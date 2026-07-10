@@ -5,15 +5,18 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "server"
+    "server",
+    "functions"
   ],
   "scripts": {
     "dev:server": "npm run dev -w server",
     "dev:seller": "npm run dev -w apps/seller",
     "dev:admin": "npm run dev -w apps/admin",
     "build": "npm run build -w server && npm run build -w apps/seller && npm run build -w apps/admin",
+    "build:functions": "npm run build -w server && npm run build -w functions",
     "db:migrate": "npm run db:migrate -w server",
-    "db:seed": "npm run db:seed -w server"
+    "db:seed": "npm run db:seed -w server",
+    "firebase:deploy": "npm run build && npm run build:functions && firebase deploy"
   },
   "engines": {
     "node": ">=20"

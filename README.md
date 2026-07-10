@@ -1,6 +1,6 @@
 # Aviva — Visitas de Campo
 
-Implementación real (no prototipo) de los diseños en `project/` y las conversaciones en `chats/`: una **app web para vendedores de campo** y un **admin web de Visitas de Campo**, compartiendo un mismo backend/base de datos.
+Implementación real (no prototipo) de una **app web para vendedores de campo** y un **admin web de Visitas de Campo**, compartiendo un mismo backend/base de datos.
 
 ## Estructura
 
@@ -9,6 +9,7 @@ apps/seller   → App web del vendedor (React + Vite). Inicio (metas), Visitas, 
 apps/admin    → Admin web (React + Vite). Rutas por vendedor, Dashboard, Mapa, Seguimiento, Reportes, CRM.
 server        → API (Express + TypeScript + Prisma/SQLite). Integraciones reales de DENUE (INEGI) y HubSpot.
 packages/ui   → Tokens de diseño compartidos (colores, tipografía) usados por ambas apps.
+functions     → Cloud Function que envuelve `server` para desplegarlo en Firebase.
 ```
 
 ## Arrancar en desarrollo

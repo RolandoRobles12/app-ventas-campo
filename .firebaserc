@@ -1,0 +1,13 @@
+{
+  "projects": {
+    "default": "REEMPLAZA-CON-TU-PROJECT-ID"
+  },
+  "targets": {
+    "REEMPLAZA-CON-TU-PROJECT-ID": {
+      "hosting": {
+        "seller": ["REEMPLAZA-CON-TU-SITE-ID-VENDEDOR"],
+        "admin": ["REEMPLAZA-CON-TU-SITE-ID-ADMIN"]
+      }
+    }
+  }
+}
