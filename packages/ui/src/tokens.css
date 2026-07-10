@@ -1,0 +1,69 @@
+:root {
+  /* Brand */
+  --aviva-green-900: #0d3d24;
+  --aviva-green-800: #0a3320;
+  --aviva-green-700: #0f5132;
+  --aviva-green-600: #157347;
+  --aviva-green-500: #22a36c;
+  --aviva-green-400: #22bd78;
+  --aviva-green-300: #3ddc97;
+  --aviva-green-200: #8fcfae;
+  --aviva-green-100: #e3f3e9;
+  --aviva-green-50: #eef5f0;
+
+  --aviva-mint-bg-1: #cfe8dc;
+  --aviva-mint-bg-2: #dcefe5;
+  --aviva-mint-bg-3: #e9f4ee;
+
+  --aviva-orange-900: #7a3d09;
+  --aviva-orange-700: #c96a1e;
+  --aviva-orange-600: #e07a26;
+  --aviva-orange-500: #ef8b3e;
+  --aviva-orange-100: #fdecdb;
+
+  --aviva-purple-900: #2b2350;
+  --aviva-purple-700: #2e2566;
+  --aviva-purple-500: #7c6ff0;
+  --aviva-purple-300: #a99cff;
+  --aviva-purple-100: #e6e3f7;
+
+  --aviva-blue-600: #2a6fdb;
+  --aviva-blue-100: #e2ecfb;
+  --aviva-teal-600: #0e8a8a;
+  --aviva-teal-100: #d7f0f0;
+  --aviva-magenta-600: #a83292;
+  --aviva-magenta-100: #f6e2f1;
+  --aviva-violet-600: #7a52c9;
+  --aviva-violet-500: #a855f7;
+  --aviva-red-600: #d64545;
+  --aviva-red-700: #c0392b;
+  --aviva-red-100: #fbe3e0;
+
+  --ink-900: #161a17;
+  --ink-800: #1a1f1c;
+  --ink-700: #263238;
+  --ink-600: #2c3631;
+  --ink-500: #3a4a41;
+  --ink-400: #5a665f;
+  --ink-300: #6f7d75;
+  --ink-200: #8a978f;
+  --ink-100: #9aa39c;
+  --ink-50: #b9c1ba;
+
+  --border-100: #e6ece7;
+  --border-200: #eef2ee;
+  --border-300: #f2f5f2;
+  --surface-100: #eef3ee;
+  --surface-200: #dfe6e0;
+
+  --hubspot-orange: #ff7a59;
+  --hubspot-orange-dark: #e0562f;
+
+  --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-admin: 'Roboto', system-ui, Arial, sans-serif;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 26px;
+}

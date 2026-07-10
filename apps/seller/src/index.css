@@ -1,0 +1,14 @@
+@import '@aviva/ui/tokens.css';
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+* { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: #cbd9d0;
+  color: var(--ink-800);
+}
+button, input, select, textarea { font-family: inherit; }
+input, select, textarea { -webkit-appearance: none; appearance: none; }
+button { cursor: pointer; }

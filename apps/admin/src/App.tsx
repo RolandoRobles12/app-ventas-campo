@@ -1,0 +1,32 @@
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { FiltersProvider } from './filters';
+import { ToastProvider } from './toast';
+import { Chrome } from './components/Chrome';
+import { Rutas } from './pages/Rutas';
+import { Dashboard } from './pages/Dashboard';
+import { Mapa } from './pages/Mapa';
+import { Seguimiento } from './pages/Seguimiento';
+import { Reportes } from './pages/Reportes';
+import { Crm } from './pages/Crm';
+
+function App() {
+  return (
+    <ToastProvider>
+      <FiltersProvider>
+        <Chrome>
+          <Routes>
+            <Route path="/" element={<Navigate to="/rutas" replace />} />
+            <Route path="/rutas" element={<Rutas />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/mapa" element={<Mapa />} />
+            <Route path="/seguimiento" element={<Seguimiento />} />
+            <Route path="/reportes" element={<Reportes />} />
+            <Route path="/crm" element={<Crm />} />
+          </Routes>
+        </Chrome>
+      </FiltersProvider>
+    </ToastProvider>
+  );
+}
+
+export default App;
