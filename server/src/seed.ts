@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { db, Timestamp } from './db.js';
 import { slugify } from './firestore-helpers.js';
 
