@@ -21,17 +21,29 @@ La base de datos es Firestore. En local se usa el **emulador de Firestore**
 npm install
 cp .env.example server/.env   # ya trae FIRESTORE_EMULATOR_HOST/GCLOUD_PROJECT
 
-npm run emulators      # levanta el emulador de Firestore en :8080 (UI en :4200)
-npm run db:seed        # datos base: productos, vendedores, giros, deals de ejemplo
-
-npm run dev:server     # API en http://localhost:4000
-npm run dev:seller     # app del vendedor en http://localhost:5173
-npm run dev:admin      # admin en http://localhost:5174
+npm run dev
 ```
 
-`npm run emulators` y `npm run db:seed`/`npm run dev:server` van en terminales
-distintas; mientras el emulador esté corriendo, los datos viven solo en memoria
-(se pierden al detenerlo — vuelve a correr `db:seed`).
+`npm run dev` levanta todo junto en una sola terminal (usa
+[concurrently](https://www.npmjs.com/package/concurrently)): el emulador de
+Firestore (`:8080`, UI en `:4200`), el seed de datos base en cuanto el
+emulador está listo, la API (`:4000`), la app del vendedor (`:5173`) y el
+admin (`:5174`).
+
+Mientras el emulador esté corriendo, los datos viven solo en memoria — se
+pierden al detener `npm run dev` y hay que volver a sembrarlos la próxima vez
+(`npm run dev` ya lo hace automáticamente).
+
+Si prefieres arrancar cada pieza por separado (por ejemplo para ver logs de
+una sola), los scripts individuales siguen disponibles:
+
+```bash
+npm run emulators      # emulador de Firestore
+npm run db:seed        # datos base (una vez el emulador esté arriba)
+npm run dev:server     # API
+npm run dev:seller     # app del vendedor
+npm run dev:admin      # admin
+```
 
 Los dos frontends usan un proxy de Vite hacia `/api` y `/uploads`, así que no necesitas configurar CORS en desarrollo.
 
