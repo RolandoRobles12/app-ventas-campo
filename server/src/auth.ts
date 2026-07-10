@@ -15,7 +15,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     }
     req.user = { uid: decoded.uid, email: decoded.email };
     next();
-  } catch {
-    return res.status(401).json({ error: 'invalid_token' });
+  } catch (err: any) {
+    console.error('requireAuth: verifyIdToken falló:', err?.message || err);
+    return res.status(401).json({ error: 'invalid_token', message: err?.message });
   }
 }
