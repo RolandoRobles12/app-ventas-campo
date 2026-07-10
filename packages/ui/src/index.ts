@@ -1,3 +1,6 @@
+export { auth, googleProvider, ALLOWED_EMAIL_DOMAIN } from './firebase';
+export { AuthProvider, useAuth, RequireAuth, getIdToken } from './auth';
+
 export const colors = {
   green900: '#0d3d24',
   green800: '#0a3320',

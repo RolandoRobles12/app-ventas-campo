@@ -1,3 +1,5 @@
+import { getIdToken } from '@aviva/ui';
+
 export interface Vendedor {
   id: string;
   nombre: string;
@@ -39,9 +41,13 @@ export interface JornadaHoy {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = await getIdToken();
+  const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const res = await fetch(`/api${path}`, {
     ...init,
-    headers: init?.body instanceof FormData ? init.headers : { 'Content-Type': 'application/json', ...init?.headers },
+    headers: init?.body instanceof FormData
+      ? { ...authHeader, ...init.headers }
+      : { 'Content-Type': 'application/json', ...authHeader, ...init?.headers },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -52,7 +58,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  vendedoresDeCampo: () => req<Vendedor[]>('/vendedores').then((vs) => vs),
+  me: () => req<{ email: string; vendedor: Vendedor | null }>('/auth/me'),
   prospectos: (vendedorId: string) => req<Prospecto[]>(`/prospectos/vendedor/${vendedorId}`),
   crearProspectoManual: (data: { vendedorId: string; nombre: string; direccion: string; giro?: string }) =>
     req<Prospecto>('/prospectos', { method: 'POST', body: JSON.stringify(data) }),

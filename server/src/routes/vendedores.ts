@@ -3,7 +3,7 @@ import { db } from '../db.js';
 
 export const vendedoresRouter = Router();
 
-interface VendedorDoc {
+export interface VendedorDoc {
   nombre: string;
   iniciales: string;
   color: string;
@@ -16,7 +16,7 @@ interface VendedorDoc {
   giros: string[];
 }
 
-async function productosPorId(ids: string[]): Promise<Map<string, string>> {
+export async function productosPorId(ids: string[]): Promise<Map<string, string>> {
   const unique = [...new Set(ids)].filter(Boolean);
   const map = new Map<string, string>();
   await Promise.all(
@@ -28,7 +28,7 @@ async function productosPorId(ids: string[]): Promise<Map<string, string>> {
   return map;
 }
 
-async function shape(id: string, v: VendedorDoc, productoNombre?: string) {
+export async function shapeVendedor(id: string, v: VendedorDoc, productoNombre?: string) {
   const prospectosCount = (await db.collection('prospectos').where('vendedorId', '==', id).count().get()).data().count;
   return {
     id,
@@ -60,7 +60,7 @@ vendedoresRouter.get('/', async (req, res) => {
   const docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as VendedorDoc }));
   const productos = await productosPorId(docs.map((d) => d.data.productoId));
 
-  const out = await Promise.all(docs.map((d) => shape(d.id, d.data, productos.get(d.data.productoId))));
+  const out = await Promise.all(docs.map((d) => shapeVendedor(d.id, d.data, productos.get(d.data.productoId))));
   out.sort((a, b) => a.nombre.localeCompare(b.nombre));
   res.json(out);
 });
@@ -70,7 +70,7 @@ vendedoresRouter.get('/:id', async (req, res) => {
   if (!doc.exists) return res.status(404).json({ error: 'not_found' });
   const v = doc.data() as VendedorDoc;
   const productos = await productosPorId([v.productoId]);
-  res.json(await shape(doc.id, v, productos.get(v.productoId)));
+  res.json(await shapeVendedor(doc.id, v, productos.get(v.productoId)));
 });
 
 // Configura (o reconfigura) la ruta de un vendedor: producto, zona y giros.
@@ -92,5 +92,5 @@ vendedoresRouter.put('/:id/ruta', async (req, res) => {
   const doc = await ref.get();
   const v = doc.data() as VendedorDoc;
   const productos = await productosPorId([v.productoId]);
-  res.json(await shape(doc.id, v, productos.get(v.productoId)));
+  res.json(await shapeVendedor(doc.id, v, productos.get(v.productoId)));
 });

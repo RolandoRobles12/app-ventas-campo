@@ -1,3 +1,5 @@
+import { getIdToken } from '@aviva/ui';
+
 export interface Producto { id: string; nombre: string; esDeCampo: boolean; giros: string[]; }
 export interface Vendedor {
   id: string; nombre: string; iniciales: string; color: string; email: string | null; estado: string;
@@ -34,7 +36,9 @@ export interface CrmDeal {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
+  const token = await getIdToken();
+  const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...authHeader, ...init?.headers } });
   const isJson = res.headers.get('content-type')?.includes('application/json');
   const body = isJson ? await res.json().catch(() => ({})) : undefined;
   if (!res.ok) {

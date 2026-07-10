@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom';
+import { AuthProvider, RequireAuth } from '@aviva/ui';
 import { SessionProvider, useSession } from './session';
-import { PickVendedor } from './pages/PickVendedor';
+import { NoVendedor } from './pages/NoVendedor';
 import { Home } from './pages/Home';
 import { VisitasList } from './pages/visitas/VisitasList';
 import { VisitForm } from './pages/visitas/VisitForm';
@@ -21,7 +22,7 @@ function AppShell() {
   }
 
   if (!vendedor) {
-    return <PickVendedor />;
+    return <NoVendedor />;
   }
 
   return (
@@ -44,9 +45,13 @@ function AppShell() {
 
 function App() {
   return (
-    <SessionProvider>
-      <AppShell />
-    </SessionProvider>
+    <AuthProvider>
+      <RequireAuth>
+        <SessionProvider>
+          <AppShell />
+        </SessionProvider>
+      </RequireAuth>
+    </AuthProvider>
   );
 }
 

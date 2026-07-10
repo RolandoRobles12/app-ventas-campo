@@ -1,44 +1,31 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { useAuth } from '@aviva/ui';
 import { api, type Vendedor } from './api';
 
 interface SessionState {
   vendedor: Vendedor | null;
   loading: boolean;
-  vendedores: Vendedor[];
-  elegir: (v: Vendedor) => void;
+  email: string | null;
   salir: () => void;
 }
 
 const SessionContext = createContext<SessionState | null>(null);
 
-const STORAGE_KEY = 'aviva.vendedorId';
-
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [vendedores, setVendedores] = useState<Vendedor[]>([]);
+  const { user, signOutUser } = useAuth();
   const [vendedor, setVendedor] = useState<Vendedor | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.vendedoresDeCampo().then((vs) => {
-      setVendedores(vs);
-      const savedId = localStorage.getItem(STORAGE_KEY);
-      const saved = savedId ? vs.find((v) => v.id === savedId) : null;
-      setVendedor(saved || null);
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, []);
-
-  const elegir = (v: Vendedor) => {
-    localStorage.setItem(STORAGE_KEY, v.id);
-    setVendedor(v);
-  };
-  const salir = () => {
-    localStorage.removeItem(STORAGE_KEY);
-    setVendedor(null);
-  };
+    setLoading(true);
+    api.me()
+      .then((r) => setVendedor(r.vendedor))
+      .catch(() => setVendedor(null))
+      .finally(() => setLoading(false));
+  }, [user]);
 
   return (
-    <SessionContext.Provider value={{ vendedor, loading, vendedores, elegir, salir }}>
+    <SessionContext.Provider value={{ vendedor, loading, email: user?.email ?? null, salir: signOutUser }}>
       {children}
     </SessionContext.Provider>
   );

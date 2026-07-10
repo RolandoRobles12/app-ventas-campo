@@ -12,40 +12,76 @@ packages/ui   → Tokens de diseño compartidos (colores, tipografía) usados po
 functions     → Cloud Function que envuelve `server` para desplegarlo en Firebase.
 ```
 
-## Arrancar en desarrollo
+## Antes de arrancar: crea tu proyecto de Firebase
 
-La base de datos es Firestore. En local se usa el **emulador de Firestore**
-(no necesitas un proyecto de Firebase real ni credenciales para desarrollar):
+La base de datos es Firestore, y tanto desarrollo local como producción usan
+**el mismo proyecto de Firebase** (no hay entorno de prueba separado). Como
+todavía no existe, créalo una vez:
+
+1. Ve a la [consola de Firebase](https://console.firebase.google.com), **Agregar proyecto**, dale un nombre (puedes desactivar Google Analytics, no se usa). Anota el **Project ID** que te asigna. Registra ahí mismo una "app web" (sin marcar Hosting, eso ya está configurado en `firebase.json`) para obtener el `firebaseConfig` — ya está cargado en `packages/ui/src/firebase.ts`, no hace falta tocarlo salvo que cambies de proyecto.
+2. Dentro del proyecto: **Build → Firestore Database → Crear base de datos**, modo producción, elige una región (ej. `us-central1`).
+3. **Build → Authentication → Comenzar → Google** (habilita el proveedor). Solo se usa login con Google, restringido a cuentas `@avivacredito.com` (se valida tanto en el cliente como en el servidor); no hace falta crear usuarios a mano, cualquiera con esa cuenta de correo puede entrar.
+4. **Configuración del proyecto** (ícono de engranaje) **→ Cuentas de servicio → Generar nueva clave privada**. Descarga el JSON y guárdalo **fuera de este repo** (ej. `C:\Users\tu-usuario\secrets\`) — nunca lo subas a git.
+5. Actualiza `.firebaserc` en la raíz del repo: reemplaza `REEMPLAZA-CON-TU-PROJECT-ID` por tu Project ID real (deja los IDs de sitio de Hosting como están por ahora, se configuran en la sección de deploy).
+6. Despliega las reglas e índices de Firestore que la API necesita (una vez, y de nuevo cada vez que cambie `firestore.indexes.json`):
+   ```bash
+   npx firebase-tools login
+   npx firebase-tools deploy --only firestore:indexes,firestore:rules
+   ```
+   Sin esto, las rutas de dashboard/reportes/mapa fallan con un error de "missing index" la primera vez que las uses.
+
+## Arrancar en desarrollo
 
 ```bash
 npm install
-cp .env.example server/.env   # ya trae FIRESTORE_EMULATOR_HOST/GCLOUD_PROJECT
-
-npm run dev
+cp .env.example server/.env
 ```
 
-`npm run dev` levanta todo junto en una sola terminal (usa
-[concurrently](https://www.npmjs.com/package/concurrently)): el emulador de
-Firestore (`:8080`, UI en `:4200`), el seed de datos base en cuanto el
-emulador está listo, la API (`:4000`), la app del vendedor (`:5173`) y el
-admin (`:5174`).
-
-Mientras el emulador esté corriendo, los datos viven solo en memoria — se
-pierden al detener `npm run dev` y hay que volver a sembrarlos la próxima vez
-(`npm run dev` ya lo hace automáticamente).
-
-Si prefieres arrancar cada pieza por separado (por ejemplo para ver logs de
-una sola), los scripts individuales siguen disponibles:
+Edita `server/.env` y apunta `GOOGLE_APPLICATION_CREDENTIALS` a la ruta donde
+guardaste el JSON de la cuenta de servicio del paso anterior. Con eso:
 
 ```bash
-npm run emulators      # emulador de Firestore
-npm run db:seed        # datos base (una vez el emulador esté arriba)
-npm run dev:server     # API
-npm run dev:seller     # app del vendedor
-npm run dev:admin      # admin
+npm run dev            # API + app del vendedor + admin, una sola terminal
+npm run db:seed        # una vez: productos, vendedores, giros, deals de ejemplo
 ```
 
+`npm run dev` no instala nada extra (todo es Node/npm). Como usas el mismo
+proyecto que producción, ten presente que `db:seed` y cualquier prueba local
+escriben datos reales — es idempotente (no duplica productos/vendedores si
+lo corres de nuevo), pero visitas/prospectos que crees probando sí quedan ahí.
+
 Los dos frontends usan un proxy de Vite hacia `/api` y `/uploads`, así que no necesitas configurar CORS en desarrollo.
+
+### Alternativa offline: emulador de Firestore
+
+Si prefieres desarrollar sin tocar datos reales (o sin conexión), usa el
+emulador de Firestore en vez del proyecto real. Requiere **Java (JDK 11+)**
+instalado además de Node — es lo único no-JS del proyecto (Windows:
+`winget install EclipseAdoptium.Temurin.21.JDK`, luego reabre la terminal y
+confirma con `java -version`).
+
+En `server/.env`, comenta `GOOGLE_APPLICATION_CREDENTIALS` y descomenta
+`FIRESTORE_EMULATOR_HOST`/`GCLOUD_PROJECT`. Luego:
+
+```bash
+npm run dev:emulator   # emulador + seed + API + apps, una sola terminal
+```
+
+Los datos del emulador viven solo en memoria: se pierden al detenerlo.
+
+## Autenticación
+
+Ambas apps (vendedor y admin) requieren iniciar sesión con Google, restringido
+a cuentas `@avivacredito.com` (`packages/ui/src/auth.tsx`). El backend verifica
+cada request con el Admin SDK (`server/src/auth.ts`) y rechaza cualquier token
+inválido o de otro dominio — la restricción del cliente (`hd` en el selector
+de cuentas de Google) es solo UX, la que cuenta es la del servidor.
+
+En la app del vendedor no hay un rol "admin" separado: cualquier cuenta
+`@avivacredito.com` puede entrar al admin web. Para la app del vendedor, el
+correo de la cuenta de Google se busca contra el campo `email` de los
+documentos de `vendedores` en Firestore (`GET /api/auth/me`) — si no hay un
+vendedor con ese correo, la app lo indica en vez de dejar pasar a nadie.
 
 ## Integraciones reales (no simuladas)
 
@@ -58,7 +94,7 @@ Ninguna de las dos integraciones genera datos falsos: si no están configuradas,
 
 ## Decisiones fuera del mockup original
 
-- **Selector de vendedor en la app móvil**: el diseño no incluía pantalla de login. Como el backend es real y multi-vendedor, se agregó una pantalla mínima "¿Quién eres?" (persistida en `localStorage`) para simular sesión sin construir un sistema de autenticación completo.
+- **Login en la app móvil**: el diseño no incluía pantalla de login. Se agregó autenticación real con Google (`@avivacredito.com`); la app resuelve automáticamente qué vendedor eres por tu correo en vez de pedirte elegirlo de una lista.
 - **Racha, metas y km recorridos** se calculan de datos reales (visitas y jornadas capturadas), no son valores fijos como en el prototipo.
 - **Mapa de Leads / mapa de calor**: se mantiene el lienzo ilustrado (calles/avenida/parque/río) del diseño, pero los pines se posicionan a partir de coordenadas reales de DENUE normalizadas al lienzo — no son posiciones inventadas.
 - **Cómo llegar** abre Google Maps con la dirección o coordenadas reales del prospecto; el mini-mapa del formulario de visita usa OpenStreetMap embebido cuando hay coordenadas.
@@ -71,28 +107,20 @@ npm run build   # compila server, apps/seller y apps/admin
 
 ## Despliegue en Firebase
 
-El proyecto está pensado para desplegarse como **dos sitios de Firebase Hosting** (vendedor y admin) más **una Cloud Function** (`api`, en `functions/`) que envuelve el mismo backend Express de `server/`.
+El proyecto está pensado para desplegarse como **dos sitios de Firebase Hosting** (vendedor y admin) más **una Cloud Function** (`api`, en `functions/`) que envuelve el mismo backend Express de `server/`. El proyecto de Firebase y Firestore ya deberían existir (ver "Antes de arrancar" arriba); esto es lo que falta para publicar la app:
 
-1. **Crea el proyecto y los sitios de Hosting** (una vez):
+1. **Crea los sitios de Hosting** (una vez):
    ```bash
-   firebase projects:create tu-project-id
    firebase hosting:sites:create tu-site-vendedor
    firebase hosting:sites:create tu-site-admin
    firebase target:apply hosting seller tu-site-vendedor
    firebase target:apply hosting admin tu-site-admin
    ```
-   Actualiza `.firebaserc` con tu `project-id` y los IDs de sitio (el comando `target:apply` lo hace por ti).
+   (`target:apply` actualiza `.firebaserc` con los IDs de sitio por ti).
 
-2. **Habilita Firestore** en el proyecto (modo nativo, no Datastore) desde la consola de Firebase o con `firebase firestore:databases:create '(default)' --location <región>`. No hay que provisionar ninguna base externa: la Cloud Function usa el Admin SDK, que ya tiene acceso a Firestore del mismo proyecto sin configuración adicional.
+2. **Configura las variables de entorno de la función** copiando `functions/.env.example` a `functions/.env` y completándolo. Lo único que cambia respecto al desarrollo local son las **fotos de visitas**: en local se guardan en `server/uploads`; en Cloud Functions se suben a Firebase Storage porque el filesystem no es persistente. Esto ya está resuelto en `server/src/storage.ts` (controlado por `STORAGE_DRIVER`, que `functions/src/index.ts` fuerza a `"firebase"`); solo necesitas definir `FIREBASE_STORAGE_BUCKET` en `functions/.env`. No definas `GOOGLE_APPLICATION_CREDENTIALS` aquí: en Cloud Functions el Admin SDK ya tiene acceso a Firestore del propio proyecto sin ninguna clave.
 
-3. **Configura las variables de entorno de la función** copiando `functions/.env.example` a `functions/.env` y completándolo. Lo único que cambia respecto al desarrollo local son las **fotos de visitas**: en local se guardan en `server/uploads`; en Cloud Functions se suben a Firebase Storage porque el filesystem no es persistente. Esto ya está resuelto en `server/src/storage.ts` (controlado por `STORAGE_DRIVER`, que `functions/src/index.ts` fuerza a `"firebase"`); solo necesitas definir `FIREBASE_STORAGE_BUCKET` en `functions/.env`.
-
-4. **Despliega los índices compuestos de Firestore** que usan las rutas de reportes/dashboard/mapa (`firestore.indexes.json`):
-   ```bash
-   firebase deploy --only firestore:indexes,firestore:rules
-   ```
-
-5. **Build y deploy**:
+3. **Build y deploy**:
    ```bash
    npm run firebase:deploy   # build de server, apps y functions + firebase deploy
    ```

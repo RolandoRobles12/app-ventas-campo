@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '@aviva/ui';
 
 const staticItem = (label: string, icon: ReactNode, hasChevron = false) => (
   <div className="navdark" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', color: '#e3efe7', cursor: 'default' }}>
@@ -70,7 +71,7 @@ export function Sidebar() {
   );
 }
 
-export function TopBar({ userEmail }: { userEmail: string }) {
+export function TopBar({ userEmail, onSignOut }: { userEmail: string; onSignOut: () => void }) {
   return (
     <div style={{ height: 60, flex: 'none', background: '#ffffff', borderBottom: '1px solid #e6ebe6', display: 'flex', alignItems: 'center', padding: '0 22px', gap: 16, zIndex: 20 }}>
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3a4a41" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
@@ -84,20 +85,25 @@ export function TopBar({ userEmail }: { userEmail: string }) {
       <div style={{ width: 26, height: 17, borderRadius: 2, overflow: 'hidden', boxShadow: '0 0 0 1px #e2e2e2', display: 'flex' }}>
         <div style={{ flex: 1, background: '#006847' }} /><div style={{ flex: 1, background: '#fff' }} /><div style={{ flex: 1, background: '#ce1126' }} />
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'var(--aviva-green-700)', padding: '8px 16px 8px 12px', borderRadius: 22 }}>
+      <button
+        onClick={onSignOut}
+        title="Cerrar sesión"
+        style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'var(--aviva-green-700)', padding: '8px 16px 8px 12px', borderRadius: 22, border: 'none', cursor: 'pointer' }}
+      >
         <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--aviva-green-700)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
         </div>
         <span style={{ fontSize: 14, fontWeight: 500, color: '#fff' }}>{userEmail}</span>
-      </div>
+      </button>
     </div>
   );
 }
 
 export function Chrome({ children }: { children: ReactNode }) {
+  const { user, signOutUser } = useAuth();
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#eef3ee', position: 'relative', color: '#202723' }}>
-      <TopBar userEmail="rolando.robles@avivacredito.com" />
+      <TopBar userEmail={user?.email ?? ''} onSignOut={signOutUser} />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <Sidebar />
         <div className="adm-scroll" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto', background: '#eef3ee' }}>

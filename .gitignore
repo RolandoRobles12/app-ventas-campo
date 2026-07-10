@@ -16,3 +16,9 @@ firebase-debug.log
 firestore-debug.log
 ui-debug.log
 functions/dist/
+
+# Service account keys should live outside the repo, but ignore common
+# naming patterns as a safety net in case one ends up here by accident.
+*firebase-adminsdk*.json
+serviceAccount*.json
+service-account*.json

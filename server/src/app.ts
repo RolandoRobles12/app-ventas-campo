@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 
+import { requireAuth } from './auth.js';
+import { authRouter } from './routes/auth.js';
 import { productosRouter } from './routes/productos.js';
 import { vendedoresRouter } from './routes/vendedores.js';
 import { prospectosRouter } from './routes/prospectos.js';
@@ -24,6 +26,9 @@ app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
+app.use('/api', requireAuth);
+
+app.use('/api/auth', authRouter);
 app.use('/api/productos', productosRouter);
 app.use('/api/vendedores', vendedoresRouter);
 app.use('/api/prospectos', prospectosRouter);
