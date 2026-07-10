@@ -15,7 +15,13 @@ functions     → Cloud Function que envuelve `server` para desplegarlo en Fireb
 ## Arrancar en desarrollo
 
 La base de datos es Firestore. En local se usa el **emulador de Firestore**
-(no necesitas un proyecto de Firebase real ni credenciales para desarrollar):
+(no necesitas un proyecto de Firebase real ni credenciales para desarrollar).
+
+**Requisito:** el emulador de Firestore corre sobre una JVM, así que necesitas
+Java instalado (JDK 11+) además de Node — es lo único no-JS del proyecto.
+Windows: `winget install EclipseAdoptium.Temurin.21.JDK` (o el instalador de
+[adoptium.net](https://adoptium.net)), luego reabre la terminal. Confirma con
+`java -version`.
 
 ```bash
 npm install
