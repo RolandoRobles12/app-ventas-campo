@@ -1,15 +1,33 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { prisma } from '../db.js';
+import { db, Timestamp } from '../db.js';
+import { toIso } from '../firestore-helpers.js';
 import { saveUpload } from '../storage.js';
 
 export const visitasRouter = Router();
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
-function shape(v: any) {
+interface VisitaDoc {
+  vendedorId: string;
+  prospectoId: string | null;
+  esNegocioNuevo: boolean;
+  nombreNegocio: string;
+  direccion: string;
+  resultado: string;
+  notas: string | null;
+  fotoUrl: string | null;
+  createdAt: Timestamp;
+}
+
+interface ProspectoDoc {
+  nombre: string;
+  direccion: string;
+}
+
+function shape(id: string, v: VisitaDoc) {
   return {
-    id: v.id,
+    id,
     vendedorId: v.vendedorId,
     prospectoId: v.prospectoId,
     esNegocioNuevo: v.esNegocioNuevo,
@@ -18,17 +36,17 @@ function shape(v: any) {
     resultado: v.resultado,
     notas: v.notas,
     fotoUrl: v.fotoUrl,
-    createdAt: v.createdAt,
+    createdAt: toIso(v.createdAt),
   };
 }
 
 visitasRouter.get('/vendedor/:vendedorId', async (req, res) => {
-  const visitas = await prisma.visita.findMany({
-    where: { vendedorId: req.params.vendedorId },
-    orderBy: { createdAt: 'desc' },
-    take: 100,
-  });
-  res.json(visitas.map(shape));
+  const snap = await db.collection('visitas')
+    .where('vendedorId', '==', req.params.vendedorId)
+    .orderBy('createdAt', 'desc')
+    .limit(100)
+    .get();
+  res.json(snap.docs.map((d) => shape(d.id, d.data() as VisitaDoc)));
 });
 
 visitasRouter.post('/', upload.single('foto'), async (req, res) => {
@@ -36,33 +54,35 @@ visitasRouter.post('/', upload.single('foto'), async (req, res) => {
   if (!vendedorId || !resultado) return res.status(400).json({ error: 'vendedorId y resultado son requeridos' });
 
   const esNuevo = esNegocioNuevo === 'true' || esNegocioNuevo === '1';
-  let prospecto = prospectoId ? await prisma.prospecto.findUnique({ where: { id: prospectoId } }) : null;
+  const prospectoRef = prospectoId ? db.collection('prospectos').doc(prospectoId) : null;
+  let prospectoDoc = prospectoRef ? await prospectoRef.get() : null;
+  let prospecto = prospectoDoc?.exists ? ({ id: prospectoDoc.id, ...(prospectoDoc.data() as ProspectoDoc) }) : null;
 
   if (esNuevo && !prospecto) {
-    prospecto = await prisma.prospecto.create({
-      data: {
-        vendedorId, nombre: nombreNegocio || 'Nuevo negocio', direccion: direccion || 'Ubicación actual',
-        giro: giro || undefined, origen: 'manual', estado: 'visitado',
-      },
-    });
-  } else if (prospecto) {
-    await prisma.prospecto.update({ where: { id: prospecto.id }, data: { estado: 'visitado' } });
+    const data: ProspectoDoc & { vendedorId: string; giro?: string; origen: string; estado: string; createdAt: Timestamp } = {
+      vendedorId, nombre: nombreNegocio || 'Nuevo negocio', direccion: direccion || 'Ubicación actual',
+      giro: giro || undefined, origen: 'manual', estado: 'visitado', createdAt: Timestamp.now(),
+    };
+    const ref = await db.collection('prospectos').add(data);
+    prospecto = { id: ref.id, nombre: data.nombre, direccion: data.direccion };
+  } else if (prospecto && prospectoRef) {
+    await prospectoRef.update({ estado: 'visitado' });
   }
 
   const fotoUrl = req.file ? await saveUpload(req.file) : null;
 
-  const visita = await prisma.visita.create({
-    data: {
-      vendedorId,
-      prospectoId: prospecto?.id,
-      esNegocioNuevo: esNuevo,
-      nombreNegocio: nombreNegocio || prospecto?.nombre || 'Negocio',
-      direccion: direccion || prospecto?.direccion || '',
-      resultado,
-      notas: notas || null,
-      fotoUrl,
-    },
-  });
+  const visitaData: VisitaDoc = {
+    vendedorId,
+    prospectoId: prospecto?.id ?? null,
+    esNegocioNuevo: esNuevo,
+    nombreNegocio: nombreNegocio || prospecto?.nombre || 'Negocio',
+    direccion: direccion || prospecto?.direccion || '',
+    resultado,
+    notas: notas || null,
+    fotoUrl,
+    createdAt: Timestamp.now(),
+  };
+  const ref = await db.collection('visitas').add(visitaData);
 
-  res.status(201).json(shape(visita));
+  res.status(201).json(shape(ref.id, visitaData));
 });

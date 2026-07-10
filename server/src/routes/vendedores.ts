@@ -1,11 +1,37 @@
 import { Router } from 'express';
-import { prisma } from '../db.js';
+import { db } from '../db.js';
 
 export const vendedoresRouter = Router();
 
-function shape(v: any) {
+interface VendedorDoc {
+  nombre: string;
+  iniciales: string;
+  color: string;
+  email: string | null;
+  estado: string;
+  ciudad: string;
+  colonia: string | null;
+  drawZone: boolean;
+  productoId: string;
+  giros: string[];
+}
+
+async function productosPorId(ids: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids)].filter(Boolean);
+  const map = new Map<string, string>();
+  await Promise.all(
+    unique.map(async (id) => {
+      const doc = await db.collection('productos').doc(id).get();
+      if (doc.exists) map.set(id, (doc.data() as { nombre: string }).nombre);
+    }),
+  );
+  return map;
+}
+
+async function shape(id: string, v: VendedorDoc, productoNombre?: string) {
+  const prospectosCount = (await db.collection('prospectos').where('vendedorId', '==', id).count().get()).data().count;
   return {
-    id: v.id,
+    id,
     nombre: v.nombre,
     iniciales: v.iniciales,
     color: v.color,
@@ -14,30 +40,37 @@ function shape(v: any) {
     ciudad: v.ciudad,
     colonia: v.colonia,
     drawZone: v.drawZone,
-    producto: v.producto?.nombre,
+    producto: productoNombre,
     productoId: v.productoId,
-    giros: (v.giros || []).map((g: any) => g.giro.nombre),
-    prospectosCount: v._count?.prospectos ?? undefined,
+    giros: v.giros || [],
+    prospectosCount,
   };
 }
 
 vendedoresRouter.get('/', async (req, res) => {
   const { producto } = req.query as { producto?: string };
-  const vendedores = await prisma.vendedor.findMany({
-    where: producto && producto !== 'Todos los productos' ? { producto: { nombre: producto } } : undefined,
-    include: { producto: true, giros: { include: { giro: true } }, _count: { select: { prospectos: true } } },
-    orderBy: { nombre: 'asc' },
-  });
-  res.json(vendedores.map(shape));
+
+  let query: FirebaseFirestore.Query = db.collection('vendedores');
+  if (producto && producto !== 'Todos los productos') {
+    const productoSnap = await db.collection('productos').where('nombre', '==', producto).limit(1).get();
+    query = query.where('productoId', '==', productoSnap.empty ? '__none__' : productoSnap.docs[0].id);
+  }
+
+  const snap = await query.get();
+  const docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as VendedorDoc }));
+  const productos = await productosPorId(docs.map((d) => d.data.productoId));
+
+  const out = await Promise.all(docs.map((d) => shape(d.id, d.data, productos.get(d.data.productoId))));
+  out.sort((a, b) => a.nombre.localeCompare(b.nombre));
+  res.json(out);
 });
 
 vendedoresRouter.get('/:id', async (req, res) => {
-  const v = await prisma.vendedor.findUnique({
-    where: { id: req.params.id },
-    include: { producto: true, giros: { include: { giro: true } }, _count: { select: { prospectos: true } } },
-  });
-  if (!v) return res.status(404).json({ error: 'not_found' });
-  res.json(shape(v));
+  const doc = await db.collection('vendedores').doc(req.params.id).get();
+  if (!doc.exists) return res.status(404).json({ error: 'not_found' });
+  const v = doc.data() as VendedorDoc;
+  const productos = await productosPorId([v.productoId]);
+  res.json(await shape(doc.id, v, productos.get(v.productoId)));
 });
 
 // Configura (o reconfigura) la ruta de un vendedor: producto, zona y giros.
@@ -46,25 +79,18 @@ vendedoresRouter.put('/:id/ruta', async (req, res) => {
     productoId?: string; ciudad?: string; colonia?: string; giros?: string[]; drawZone?: boolean;
   };
 
-  const data: any = {};
+  const data: Record<string, unknown> = {};
   if (productoId) data.productoId = productoId;
   if (ciudad !== undefined) data.ciudad = ciudad;
   if (colonia !== undefined) data.colonia = colonia;
   if (drawZone !== undefined) data.drawZone = drawZone;
+  if (giros) data.giros = giros;
 
-  await prisma.vendedor.update({ where: { id: req.params.id }, data });
+  const ref = db.collection('vendedores').doc(req.params.id);
+  await ref.update(data);
 
-  if (giros) {
-    await prisma.vendedorGiro.deleteMany({ where: { vendedorId: req.params.id } });
-    const giroRecords = await prisma.giro.findMany({ where: { nombre: { in: giros } } });
-    await prisma.vendedorGiro.createMany({
-      data: giroRecords.map((g) => ({ vendedorId: req.params.id, giroId: g.id })),
-    });
-  }
-
-  const v = await prisma.vendedor.findUnique({
-    where: { id: req.params.id },
-    include: { producto: true, giros: { include: { giro: true } }, _count: { select: { prospectos: true } } },
-  });
-  res.json(shape(v));
+  const doc = await ref.get();
+  const v = doc.data() as VendedorDoc;
+  const productos = await productosPorId([v.productoId]);
+  res.json(await shape(doc.id, v, productos.get(v.productoId)));
 });

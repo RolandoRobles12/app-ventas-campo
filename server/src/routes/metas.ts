@@ -1,7 +1,22 @@
 import { Router } from 'express';
-import { prisma } from '../db.js';
+import { db, Timestamp } from '../db.js';
 
 export const metasRouter = Router();
+
+interface MetaDoc {
+  vendedorId: string;
+  tipo: string;
+  periodo: string;
+  valorActual: number;
+  valorMeta: number;
+}
+
+interface CrmDealDoc {
+  dealOwnerId?: string | null;
+  etapa: string;
+  amount?: number | null;
+  createdAt: Timestamp;
+}
 
 function monthRange() {
   const now = new Date();
@@ -18,6 +33,10 @@ function dayRange() {
   return { start, end, periodo: start.toISOString().slice(0, 10) };
 }
 
+function metaId(vendedorId: string, tipo: string, periodo: string) {
+  return `${vendedorId}_${tipo}_${periodo}`;
+}
+
 // Avance real: solicitudes de hoy se cuentan de las visitas capturadas por el
 // vendedor con resultado "Se realizó solicitud"; colocación del mes se suma de
 // los deals de CRM del vendedor que llegaron a la etapa "Desembolso" este mes.
@@ -26,19 +45,28 @@ metasRouter.get('/:vendedorId/hoy', async (req, res) => {
   const { start: dayStart, end: dayEnd, periodo: diaPeriodo } = dayRange();
   const { start: monthStart, end: monthEnd, periodo: mesPeriodo } = monthRange();
 
-  const [solicitudesHoy, metaSolicitudes, colocaciones, metaColocacion] = await Promise.all([
-    prisma.visita.count({
-      where: { vendedorId, resultado: 'Se realizó solicitud', createdAt: { gte: dayStart, lt: dayEnd } },
-    }),
-    prisma.meta.findUnique({ where: { vendedorId_tipo_periodo: { vendedorId, tipo: 'solicitudes_hoy', periodo: diaPeriodo } } }),
-    prisma.crmDeal.findMany({
-      where: { dealOwnerId: vendedorId, etapa: 'Desembolso', createdAt: { gte: monthStart, lt: monthEnd } },
-      select: { amount: true },
-    }),
-    prisma.meta.findUnique({ where: { vendedorId_tipo_periodo: { vendedorId, tipo: 'colocacion_mes', periodo: mesPeriodo } } }),
+  const [solicitudesHoySnap, metaSolicitudesDoc, colocacionesSnap, metaColocacionDoc] = await Promise.all([
+    db.collection('visitas')
+      .where('vendedorId', '==', vendedorId)
+      .where('resultado', '==', 'Se realizó solicitud')
+      .where('createdAt', '>=', Timestamp.fromDate(dayStart))
+      .where('createdAt', '<', Timestamp.fromDate(dayEnd))
+      .count()
+      .get(),
+    db.collection('metas').doc(metaId(vendedorId, 'solicitudes_hoy', diaPeriodo)).get(),
+    db.collection('crmDeals')
+      .where('dealOwnerId', '==', vendedorId)
+      .where('etapa', '==', 'Desembolso')
+      .where('createdAt', '>=', Timestamp.fromDate(monthStart))
+      .where('createdAt', '<', Timestamp.fromDate(monthEnd))
+      .get(),
+    db.collection('metas').doc(metaId(vendedorId, 'colocacion_mes', mesPeriodo)).get(),
   ]);
 
-  const colocacionMes = colocaciones.reduce((sum, d) => sum + (d.amount || 0), 0);
+  const solicitudesHoy = solicitudesHoySnap.data().count;
+  const metaSolicitudes = metaSolicitudesDoc.data() as MetaDoc | undefined;
+  const metaColocacion = metaColocacionDoc.data() as MetaDoc | undefined;
+  const colocacionMes = colocacionesSnap.docs.reduce((sum, d) => sum + ((d.data() as CrmDealDoc).amount || 0), 0);
 
   res.json({
     solicitudesHoy: { actual: solicitudesHoy, meta: metaSolicitudes?.valorMeta ?? 5 },

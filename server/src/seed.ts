@@ -1,6 +1,5 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { db, Timestamp } from './db.js';
+import { slugify } from './firestore-helpers.js';
 
 const PRODUCTOS = [
   { nombre: 'Aviva Contigo', esDeCampo: false },
@@ -44,63 +43,58 @@ const LEADS_JORGE = [
   { name: 'Papelería Escolar Sol', address: 'Av. Reforma 122, Las Flores, Tlaquepaque', phone: '55 4567 8901', dist: 4.1, giro: 'Ferretería y tlapalería' },
 ];
 
+async function upsertVendedor(v: (typeof VENDEDORES)[number], productoId: string): Promise<string> {
+  const existing = await db.collection('vendedores').where('email', '==', v.email).limit(1).get();
+  const data = {
+    nombre: v.nombre, iniciales: v.iniciales, color: v.color, email: v.email,
+    productoId, ciudad: v.ciudad, colonia: v.colonia, estado: v.estado,
+    drawZone: false, giros: v.giros,
+  };
+  if (!existing.empty) {
+    const id = existing.docs[0].id;
+    await db.collection('vendedores').doc(id).update(data);
+    return id;
+  }
+  const ref = await db.collection('vendedores').add({ ...data, createdAt: Timestamp.now() });
+  return ref.id;
+}
+
 async function main() {
   console.log('Seeding…');
 
-  const giroRecords: Record<string, { id: string }> = {};
+  const giroRecords: Record<string, string> = {};
   for (const nombre of GIROS) {
-    giroRecords[nombre] = await prisma.giro.upsert({ where: { nombre }, update: {}, create: { nombre } });
+    const id = slugify(nombre);
+    await db.collection('giros').doc(id).set({ nombre }, { merge: true });
+    giroRecords[nombre] = id;
   }
 
-  const productoRecords: Record<string, { id: string }> = {};
+  const productoRecords: Record<string, string> = {};
   for (const p of PRODUCTOS) {
-    const rec = await prisma.producto.upsert({ where: { nombre: p.nombre }, update: { esDeCampo: p.esDeCampo }, create: p });
-    productoRecords[p.nombre] = rec;
+    const id = slugify(p.nombre);
     const giros = GIROS_POR_PRODUCTO[p.nombre] ?? [];
-    for (const g of giros) {
-      await prisma.productoGiro.upsert({
-        where: { productoId_giroId: { productoId: rec.id, giroId: giroRecords[g].id } },
-        update: {},
-        create: { productoId: rec.id, giroId: giroRecords[g].id },
-      });
-    }
+    await db.collection('productos').doc(id).set({ nombre: p.nombre, esDeCampo: p.esDeCampo, giros }, { merge: true });
+    productoRecords[p.nombre] = id;
   }
 
-  const vendedorRecords: Record<string, { id: string }> = {};
+  const vendedorRecords: Record<string, string> = {};
   for (const v of VENDEDORES) {
-    const rec = await prisma.vendedor.upsert({
-      where: { email: v.email },
-      update: {
-        nombre: v.nombre, iniciales: v.iniciales, color: v.color,
-        productoId: productoRecords[v.producto].id, ciudad: v.ciudad, colonia: v.colonia, estado: v.estado,
-      },
-      create: {
-        nombre: v.nombre, iniciales: v.iniciales, color: v.color, email: v.email,
-        productoId: productoRecords[v.producto].id, ciudad: v.ciudad, colonia: v.colonia, estado: v.estado,
-      },
-    });
-    vendedorRecords[v.nombre] = rec;
-    for (const g of v.giros) {
-      await prisma.vendedorGiro.upsert({
-        where: { vendedorId_giroId: { vendedorId: rec.id, giroId: giroRecords[g].id } },
-        update: {},
-        create: { vendedorId: rec.id, giroId: giroRecords[g].id },
-      });
-    }
+    vendedorRecords[v.nombre] = await upsertVendedor(v, productoRecords[v.producto]);
   }
 
   // Prospectos + una visita ya hecha para Jorge Díaz (para poblar la lista de la app del vendedor)
-  const jorge = vendedorRecords['Jorge Díaz'];
-  const existingProspectos = await prisma.prospecto.count({ where: { vendedorId: jorge.id } });
-  if (existingProspectos === 0) {
+  const jorgeId = vendedorRecords['Jorge Díaz'];
+  const existingProspectos = await db.collection('prospectos').where('vendedorId', '==', jorgeId).count().get();
+  if (existingProspectos.data().count === 0) {
+    const batch = db.batch();
     for (const l of LEADS_JORGE) {
-      await prisma.prospecto.create({
-        data: {
-          vendedorId: jorge.id, nombre: l.name, direccion: l.address, telefono: l.phone,
-          distanciaKm: l.dist, giro: l.giro, origen: 'denue', estado: 'por_visitar',
-        },
+      const ref = db.collection('prospectos').doc();
+      batch.set(ref, {
+        vendedorId: jorgeId, nombre: l.name, direccion: l.address, telefono: l.phone,
+        distanciaKm: l.dist, giro: l.giro, origen: 'denue', estado: 'por_visitar', createdAt: Timestamp.now(),
       });
     }
+    await batch.commit();
   }
 
   // Metas de ejemplo (hoy / este mes) por vendedor
@@ -108,22 +102,17 @@ async function main() {
   const fechaHoy = today.toISOString().slice(0, 10);
   const fechaMes = today.toISOString().slice(0, 7);
   for (const nombre of Object.keys(vendedorRecords)) {
-    const rec = vendedorRecords[nombre];
-    await prisma.meta.upsert({
-      where: { vendedorId_tipo_periodo: { vendedorId: rec.id, tipo: 'solicitudes_hoy', periodo: fechaHoy } },
-      update: {},
-      create: { vendedorId: rec.id, tipo: 'solicitudes_hoy', periodo: fechaHoy, valorActual: 2, valorMeta: 5 },
-    });
-    await prisma.meta.upsert({
-      where: { vendedorId_tipo_periodo: { vendedorId: rec.id, tipo: 'colocacion_mes', periodo: fechaMes } },
-      update: {},
-      create: { vendedorId: rec.id, tipo: 'colocacion_mes', periodo: fechaMes, valorActual: 35000, valorMeta: 120000 },
-    });
-    await prisma.jornada.upsert({
-      where: { vendedorId_fecha: { vendedorId: rec.id, fecha: fechaHoy } },
-      update: {},
-      create: { vendedorId: rec.id, fecha: fechaHoy, horaEntrada: '09:30', activa: true },
-    });
+    const id = vendedorRecords[nombre];
+    await db.collection('metas').doc(`${id}_solicitudes_hoy_${fechaHoy}`).set({
+      vendedorId: id, tipo: 'solicitudes_hoy', periodo: fechaHoy, valorActual: 2, valorMeta: 5,
+    }, { merge: true });
+    await db.collection('metas').doc(`${id}_colocacion_mes_${fechaMes}`).set({
+      vendedorId: id, tipo: 'colocacion_mes', periodo: fechaMes, valorActual: 35000, valorMeta: 120000,
+    }, { merge: true });
+    await db.collection('jornadas').doc(`${id}_${fechaHoy}`).set({
+      vendedorId: id, fecha: fechaHoy, horaEntrada: '09:30', horaSalidaComer: null, horaRegreso: null,
+      horaSalida: null, activa: true, createdAt: Timestamp.now(),
+    }, { merge: true });
   }
 
   // CRM deals de ejemplo (local, no vinculados a HubSpot hasta que se sincronice)
@@ -136,21 +125,22 @@ async function main() {
     { cliente: 'Elena Vargas', negocio: 'Construrama del Valle', producto: 'Aviva Construrama', etapa: 'Rechazado', amount: 4000, owner: 'Miguel Soto', service: 'Gabriela Mora' },
     { cliente: 'Raúl Mendoza', negocio: 'Estética Bella', producto: 'Aviva Tu Negocio', etapa: 'Documentos subidos', amount: 8000, owner: 'Rolando Robles', service: 'Sergio Lara' },
   ];
-  const existingDeals = await prisma.crmDeal.count();
-  if (existingDeals === 0) {
+  const existingDeals = await db.collection('crmDeals').count().get();
+  if (existingDeals.data().count === 0) {
+    const batch = db.batch();
     for (const d of crmSeed) {
-      await prisma.crmDeal.create({
-        data: {
-          cliente: d.cliente, negocio: d.negocio, etapa: d.etapa, amount: d.amount, serviceOwner: d.service,
-          productoId: productoRecords[d.producto].id, dealOwnerId: vendedorRecords[d.owner].id, source: 'local',
-        },
+      const ref = db.collection('crmDeals').doc();
+      batch.set(ref, {
+        cliente: d.cliente, negocio: d.negocio, etapa: d.etapa, amount: d.amount, serviceOwner: d.service,
+        productoId: productoRecords[d.producto], dealOwnerId: vendedorRecords[d.owner], source: 'local',
+        hubspotDealId: null, hubspotOwnerId: null, hubspotCompanyId: null, dealOwnerLabel: null,
+        lastSyncedAt: null, createdAt: Timestamp.now(),
       });
     }
+    await batch.commit();
   }
 
   console.log('Seed complete.');
 }
 
-main()
-  .catch((e) => { console.error(e); process.exit(1); })
-  .finally(async () => { await prisma.$disconnect(); });
+main().catch((e) => { console.error(e); process.exit(1); });
