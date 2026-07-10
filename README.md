@@ -46,3 +46,5 @@ Ninguna de las dos integraciones genera datos falsos: si no están configuradas,
 ```bash
 npm run build   # compila server, apps/seller y apps/admin
 ```
+
+
