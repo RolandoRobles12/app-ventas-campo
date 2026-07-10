@@ -1,20 +1,11 @@
 import { Router } from 'express';
 import multer from 'multer';
-import path from 'node:path';
-import crypto from 'node:crypto';
 import { prisma } from '../db.js';
+import { saveUpload } from '../storage.js';
 
 export const visitasRouter = Router();
 
-const uploadDir = path.resolve(process.cwd(), 'uploads');
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname) || '.jpg';
-    cb(null, `${crypto.randomUUID()}${ext}`);
-  },
-});
-const upload = multer({ storage, limits: { fileSize: 8 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
 function shape(v: any) {
   return {
@@ -58,7 +49,7 @@ visitasRouter.post('/', upload.single('foto'), async (req, res) => {
     await prisma.prospecto.update({ where: { id: prospecto.id }, data: { estado: 'visitado' } });
   }
 
-  const fotoUrl = req.file ? `/uploads/${req.file.filename}` : null;
+  const fotoUrl = req.file ? await saveUpload(req.file) : null;
 
   const visita = await prisma.visita.create({
     data: {

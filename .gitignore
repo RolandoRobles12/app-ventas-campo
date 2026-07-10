@@ -9,3 +9,10 @@ server/prisma/dev.db
 server/prisma/dev.db-journal
 server/uploads/*
 !server/uploads/.gitkeep
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+functions/dist/

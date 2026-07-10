@@ -1,6 +1,6 @@
 # Aviva — Visitas de Campo
 
-Implementación real (no prototipo) de los diseños en `project/` y las conversaciones en `chats/`: una **app web para vendedores de campo** y un **admin web de Visitas de Campo**, compartiendo un mismo backend/base de datos.
+Implementación real (no prototipo) de una **app web para vendedores de campo** y un **admin web de Visitas de Campo**, compartiendo un mismo backend/base de datos.
 
 ## Estructura
 
@@ -9,6 +9,7 @@ apps/seller   → App web del vendedor (React + Vite). Inicio (metas), Visitas, 
 apps/admin    → Admin web (React + Vite). Rutas por vendedor, Dashboard, Mapa, Seguimiento, Reportes, CRM.
 server        → API (Express + TypeScript + Prisma/SQLite). Integraciones reales de DENUE (INEGI) y HubSpot.
 packages/ui   → Tokens de diseño compartidos (colores, tipografía) usados por ambas apps.
+functions     → Cloud Function que envuelve `server` para desplegarlo en Firebase.
 ```
 
 ## Arrancar en desarrollo
@@ -46,3 +47,29 @@ Ninguna de las dos integraciones genera datos falsos: si no están configuradas,
 ```bash
 npm run build   # compila server, apps/seller y apps/admin
 ```
+
+## Despliegue en Firebase
+
+El proyecto está pensado para desplegarse como **dos sitios de Firebase Hosting** (vendedor y admin) más **una Cloud Function** (`api`, en `functions/`) que envuelve el mismo backend Express de `server/`.
+
+1. **Crea el proyecto y los sitios de Hosting** (una vez):
+   ```bash
+   firebase projects:create tu-project-id
+   firebase hosting:sites:create tu-site-vendedor
+   firebase hosting:sites:create tu-site-admin
+   firebase target:apply hosting seller tu-site-vendedor
+   firebase target:apply hosting admin tu-site-admin
+   ```
+   Actualiza `.firebaserc` con tu `project-id` y los IDs de sitio (el comando `target:apply` lo hace por ti).
+
+2. **Configura las variables de entorno de la función** copiando `functions/.env.example` a `functions/.env` y completándolo. Dos cosas cambian respecto al desarrollo local:
+   - **Base de datos**: Cloud Functions no tiene disco persistente, así que SQLite (`file:./dev.db`) no sirve en producción. `DATABASE_URL` debe apuntar a una base de datos administrada (Cloud SQL para PostgreSQL, Neon, Supabase, etc.). Cambia el `provider` en `server/prisma/schema.prisma` a `postgresql` y corre `prisma migrate deploy` contra esa base antes de desplegar.
+   - **Fotos de visitas**: en local se guardan en `server/uploads`; en Cloud Functions se suben a Firebase Storage. Esto ya está resuelto en `server/src/storage.ts` (controlado por `STORAGE_DRIVER`, que `functions/src/index.ts` fuerza a `"firebase"`); solo necesitas definir `FIREBASE_STORAGE_BUCKET` en `functions/.env`.
+
+3. **Build y deploy**:
+   ```bash
+   npm run firebase:deploy   # build de server, apps y functions + firebase deploy
+   ```
+   O por partes: `npm run build`, `npm run build:functions`, luego `firebase deploy`.
+
+`firebase.json` ya reescribe `/api/**` y `/uploads/**` hacia la función `api` en ambos sitios de Hosting, y todo lo demás cae a `index.html` (SPA). Como el frontend llama a rutas relativas (`/api/...`), no hace falta configurar CORS entre Hosting y la función; `CORS_ORIGINS` solo importa si llamas a la API desde otro dominio.
