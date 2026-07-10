@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// Toda la app pasa por la API (Cloud Function `api`, que usa el Admin SDK y
+// por lo tanto ignora estas reglas). No hay acceso directo desde los clientes
+// web, así que Firestore se cierra por completo a peticiones con el SDK cliente.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

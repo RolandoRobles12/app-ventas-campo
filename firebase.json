@@ -27,5 +27,25 @@
       "codebase": "default",
       "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"]
     }
-  ]
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "emulators": {
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8080
+    },
+    "hosting": {
+      "host": "127.0.0.1",
+      "port": 5000
+    },
+    "ui": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 4200
+    },
+    "singleProjectMode": true
+  }
 }

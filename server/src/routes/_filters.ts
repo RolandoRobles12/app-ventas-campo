@@ -1,14 +1,16 @@
-import { prisma } from '../db.js';
+import { db } from '../db.js';
 
 export async function resolveVendedorIds(producto?: string, vendedor?: string): Promise<string[] | null> {
   // returns null = no restriction (todos); otherwise a list of vendedor ids to filter by
   if (vendedor && vendedor !== 'Todos los vendedores') {
-    const v = await prisma.vendedor.findFirst({ where: { nombre: vendedor } });
-    return v ? [v.id] : [];
+    const snap = await db.collection('vendedores').where('nombre', '==', vendedor).limit(1).get();
+    return snap.empty ? [] : [snap.docs[0].id];
   }
   if (producto && producto !== 'Todos los productos') {
-    const vs = await prisma.vendedor.findMany({ where: { producto: { nombre: producto } } });
-    return vs.map((v) => v.id);
+    const productoSnap = await db.collection('productos').where('nombre', '==', producto).limit(1).get();
+    if (productoSnap.empty) return [];
+    const vs = await db.collection('vendedores').where('productoId', '==', productoSnap.docs[0].id).get();
+    return vs.docs.map((d) => d.id);
   }
   return null;
 }

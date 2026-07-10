@@ -1,0 +1,47 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "visitas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "vendedorId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "visitas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "vendedorId", "order": "ASCENDING" },
+        { "fieldPath": "resultado", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "jornadas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "vendedorId", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "prospectos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "vendedorId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "crmDeals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dealOwnerId", "order": "ASCENDING" },
+        { "fieldPath": "etapa", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

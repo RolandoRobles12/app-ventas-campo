@@ -1,34 +1,30 @@
 import { Router } from 'express';
-import { prisma } from '../db.js';
+import { db } from '../db.js';
 
 export const productosRouter = Router();
 
+interface ProductoDoc {
+  nombre: string;
+  esDeCampo: boolean;
+  giros: string[];
+}
+
 productosRouter.get('/', async (_req, res) => {
-  const productos = await prisma.producto.findMany({
-    include: { giros: { include: { giro: true } } },
-    orderBy: { nombre: 'asc' },
-  });
+  const snap = await db.collection('productos').orderBy('nombre', 'asc').get();
   res.json(
-    productos.map((p) => ({
-      id: p.id,
-      nombre: p.nombre,
-      esDeCampo: p.esDeCampo,
-      giros: p.giros.map((g) => g.giro.nombre),
-    })),
+    snap.docs.map((d) => {
+      const p = d.data() as ProductoDoc;
+      return { id: d.id, nombre: p.nombre, esDeCampo: p.esDeCampo, giros: p.giros || [] };
+    }),
   );
 });
 
 productosRouter.get('/de-campo', async (_req, res) => {
-  const productos = await prisma.producto.findMany({
-    where: { esDeCampo: true },
-    include: { giros: { include: { giro: true } } },
-    orderBy: { nombre: 'asc' },
-  });
+  const snap = await db.collection('productos').orderBy('nombre', 'asc').get();
   res.json(
-    productos.map((p) => ({
-      id: p.id,
-      nombre: p.nombre,
-      giros: p.giros.map((g) => g.giro.nombre),
-    })),
+    snap.docs
+      .map((d) => ({ id: d.id, ...(d.data() as ProductoDoc) }))
+      .filter((p) => p.esDeCampo)
+      .map((p) => ({ id: p.id, nombre: p.nombre, giros: p.giros || [] })),
   );
 });
