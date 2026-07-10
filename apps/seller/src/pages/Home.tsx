@@ -21,7 +21,7 @@ const REGISTRO = [
 ] as const;
 
 export function Home() {
-  const { vendedor } = useSession();
+  const { vendedor, salir } = useSession();
   const navigate = useNavigate();
   const [metas, setMetas] = useState<Metas | null>(null);
   const [jornada, setJornada] = useState<JornadaHoy | null>(null);
@@ -43,11 +43,15 @@ export function Home() {
   return (
     <div style={{ paddingBottom: 30 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px 4px' }}>
-        <div style={{
-          width: 62, height: 62, borderRadius: '50%', background: vendedor.color, display: 'flex',
-          alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: 22,
-          boxShadow: '0 6px 16px rgba(34,189,120,.32)',
-        }}>{vendedor.iniciales}</div>
+        <button
+          onClick={salir}
+          title="Cerrar sesión"
+          style={{
+            width: 62, height: 62, borderRadius: '50%', background: vendedor.color, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: 22,
+            boxShadow: '0 6px 16px rgba(34,189,120,.32)', border: 'none', cursor: 'pointer', padding: 0,
+          }}
+        >{vendedor.iniciales}</button>
         <div style={{ width: 46, height: 46, borderRadius: '50%', background: '#bcd9c9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1f4d39" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
         </div>

@@ -18,11 +18,12 @@ La base de datos es Firestore, y tanto desarrollo local como producción usan
 **el mismo proyecto de Firebase** (no hay entorno de prueba separado). Como
 todavía no existe, créalo una vez:
 
-1. Ve a la [consola de Firebase](https://console.firebase.google.com), **Agregar proyecto**, dale un nombre (puedes desactivar Google Analytics, no se usa). Anota el **Project ID** que te asigna.
+1. Ve a la [consola de Firebase](https://console.firebase.google.com), **Agregar proyecto**, dale un nombre (puedes desactivar Google Analytics, no se usa). Anota el **Project ID** que te asigna. Registra ahí mismo una "app web" (sin marcar Hosting, eso ya está configurado en `firebase.json`) para obtener el `firebaseConfig` — ya está cargado en `packages/ui/src/firebase.ts`, no hace falta tocarlo salvo que cambies de proyecto.
 2. Dentro del proyecto: **Build → Firestore Database → Crear base de datos**, modo producción, elige una región (ej. `us-central1`).
-3. **Configuración del proyecto** (ícono de engranaje) **→ Cuentas de servicio → Generar nueva clave privada**. Descarga el JSON y guárdalo **fuera de este repo** (ej. `C:\Users\tu-usuario\secrets\`) — nunca lo subas a git.
-4. Actualiza `.firebaserc` en la raíz del repo: reemplaza `REEMPLAZA-CON-TU-PROJECT-ID` por tu Project ID real (deja los IDs de sitio de Hosting como están por ahora, se configuran en la sección de deploy).
-5. Despliega las reglas e índices de Firestore que la API necesita (una vez, y de nuevo cada vez que cambie `firestore.indexes.json`):
+3. **Build → Authentication → Comenzar → Google** (habilita el proveedor). Solo se usa login con Google, restringido a cuentas `@avivacredito.com` (se valida tanto en el cliente como en el servidor); no hace falta crear usuarios a mano, cualquiera con esa cuenta de correo puede entrar.
+4. **Configuración del proyecto** (ícono de engranaje) **→ Cuentas de servicio → Generar nueva clave privada**. Descarga el JSON y guárdalo **fuera de este repo** (ej. `C:\Users\tu-usuario\secrets\`) — nunca lo subas a git.
+5. Actualiza `.firebaserc` en la raíz del repo: reemplaza `REEMPLAZA-CON-TU-PROJECT-ID` por tu Project ID real (deja los IDs de sitio de Hosting como están por ahora, se configuran en la sección de deploy).
+6. Despliega las reglas e índices de Firestore que la API necesita (una vez, y de nuevo cada vez que cambie `firestore.indexes.json`):
    ```bash
    npx firebase-tools login
    npx firebase-tools deploy --only firestore:indexes,firestore:rules
@@ -68,6 +69,20 @@ npm run dev:emulator   # emulador + seed + API + apps, una sola terminal
 
 Los datos del emulador viven solo en memoria: se pierden al detenerlo.
 
+## Autenticación
+
+Ambas apps (vendedor y admin) requieren iniciar sesión con Google, restringido
+a cuentas `@avivacredito.com` (`packages/ui/src/auth.tsx`). El backend verifica
+cada request con el Admin SDK (`server/src/auth.ts`) y rechaza cualquier token
+inválido o de otro dominio — la restricción del cliente (`hd` en el selector
+de cuentas de Google) es solo UX, la que cuenta es la del servidor.
+
+En la app del vendedor no hay un rol "admin" separado: cualquier cuenta
+`@avivacredito.com` puede entrar al admin web. Para la app del vendedor, el
+correo de la cuenta de Google se busca contra el campo `email` de los
+documentos de `vendedores` en Firestore (`GET /api/auth/me`) — si no hay un
+vendedor con ese correo, la app lo indica en vez de dejar pasar a nadie.
+
 ## Integraciones reales (no simuladas)
 
 Copia `.env.example` a `server/.env` y completa:
@@ -79,7 +94,7 @@ Ninguna de las dos integraciones genera datos falsos: si no están configuradas,
 
 ## Decisiones fuera del mockup original
 
-- **Selector de vendedor en la app móvil**: el diseño no incluía pantalla de login. Como el backend es real y multi-vendedor, se agregó una pantalla mínima "¿Quién eres?" (persistida en `localStorage`) para simular sesión sin construir un sistema de autenticación completo.
+- **Login en la app móvil**: el diseño no incluía pantalla de login. Se agregó autenticación real con Google (`@avivacredito.com`); la app resuelve automáticamente qué vendedor eres por tu correo en vez de pedirte elegirlo de una lista.
 - **Racha, metas y km recorridos** se calculan de datos reales (visitas y jornadas capturadas), no son valores fijos como en el prototipo.
 - **Mapa de Leads / mapa de calor**: se mantiene el lienzo ilustrado (calles/avenida/parque/río) del diseño, pero los pines se posicionan a partir de coordenadas reales de DENUE normalizadas al lienzo — no son posiciones inventadas.
 - **Cómo llegar** abre Google Maps con la dirección o coordenadas reales del prospecto; el mini-mapa del formulario de visita usa OpenStreetMap embebido cuando hay coordenadas.
