@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { consultarDenue, isDenueConfigured } from '../integrations/denue.js';
+import { consultarDenue, isDenueConfigured, type UbicacionZona, type UbicacionGps } from '../integrations/denue.js';
 
 export const denueRouter = Router();
 
@@ -14,10 +14,23 @@ denueRouter.post('/consulta', async (req, res) => {
       message: 'Configura DENUE_TOKEN en el servidor para consultar el API real del DENUE (INEGI).',
     });
   }
-  const { giros, ciudad, colonia, cantidad } = req.body as { giros: string[]; ciudad: string; colonia?: string; cantidad: number };
-  if (!ciudad) return res.status(400).json({ error: 'ciudad es requerida' });
+  const { giros, cantidad, ciudad, colonia, lat, lng, radioMetros } = req.body as {
+    giros: string[]; cantidad: number;
+    ciudad?: string; colonia?: string;
+    lat?: number; lng?: number; radioMetros?: number;
+  };
+
+  let ubicacion: UbicacionZona | UbicacionGps;
+  if (lat != null && lng != null) {
+    ubicacion = { modo: 'gps', lat, lng, radioMetros } satisfies UbicacionGps;
+  } else if (ciudad) {
+    ubicacion = { modo: 'zona', ciudad, colonia } satisfies UbicacionZona;
+  } else {
+    return res.status(400).json({ error: 'Falta ciudad o lat/lng' });
+  }
+
   try {
-    const resultados = await consultarDenue({ giros: giros || [], ciudad, colonia, cantidad: cantidad || 10 });
+    const resultados = await consultarDenue({ giros: giros || [], cantidad: cantidad || 10, ubicacion });
     res.json({ resultados });
   } catch (err: any) {
     res.status(502).json({ error: 'DENUE_REQUEST_FAILED', message: err?.message || 'Error consultando el DENUE' });

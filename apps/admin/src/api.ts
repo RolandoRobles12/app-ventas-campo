@@ -67,8 +67,11 @@ export const api = {
   eliminarProspecto: (id: string) => req<void>(`/prospectos/${id}`, { method: 'DELETE' }),
 
   denueStatus: () => req<{ configured: boolean }>('/denue/status'),
-  consultarDenue: (data: { giros: string[]; ciudad: string; colonia?: string; cantidad: number }) =>
-    req<{ resultados: any[] }>('/denue/consulta', { method: 'POST', body: JSON.stringify(data) }),
+  consultarDenue: (data: {
+    giros: string[]; cantidad: number;
+    ciudad?: string; colonia?: string;
+    lat?: number; lng?: number; radioMetros?: number;
+  }) => req<{ resultados: any[] }>('/denue/consulta', { method: 'POST', body: JSON.stringify(data) }),
 
   dashboardSummary: (producto?: string, vendedor?: string) => req<DashboardSummary>(`/dashboard/summary${qs({ producto, vendedor })}`),
   dashboardSemana: (producto?: string, vendedor?: string) => req<WeekBar[]>(`/dashboard/semana${qs({ producto, vendedor })}`),

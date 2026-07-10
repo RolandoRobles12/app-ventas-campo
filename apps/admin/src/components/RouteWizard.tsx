@@ -28,6 +28,12 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
   const [wGiros, setWGiros] = useState<string[]>(vendedorInicial?.giros || []);
   const [wDrawZone, setWDrawZone] = useState(vendedorInicial?.drawZone || false);
   const [polygon, setPolygon] = useState<{ x: number; y: number }[]>([]);
+  const [wModo, setWModo] = useState<'zona' | 'gps'>('zona');
+  const [wLat, setWLat] = useState<number | null>(null);
+  const [wLng, setWLng] = useState<number | null>(null);
+  const [wRadio, setWRadio] = useState(1500);
+  const [geoLoading, setGeoLoading] = useState(false);
+  const [geoError, setGeoError] = useState('');
   const [wCantidad, setWCantidad] = useState(15);
   const [wResults, setWResults] = useState<WizardItem[]>([]);
   const [wLoading, setWLoading] = useState(false);
@@ -76,11 +82,36 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     setWGiros((prev) => prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]);
   };
 
+  const usarUbicacionActual = () => {
+    if (!navigator.geolocation) { setGeoError('Tu navegador no soporta geolocalización.'); return; }
+    setGeoLoading(true);
+    setGeoError('');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setWLat(pos.coords.latitude);
+        setWLng(pos.coords.longitude);
+        setGeoLoading(false);
+      },
+      (err) => {
+        setGeoError(`No se pudo obtener tu ubicación: ${err.message}`);
+        setGeoLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  };
+
   const consultarDenue = async () => {
+    if (wModo === 'gps' && (wLat == null || wLng == null)) {
+      setWError('Usa tu ubicación actual o escribe latitud/longitud antes de generar la ruta.');
+      return;
+    }
     setWLoading(true);
     setWError('');
     try {
-      const { resultados } = await api.consultarDenue({ giros: wGiros, ciudad: wCiudad, colonia: wColonia, cantidad: wCantidad });
+      const params = wModo === 'gps'
+        ? { giros: wGiros, cantidad: wCantidad, lat: wLat!, lng: wLng!, radioMetros: wRadio }
+        : { giros: wGiros, cantidad: wCantidad, ciudad: wCiudad, colonia: wColonia };
+      const { resultados } = await api.consultarDenue(params);
       const manuales = wResults.filter((r) => r.manual);
       const nuevos: WizardItem[] = resultados.map((r: any) => ({
         nombre: r.nombre, direccion: r.direccion, giro: r.giro, distanciaKm: r.distanciaKm,
@@ -156,16 +187,46 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
             </div>
           </Section>
 
-          <Section n={2} title="ZONA (MUNICIPIO + COLONIA/CP)">
+          <Section n={2} title="ZONA DE BÚSQUEDA">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <FieldInput label="Ciudad / Municipio" value={wCiudad} onChange={setWCiudad} />
-                <FieldInput label="Colonia o C.P." value={wColonia} onChange={setWColonia} placeholder="Ej. Centro / 44100" />
+              <div style={{ display: 'flex', gap: 8, background: '#f2f5f2', borderRadius: 10, padding: 4 }}>
+                <ModeTab label="Por municipio / colonia / C.P." active={wModo === 'zona'} onClick={() => setWModo('zona')} />
+                <ModeTab label="Por ubicación (GPS)" active={wModo === 'gps'} onClick={() => setWModo('gps')} />
               </div>
-              <div style={{ fontSize: 12, color: '#8a978f', display: 'flex', alignItems: 'center', gap: 7 }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a978f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
-                Con municipio o C.P. es suficiente; incluye colonias aledañas al kiosco.
-              </div>
+
+              {wModo === 'zona' ? (
+                <>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <FieldInput label="Ciudad / Municipio" value={wCiudad} onChange={setWCiudad} />
+                    <FieldInput label="Colonia o C.P." value={wColonia} onChange={setWColonia} placeholder="Ej. Centro / 44100" />
+                  </div>
+                  <div style={{ fontSize: 12, color: '#8a978f', display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a978f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
+                    Con municipio o C.P. es suficiente; incluye colonias aledañas al kiosco.
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
+                    <FieldInput label="Latitud" value={wLat != null ? String(wLat) : ''} onChange={(v) => setWLat(v ? parseFloat(v) : null)} placeholder="20.6597" />
+                    <FieldInput label="Longitud" value={wLng != null ? String(wLng) : ''} onChange={(v) => setWLng(v ? parseFloat(v) : null)} placeholder="-103.3496" />
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#3a4a41', marginBottom: 6 }}>Radio (m)</label>
+                      <input type="number" min={200} max={10000} step={100} value={wRadio} onChange={(e) => setWRadio(Math.max(200, Math.min(10000, parseInt(e.target.value, 10) || 1500)))} style={{ width: '100%', border: '1px solid #d9e1db', background: '#f8faf8', borderRadius: 8, padding: '11px 13px', fontSize: 14, color: '#263238' }} />
+                    </div>
+                  </div>
+                  <button onClick={usarUbicacionActual} disabled={geoLoading} style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 7, background: '#eef2ee', color: '#0f5132', border: 'none', borderRadius: 8, padding: '9px 14px', fontSize: 12.5, fontWeight: 600, opacity: geoLoading ? 0.7 : 1 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0f5132" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></svg>
+                    {geoLoading ? 'Obteniendo ubicación…' : 'Usar mi ubicación actual'}
+                  </button>
+                  {geoError && <div style={{ fontSize: 12, color: '#c0392b' }}>{geoError}</div>}
+                  <div style={{ fontSize: 12, color: '#8a978f', display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a978f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
+                    Busca en un radio real alrededor de un punto — útil si estás parado en el kiosco o zona exacta.
+                  </div>
+                </div>
+              )}
+
               <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
                 <span onClick={() => setWDrawZone((v) => !v)} style={{ width: 40, height: 23, borderRadius: 20, flex: 'none', position: 'relative', transition: 'background .15s', background: wDrawZone ? '#157347' : '#cdd8d0' }}>
                   <span style={{ position: 'absolute', top: 2, left: 2, width: 19, height: 19, borderRadius: '50%', background: '#fff', transition: 'transform .15s', transform: `translateX(${wDrawZone ? 17 : 0}px)` }} />
@@ -302,6 +363,21 @@ function Section({ n, title, hint, right, children }: { n: number; title: React.
       {hint && <div style={{ fontSize: 12, color: '#8a978f', margin: '0 0 12px 31px' }}>{hint}</div>}
       {children}
     </div>
+  );
+}
+
+function ModeTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        flex: 1, border: 'none', borderRadius: 8, padding: '9px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+        background: active ? '#fff' : 'transparent', color: active ? '#0f5132' : '#6f7d75',
+        boxShadow: active ? '0 1px 4px rgba(20,60,40,.12)' : 'none',
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
