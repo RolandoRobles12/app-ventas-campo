@@ -4,6 +4,10 @@
  *
  * No mock data: every business name, address and coordinate returned here comes
  * straight from INEGI's response. Requires DENUE_TOKEN in the environment.
+ *
+ * Dos formas de acotar la búsqueda (mismo endpoint, cambia el segundo segmento):
+ *   - Por zona:    /Buscar/{condicion}/{entidad}/{token}         (estado, sin radio real)
+ *   - Por GPS:     /Buscar/{condicion}/{lat},{lng}/{radio}/{token} (radio real en metros)
  */
 
 const DENUE_BASE = 'https://www.inegi.org.mx/app/api/denue/v1/consulta';
@@ -30,9 +34,8 @@ const KEYWORD_POR_GIRO: Record<string, string> = {
   'Farmacias': 'farmacia',
 };
 
-// Approximate reference point per city, used only to sort DENUE's real results
-// by proximity (haversine distance) — INEGI's "Buscar" endpoint does not accept
-// a lat/lng center, so we can't ask it to sort server-side.
+// Approximate reference point per city, usado solo para ordenar por cercanía
+// cuando se busca "por zona" (INEGI no acepta un centro lat/lng en ese modo).
 const CENTRO_POR_CIUDAD: Record<string, { lat: number; lng: number }> = {
   guadalajara: { lat: 20.6597, lng: -103.3496 },
   zapopan: { lat: 20.7214, lng: -103.3913 },
@@ -91,11 +94,8 @@ export function isDenueConfigured(): boolean {
   return !!process.env.DENUE_TOKEN;
 }
 
-async function buscarPorGiro(giro: string, ciudad: string, token: string): Promise<DenueRawResult[]> {
-  const keyword = KEYWORD_POR_GIRO[giro] || normalize(giro);
-  const entidad = ENTIDAD_POR_CIUDAD[normalize(ciudad)] || '0';
-  const condicion = encodeURIComponent(keyword);
-  const url = `${DENUE_BASE}/Buscar/${condicion}/${entidad}/${token}`;
+async function buscarDenue(condicion: string, alcance: string, token: string): Promise<DenueRawResult[]> {
+  const url = `${DENUE_BASE}/Buscar/${encodeURIComponent(condicion)}/${alcance}/${token}`;
 
   const res = await fetch(url);
   if (!res.ok) {
@@ -106,11 +106,118 @@ async function buscarPorGiro(giro: string, ciudad: string, token: string): Promi
   return Array.isArray(data) ? data : [];
 }
 
-export async function consultarDenue(opts: {
-  giros: string[];
+// ---------------------------------------------------------------------------
+// Filtros de calidad de prospecto (portados de la app de Android de
+// Aviva Tu Negocio): descartan giros y cadenas/franquicias que el DENUE
+// devuelve por coincidencia de texto pero que no son micronegocios viables.
+// ---------------------------------------------------------------------------
+
+const GIROS_EXCLUIDOS = [
+  'estacionamiento', 'parking', 'aparcamiento', 'cochera', 'pensión de autos',
+  'metrobus', 'transporte', 'autobús', 'camión', 'taxi', 'uber', 'didi', 'arrendadora',
+  'renta de autos', 'alquiler', 'vehicular', 'automotriz', 'flotillas', 'logistics',
+  'mudanza', 'paquetería', 'mensajería',
+  'banco', 'financiera', 'prestamos', 'préstamos', 'crédito', 'seguros', 'casa de cambio',
+  'caja de ahorro', 'cooperativa financiera', 'afore', 'inversiones',
+  'consultoria', 'consultoría', 'abogado', 'contador', 'notario', 'notaría', 'notarial',
+  'notariales', 'gestor', 'asesor', 'arquitecto', 'ingeniero', 'diseñador', 'desarrollador',
+  'hospital', 'clínica', 'consultorio', 'doctor', 'médico', 'dentista', 'laboratorio',
+  'radiología', 'fisioterapia', 'psicólogo',
+  'escuela', 'colegio', 'universidad', 'instituto', 'academia', 'guardería', 'kinder',
+  'preescolar', 'primaria', 'secundaria', 'preparatoria',
+  'inmobiliaria', 'bienes raíces', 'desarrolladora', 'fraccionamiento', 'residencial',
+  'condominios', 'departamentos',
+  'gobierno', 'municipal', 'delegación', 'secretaría', 'instituto nacional', 'comisión',
+  'organismo', 'dependencia', 'oficina gubernamental',
+];
+
+const PALABRAS_COMIDA = [
+  'restaurant', 'restaurante', 'taqueria', 'taquería', 'comida', 'cocina', 'antojitos',
+  'mariscos', 'pozole', 'birria', 'tacos', 'tortas', 'hamburguesas', 'pizza', 'sushi',
+  'cafeteria', 'cafetería', 'cantina', 'bar', 'cerveza', 'comedor', 'fonda', 'cenaduria',
+  'loncheria', 'quesadillas', 'tamales', 'elotes', 'raspados', 'nieves', 'helados', 'cafe',
+  'café', 'coffee', 'bebidas', 'jugos', 'licuados', 'aguas', 'refrescos', 'botanero',
+  'cerveceria', 'cervecería', 'wings', 'alitas', 'carnitas', 'barbacoa', 'mole',
+  'enchiladas', 'chilaquiles', 'flautas', 'tostadas', 'sopes', 'huaraches', 'gorditas',
+];
+
+const CADENAS_Y_FRANQUICIAS = [
+  // conveniencia
+  'oxxo', 'seven eleven', '7 eleven', 'circle k', 'extra', 'kiosko', 'modelorama', 'six',
+  "super willys", "willy's", 'ampm', 'go mart',
+  // supermercados
+  'walmart', 'soriana', 'chedraui', 'mega', 'superama', 'bodega aurrera', 'comercial mexicana',
+  'calimax', 'heb', 'costco', 'sams', 'city club',
+  // comida rápida
+  'mcdonalds', "mcdonald's", 'burger king', 'kfc', 'subway', 'dominos', "domino's", 'pizza hut',
+  'starbucks', "carl's jr", 'taco bell', 'little caesars', 'papa johns', 'pollo feliz',
+  'pollo loco', "church's", 'kentucky', 'wendys', "wendy's",
+  // farmacias
+  'farmacia guadalajara', 'farmacias del ahorro', 'farmacia benavides', 'farmacia san pablo',
+  'farmacia similares', 'dr simi', 'farmacia yza',
+  // ferreterías / materiales / muebles
+  'home depot', 'comex', 'sherwin williams', 'novaceramic', 'interceramic', 'liverpool',
+  'palacio de hierro', 'elektra', 'coppel',
+  // panaderías industriales
+  'wonder', 'bimbo', 'marinela', 'tia rosa', 'globo', 'donuts krispy',
+];
+
+const INDICADORES_EMPRESA_GRANDE = [
+  's.a. de c.v.', 'sa de cv', 'sociedad anonima', 'sociedad anónima', 'corporativo', 'grupo',
+  'holding', 'internacional', 'enterprise', 'corporation', 'sucursal', 'franquicia', 'cadena',
+  'matriz', 'subsidiaria',
+];
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Coincidencia por palabra completa, no substring: "bar" no debe disparar con
+// "abarrotes", ni "auto" con "autoservicio". Cada entrada de las listas de
+// abajo puede ser una palabra o frase ("home depot"); \b delimita ambos lados.
+function containsWord(texto: string, palabras: string[]): boolean {
+  return palabras.some((p) => new RegExp(`\\b${escapeRegExp(normalize(p))}\\b`).test(texto));
+}
+
+function esCadenaOFranquicia(nombre: string, direccion: string): boolean {
+  const texto = normalize(`${nombre} ${direccion}`);
+  if (containsWord(texto, CADENAS_Y_FRANQUICIAS)) return true;
+  if (containsWord(texto, INDICADORES_EMPRESA_GRANDE)) return true;
+  if (/#\d+|\bno\.?\s*\d+|\bsucursal\s*\d+/.test(texto)) return true;
+  return false;
+}
+
+function esGiroExcluido(nombre: string, direccion: string, claseActividad: string): boolean {
+  const texto = normalize(`${nombre} ${direccion} ${claseActividad}`);
+  return containsWord(texto, GIROS_EXCLUIDOS);
+}
+
+// El giro "Restaurantes y alimentos" sí busca comida a propósito; para
+// cualquier otro giro, un match de comida suele ser ruido del texto libre
+// del DENUE (ej. la cafetería de un hospital que ya excluimos por otro lado).
+function esComidaNoDeseada(nombre: string, claseActividad: string, giro: string): boolean {
+  if (giro === 'Restaurantes y alimentos') return false;
+  const texto = normalize(`${nombre} ${claseActividad}`);
+  return containsWord(texto, PALABRAS_COMIDA);
+}
+
+export interface UbicacionZona {
+  modo: 'zona';
   ciudad: string;
   colonia?: string;
+}
+
+export interface UbicacionGps {
+  modo: 'gps';
+  lat: number;
+  lng: number;
+  radioMetros?: number;
+}
+
+export async function consultarDenue(opts: {
+  giros: string[];
   cantidad: number;
+  ubicacion: UbicacionZona | UbicacionGps;
 }): Promise<DenueProspecto[]> {
   const token = process.env.DENUE_TOKEN;
   if (!token) {
@@ -119,28 +226,42 @@ export async function consultarDenue(opts: {
 
   const giros = opts.giros.length ? opts.giros : ['Comercio de abarrotes'];
   const cantidad = Math.max(1, Math.min(60, opts.cantidad || 10));
-  const centro = CENTRO_POR_CIUDAD[normalize(opts.ciudad)];
-  const coloniaFilter = opts.colonia ? normalize(opts.colonia) : null;
+  const ubicacion = opts.ubicacion;
+
+  const centro = ubicacion.modo === 'gps'
+    ? { lat: ubicacion.lat, lng: ubicacion.lng }
+    : CENTRO_POR_CIUDAD[normalize(ubicacion.ciudad)];
+  const coloniaFilter = ubicacion.modo === 'zona' && ubicacion.colonia ? normalize(ubicacion.colonia) : null;
+  const coloniaOriginal = ubicacion.modo === 'zona' ? ubicacion.colonia : undefined;
 
   const seen = new Set<string>();
   const merged: DenueProspecto[] = [];
 
   for (const giro of giros) {
-    let raw: DenueRawResult[];
-    try {
-      raw = await buscarPorGiro(giro, opts.ciudad, token);
-    } catch (err) {
-      // Propagate real transport/auth errors from INEGI (invalid token, rate limit, etc.)
-      throw err;
-    }
+    const keyword = KEYWORD_POR_GIRO[giro] || normalize(giro);
+    const alcance = ubicacion.modo === 'gps'
+      ? `${ubicacion.lat},${ubicacion.lng}/${ubicacion.radioMetros || 1500}`
+      : ENTIDAD_POR_CIUDAD[normalize(ubicacion.ciudad)] || '0';
+
+    const raw = await buscarDenue(keyword, alcance, token);
 
     for (const r of raw) {
       if (seen.has(r.Id)) continue;
       if (coloniaFilter) {
         const col = normalize(r.Colonia || '');
         const cp = (r.CP || '').trim();
-        if (!col.includes(coloniaFilter) && cp !== opts.colonia?.trim()) continue;
+        if (!col.includes(coloniaFilter) && cp !== coloniaOriginal?.trim()) continue;
       }
+
+      const nombre = r.Nombre || r.Razon_social || 'Negocio sin nombre';
+      const calle = [r.Tipo_vialidad, r.Calle, r.Num_Exterior].filter(Boolean).join(' ');
+      const direccion = [calle, r.Colonia, r.Municipio || (ubicacion.modo === 'zona' ? ubicacion.ciudad : '')].filter(Boolean).join(', ') || nombre;
+      const claseActividad = r.Clase_actividad || '';
+
+      if (esGiroExcluido(nombre, direccion, claseActividad)) continue;
+      if (esComidaNoDeseada(nombre, claseActividad, giro)) continue;
+      if (esCadenaOFranquicia(nombre, direccion)) continue;
+
       seen.add(r.Id);
 
       const lat = r.Latitud ? parseFloat(r.Latitud) : undefined;
@@ -149,12 +270,9 @@ export async function consultarDenue(opts: {
         ? Math.round(haversineKm(centro, { lat, lng }) * 10) / 10
         : undefined;
 
-      const calle = [r.Tipo_vialidad, r.Calle, r.Num_Exterior].filter(Boolean).join(' ');
-      const direccion = [calle, r.Colonia, r.Municipio || opts.ciudad].filter(Boolean).join(', ');
-
       merged.push({
-        nombre: r.Nombre || r.Razon_social || 'Negocio sin nombre',
-        direccion: direccion || opts.ciudad,
+        nombre,
+        direccion: direccion || (ubicacion.modo === 'zona' ? ubicacion.ciudad : 'Ubicación actual'),
         giro,
         telefono: r.Telefono || undefined,
         lat, lng, distanciaKm,
