@@ -38,10 +38,27 @@ const VENDEDORES = [
 ];
 
 const LEADS_JORGE = [
-  { name: 'Ferretería La Palma', address: 'Av. Juárez 210, Col. Centro, Tlaquepaque', phone: '55 1234 5678', dist: 1.2, giro: 'Ferretería y tlapalería' },
-  { name: 'Abarrotes Doña Mari', address: 'Calle 5 de Mayo 44, San Pedro, Tlaquepaque', phone: '55 2345 6789', dist: 2.8, giro: 'Comercio de abarrotes' },
-  { name: 'Taller Mecánico El Güero', address: 'Blvd. Hidalgo 890, Industrial, Tlaquepaque', phone: '55 3456 7890', dist: 3.5, giro: 'Talleres mecánicos' },
-  { name: 'Papelería Escolar Sol', address: 'Av. Reforma 122, Las Flores, Tlaquepaque', phone: '55 4567 8901', dist: 4.1, giro: 'Ferretería y tlapalería' },
+  { name: 'Ferretería La Palma', address: 'Av. Juárez 210, Col. Centro, Tlaquepaque', phone: '55 1234 5678', dist: 1.2, giro: 'Ferretería y tlapalería', lat: 20.6409, lng: -103.3117 },
+  { name: 'Abarrotes Doña Mari', address: 'Calle 5 de Mayo 44, San Pedro, Tlaquepaque', phone: '55 2345 6789', dist: 2.8, giro: 'Comercio de abarrotes', lat: 20.6376, lng: -103.2996 },
+  { name: 'Taller Mecánico El Güero', address: 'Blvd. Hidalgo 890, Industrial, Tlaquepaque', phone: '55 3456 7890', dist: 3.5, giro: 'Talleres mecánicos', lat: 20.6295, lng: -103.3208 },
+  { name: 'Papelería Escolar Sol', address: 'Av. Reforma 122, Las Flores, Tlaquepaque', phone: '55 4567 8901', dist: 4.1, giro: 'Ferretería y tlapalería', lat: 20.6488, lng: -103.3062 },
+];
+
+// Visitas de demostración con GPS para poblar el mapa de calor en el emulador.
+// Puntos alrededor de la zona de cada vendedor en la ZMG.
+const VISITAS_DEMO: { vendedor: string; negocio: string; resultado: string; lat: number; lng: number }[] = [
+  { vendedor: 'Jorge Díaz', negocio: 'Ferretería La Palma', resultado: 'Se realizó solicitud', lat: 20.6409, lng: -103.3117 },
+  { vendedor: 'Jorge Díaz', negocio: 'Abarrotes Doña Mari', resultado: 'Se dejó información', lat: 20.6376, lng: -103.2996 },
+  { vendedor: 'Jorge Díaz', negocio: 'Taller El Güero', resultado: 'Cliente no interesado', lat: 20.6295, lng: -103.3208 },
+  { vendedor: 'Jorge Díaz', negocio: 'Miscelánea San Pedro', resultado: 'Se realizó solicitud', lat: 20.6402, lng: -103.3101 },
+  { vendedor: 'Jorge Díaz', negocio: 'Abarrotes El Centro', resultado: 'Se dejó información', lat: 20.6415, lng: -103.3128 },
+  { vendedor: 'Rolando Robles', negocio: 'Café La Americana', resultado: 'Se realizó solicitud', lat: 20.6736, lng: -103.3634 },
+  { vendedor: 'Rolando Robles', negocio: 'Estética Bella', resultado: 'Se dejó información', lat: 20.6712, lng: -103.3679 },
+  { vendedor: 'Rolando Robles', negocio: 'Abarrotes Chapultepec', resultado: 'Se realizó solicitud', lat: 20.6748, lng: -103.3618 },
+  { vendedor: 'Laura Sánchez', negocio: 'Papelería Zapopan Centro', resultado: 'Se realizó solicitud', lat: 20.7214, lng: -103.3918 },
+  { vendedor: 'Laura Sánchez', negocio: 'Papelería El Estudiante', resultado: 'Se reagenda visita', lat: 20.7239, lng: -103.3887 },
+  { vendedor: 'María López', negocio: 'Papelería Catedral', resultado: 'Se dejó información', lat: 20.6767, lng: -103.3475 },
+  { vendedor: 'Miguel Soto', negocio: 'Construrama del Valle', resultado: 'Se realizó solicitud', lat: 20.4737, lng: -103.4459 },
 ];
 
 async function upsertVendedor(v: (typeof VENDEDORES)[number], productoId: string): Promise<string> {
@@ -92,7 +109,26 @@ async function main() {
       const ref = db.collection('prospectos').doc();
       batch.set(ref, {
         vendedorId: jorgeId, nombre: l.name, direccion: l.address, telefono: l.phone,
-        distanciaKm: l.dist, giro: l.giro, origen: 'denue', estado: 'por_visitar', createdAt: Timestamp.now(),
+        distanciaKm: l.dist, giro: l.giro, origen: 'denue', estado: 'por_visitar',
+        lat: l.lat, lng: l.lng, createdAt: Timestamp.now(),
+      });
+    }
+    await batch.commit();
+  }
+
+  // Visitas de demo con ubicación GPS (solo si aún no hay visitas), para el mapa de calor
+  const existingVisitas = await db.collection('visitas').count().get();
+  if (existingVisitas.data().count === 0) {
+    const batch = db.batch();
+    for (const v of VISITAS_DEMO) {
+      const ref = db.collection('visitas').doc();
+      const hace = new Date();
+      hace.setDate(hace.getDate() - Math.floor(Math.random() * 7));
+      batch.set(ref, {
+        vendedorId: vendedorRecords[v.vendedor], prospectoId: null, esNegocioNuevo: true,
+        nombreNegocio: v.negocio, direccion: 'Zona metropolitana de Guadalajara', resultado: v.resultado,
+        notas: null, fotoUrl: null, lat: v.lat, lng: v.lng, gpsAccuracy: 12,
+        createdAt: Timestamp.fromDate(hace),
       });
     }
     await batch.commit();

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { api, type ReportesSummary, type ReporteVendedor, type Evidencia, type ResultadosDonut } from '../api';
+import { api, type ReportesSummary, type ReporteVendedor, type Evidencia, type ResultadosDonut, type MapaCalorResponse } from '../api';
 import { useFilters } from '../filters';
 import { FilterBar, PageHeader } from '../components/FilterBar';
-import { RealisticMapBg } from '../components/RealisticMapBg';
+import { GeoMap } from '../components/GeoMap';
 
 export function Reportes() {
   const { fProducto, fVendedor } = useFilters();
@@ -10,12 +10,14 @@ export function Reportes() {
   const [vendedores, setVendedores] = useState<ReporteVendedor[]>([]);
   const [resultados, setResultados] = useState<ResultadosDonut | null>(null);
   const [evidencias, setEvidencias] = useState<Evidencia[]>([]);
+  const [calor, setCalor] = useState<MapaCalorResponse | null>(null);
 
   useEffect(() => {
     api.reportesSummary(fProducto, fVendedor).then(setSummary).catch(() => {});
     api.reportesVendedores(fProducto, fVendedor).then(setVendedores).catch(() => {});
     api.dashboardResultados(fProducto, fVendedor).then(setResultados).catch(() => {});
     api.reportesEvidencias(fProducto, fVendedor).then(setEvidencias).catch(() => {});
+    api.mapaCalor(fProducto, fVendedor).then(setCalor).catch(() => {});
   }, [fProducto, fVendedor]);
 
   return (
@@ -77,19 +79,22 @@ export function Reportes() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.1fr', gap: 16, marginTop: 16 }}>
         <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, padding: '20px 22px' }}>
           <div style={{ fontSize: 15, fontWeight: 500, color: '#263238', marginBottom: 6 }}>Cobertura por zona</div>
-          <div style={{ fontSize: 12.5, color: '#8a978f', marginBottom: 14 }}>Mapa de calor de visitas</div>
+          <div style={{ fontSize: 12.5, color: '#8a978f', marginBottom: 14 }}>
+            Mapa de calor de visitas
+            {calor && calor.visitasConUbicacion > 0 && ` · ${calor.visitasConUbicacion.toLocaleString('es-MX')} visitas con ubicación`}
+          </div>
           <div style={{ position: 'relative', height: 250, borderRadius: 10, overflow: 'hidden', background: '#e7ece4' }}>
-            <RealisticMapBg />
-            <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,.32)' }} />
-            <div style={{ position: 'absolute', left: '22%', top: '32%', width: 130, height: 130, borderRadius: '50%', transform: 'translate(-50%,-50%)', background: 'radial-gradient(circle, rgba(214,69,69,.55), rgba(239,139,62,.25) 55%, transparent 72%)' }} />
-            <div style={{ position: 'absolute', left: '58%', top: '44%', width: 170, height: 170, borderRadius: '50%', transform: 'translate(-50%,-50%)', background: 'radial-gradient(circle, rgba(239,139,62,.5), rgba(34,163,108,.2) 55%, transparent 72%)' }} />
-            <div style={{ position: 'absolute', left: '74%', top: '70%', width: 110, height: 110, borderRadius: '50%', transform: 'translate(-50%,-50%)', background: 'radial-gradient(circle, rgba(34,163,108,.5), transparent 70%)' }} />
-            <div style={{ position: 'absolute', left: '40%', top: '74%', width: 90, height: 90, borderRadius: '50%', transform: 'translate(-50%,-50%)', background: 'radial-gradient(circle, rgba(34,163,108,.4), transparent 70%)' }} />
+            <GeoMap heatPoints={calor?.puntos ?? []} height={250} />
+            {calor && calor.puntos.length === 0 && (
+              <div style={{ position: 'absolute', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.72)', color: '#5a665f', fontSize: 12.5, fontWeight: 600, textAlign: 'center', padding: '0 30px' }}>
+                Aún no hay visitas con ubicación GPS. El mapa se llena conforme los vendedores registran visitas desde la app.
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 11.5, color: '#8a978f' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#d64545' }} />Alta densidad</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ef8b3e' }} />Media</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#22a36c' }} />Baja</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#f03b20' }} />Alta densidad</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fd8d3c' }} />Media</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fecc5c' }} />Baja</span>
           </div>
         </div>
         <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, padding: '20px 22px' }}>

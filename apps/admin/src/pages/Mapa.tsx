@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, type MapaLeadsResponse } from '../api';
 import { useFilters } from '../filters';
 import { FilterBar, PageHeader } from '../components/FilterBar';
-import { RealisticMapBg, normalizeLatLng } from '../components/RealisticMapBg';
+import { GeoMap, type MapPin } from '../components/GeoMap';
 import { estadoProspectoBadgeStyle } from '../badges';
 
 export function Mapa() {
@@ -14,7 +14,10 @@ export function Mapa() {
   }, [fProducto, fVendedor]);
 
   const leads = data?.leads ?? [];
-  const positions = normalizeLatLng(leads.map((l) => ({ lat: l.lat, lng: l.lng })));
+  const pins = useMemo<MapPin[]>(
+    () => (data?.leads ?? []).map((l) => ({ id: l.id, lat: l.lat, lng: l.lng, color: l.color, title: l.nombre, subtitle: `${l.direccion}${l.vendedor ? ` · ${l.vendedor}` : ''}` })),
+    [data],
+  );
 
   return (
     <div className="screen">
@@ -27,18 +30,13 @@ export function Mapa() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, alignItems: 'start' }}>
         <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, overflow: 'hidden' }}>
           <div style={{ position: 'relative', height: 540, background: '#e7ece4', overflow: 'hidden' }}>
-            <RealisticMapBg />
-            {leads.length === 0 && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5a665f', fontSize: 13, fontWeight: 600, textAlign: 'center', padding: '0 40px' }}>
+            <GeoMap pins={pins} height={540} />
+            {data && leads.length === 0 && (
+              <div style={{ position: 'absolute', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.72)', color: '#5a665f', fontSize: 13, fontWeight: 600, textAlign: 'center', padding: '0 40px' }}>
                 Sin leads con coordenadas GPS todavía. Consulta el DENUE desde "Rutas por vendedor" para traer negocios con ubicación real.
               </div>
             )}
-            {leads.map((l, i) => (
-              <div key={l.id} title={l.nombre} style={{ position: 'absolute', left: `${positions[i]?.x ?? 50}%`, top: `${positions[i]?.y ?? 50}%`, transform: 'translate(-50%,-100%)', filter: 'drop-shadow(0 3px 4px rgba(0,0,0,.3))' }}>
-                <svg width="28" height="28" viewBox="0 0 24 24" fill={l.color} stroke="#fff" strokeWidth="1.6"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" fill="#fff" stroke="none" /></svg>
-              </div>
-            ))}
-            <div style={{ position: 'absolute', right: 16, top: 16, background: '#fff', borderRadius: 10, padding: '13px 16px', boxShadow: '0 3px 10px rgba(0,0,0,.1)', display: 'flex', flexDirection: 'column', gap: 9 }}>
+            <div style={{ position: 'absolute', right: 16, top: 16, zIndex: 600, background: '#fff', borderRadius: 10, padding: '13px 16px', boxShadow: '0 3px 10px rgba(0,0,0,.1)', display: 'flex', flexDirection: 'column', gap: 9 }}>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.5px', color: '#8a978f' }}>ESTADO</div>
               <Legend color="#ef8b3e" label="Por visitar" />
               <Legend color="#22a36c" label="Visitado" />

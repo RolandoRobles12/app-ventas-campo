@@ -7,6 +7,41 @@ import { RESULTADO_OPTIONS } from '@aviva/ui';
 
 const GIROS = ['Abarrotes', 'Ferretería', 'Papelería', 'Alimentos', 'Servicios', 'Otro'];
 
+type GpsFix = { lat: number; lng: number; accuracy: number };
+type GpsState =
+  | { status: 'buscando' }
+  | { status: 'ok'; fix: GpsFix }
+  | { status: 'error'; message: string };
+
+function useGps(): GpsState {
+  const [gps, setGps] = useState<GpsState>({ status: 'buscando' });
+
+  useEffect(() => {
+    if (!('geolocation' in navigator)) {
+      setGps({ status: 'error', message: 'Este dispositivo no tiene GPS disponible' });
+      return;
+    }
+    // watchPosition en lugar de getCurrentPosition: el primer fix suele ser burdo
+    // (por red) y los siguientes lo van afinando mientras se llena el formulario.
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => setGps({
+        status: 'ok',
+        fix: { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) },
+      }),
+      (err) => setGps((prev) => (prev.status === 'ok' ? prev : {
+        status: 'error',
+        message: err.code === err.PERMISSION_DENIED
+          ? 'Permiso de ubicación denegado · actívalo para el mapa de calor'
+          : 'No se pudo obtener la ubicación GPS',
+      })),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 },
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
+
+  return gps;
+}
+
 export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
   const { vendedor } = useSession();
   const { id } = useParams();
@@ -22,6 +57,7 @@ export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const gps = useGps();
 
   useEffect(() => {
     if (mode === 'lead' && vendedor && id) {
@@ -53,6 +89,11 @@ export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
       fd.append('resultado', resultado);
       if (notas) fd.append('notas', notas);
       if (photo) fd.append('foto', photo.file);
+      if (gps.status === 'ok') {
+        fd.append('lat', String(gps.fix.lat));
+        fd.append('lng', String(gps.fix.lng));
+        fd.append('gpsAccuracy', String(gps.fix.accuracy));
+      }
 
       if (mode === 'nuevo') {
         fd.append('esNegocioNuevo', 'true');
@@ -93,15 +134,15 @@ export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
       </div>
 
       {mode === 'lead' && prospecto && (
-        <MapPreview direccion={prospecto.direccion} telefono={prospecto.telefono} lat={prospecto.lat} lng={prospecto.lng} />
+        <>
+          <MapPreview direccion={prospecto.direccion} telefono={prospecto.telefono} lat={prospecto.lat} lng={prospecto.lng} />
+          <div style={{ margin: '12px 16px 0' }}><GpsBanner gps={gps} /></div>
+        </>
       )}
 
       {mode === 'nuevo' && (
         <div style={{ margin: '12px 16px 0', background: '#fff', borderRadius: 20, padding: 16, boxShadow: '0 8px 24px rgba(20,60,40,.07)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--aviva-green-50)', borderRadius: 12, padding: '9px 12px' }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#15915c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: '#356048' }}>Ubicación actual detectada por GPS</span>
-          </div>
+          <GpsBanner gps={gps} />
           <Field label="Nombre del negocio">
             <input className="fld" value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="Ej. Tortillería La Espiga" style={inputStyle} />
           </Field>
@@ -166,6 +207,26 @@ export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
           {submitting ? 'Guardando…' : 'Guardar visita'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function GpsBanner({ gps }: { gps: GpsState }) {
+  const palette = {
+    buscando: { bg: '#fdf4e7', ink: '#8a5a1e', dot: '#ef8b3e' },
+    ok: { bg: 'var(--aviva-green-50)', ink: '#356048', dot: '#15915c' },
+    error: { bg: '#fdecea', ink: '#8f3025', dot: '#c0392b' },
+  }[gps.status];
+  const label = gps.status === 'buscando'
+    ? 'Buscando señal GPS…'
+    : gps.status === 'ok'
+      ? `Ubicación GPS capturada · precisión ±${gps.fix.accuracy} m`
+      : gps.message;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: palette.bg, borderRadius: 12, padding: '9px 12px' }}>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={palette.dot} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+      <span style={{ fontSize: 12.5, fontWeight: 600, color: palette.ink }}>{label}</span>
     </div>
   );
 }

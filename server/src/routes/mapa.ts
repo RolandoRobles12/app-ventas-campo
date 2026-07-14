@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { db, Timestamp } from '../db.js';
 import { resolveVendedorIds } from './_filters.js';
 import { isEmptyRestriction } from '../firestore-helpers.js';
 
@@ -10,6 +10,13 @@ interface ProspectoDoc {
   nombre: string;
   direccion: string;
   estado: string;
+  lat?: number | null;
+  lng?: number | null;
+}
+
+interface VisitaGeoDoc {
+  vendedorId: string;
+  prospectoId: string | null;
   lat?: number | null;
   lng?: number | null;
 }
@@ -59,5 +66,54 @@ mapaRouter.get('/leads', async (req, res) => {
       id, nombre: p.nombre, direccion: p.direccion, estado: p.estado, lat: p.lat, lng: p.lng,
       vendedor: vendedores.get(p.vendedorId) || '', color: p.estado === 'visitado' ? '#22a36c' : '#ef8b3e',
     })),
+  });
+});
+
+// Puntos para el mapa de calor: la ubicación GPS de cada visita registrada.
+// Las visitas antiguas (sin GPS propio) heredan las coordenadas de su prospecto.
+mapaRouter.get('/calor', async (req, res) => {
+  const { producto, vendedor, dias } = req.query as { producto?: string; vendedor?: string; dias?: string };
+  const ids = await resolveVendedorIds(producto, vendedor);
+  if (isEmptyRestriction(ids)) return res.json({ puntos: [], visitasTotales: 0, visitasConUbicacion: 0 });
+
+  let query: FirebaseFirestore.Query = db.collection('visitas');
+  if (ids) query = query.where('vendedorId', 'in', ids);
+  const nDias = Number(dias);
+  if (Number.isFinite(nDias) && nDias > 0) {
+    const desde = new Date();
+    desde.setDate(desde.getDate() - nDias);
+    query = query.where('createdAt', '>=', Timestamp.fromDate(desde));
+  }
+  const snap = await query.orderBy('createdAt', 'desc').limit(2000).get();
+  const visitas = snap.docs.map((d) => d.data() as VisitaGeoDoc);
+
+  // Resuelve coordenadas faltantes vía el prospecto asociado (una lectura por prospecto único).
+  const sinGps = [...new Set(visitas.filter((v) => (v.lat == null || v.lng == null) && v.prospectoId).map((v) => v.prospectoId as string))];
+  const prospectoCoords = new Map<string, { lat: number; lng: number }>();
+  await Promise.all(sinGps.map(async (pid) => {
+    const doc = await db.collection('prospectos').doc(pid).get();
+    const p = doc.exists ? (doc.data() as ProspectoDoc) : null;
+    if (p && p.lat != null && p.lng != null) prospectoCoords.set(pid, { lat: p.lat, lng: p.lng });
+  }));
+
+  // Agrega visitas en el mismo punto como peso, para que la intensidad refleje densidad real.
+  const agregado = new Map<string, { lat: number; lng: number; peso: number }>();
+  let conUbicacion = 0;
+  for (const v of visitas) {
+    const coords = v.lat != null && v.lng != null
+      ? { lat: v.lat, lng: v.lng }
+      : (v.prospectoId ? prospectoCoords.get(v.prospectoId) : undefined);
+    if (!coords) continue;
+    conUbicacion++;
+    const key = `${coords.lat.toFixed(5)},${coords.lng.toFixed(5)}`;
+    const prev = agregado.get(key);
+    if (prev) prev.peso++;
+    else agregado.set(key, { lat: coords.lat, lng: coords.lng, peso: 1 });
+  }
+
+  res.json({
+    puntos: [...agregado.values()],
+    visitasTotales: visitas.length,
+    visitasConUbicacion: conUbicacion,
   });
 });
