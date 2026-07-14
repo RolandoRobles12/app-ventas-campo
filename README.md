@@ -96,7 +96,7 @@ Ninguna de las dos integraciones genera datos falsos: si no están configuradas,
 
 - **Login en la app móvil**: el diseño no incluía pantalla de login. Se agregó autenticación real con Google (`@avivacredito.com`); la app resuelve automáticamente qué vendedor eres por tu correo en vez de pedirte elegirlo de una lista.
 - **Racha, metas y km recorridos** se calculan de datos reales (visitas y jornadas capturadas), no son valores fijos como en el prototipo.
-- **Mapa de Leads / mapa de calor**: se mantiene el lienzo ilustrado (calles/avenida/parque/río) del diseño, pero los pines se posicionan a partir de coordenadas reales de DENUE normalizadas al lienzo — no son posiciones inventadas.
+- **Mapa de Leads / mapa de calor**: mapas reales con Leaflet + OpenStreetMap (sin clave de API). El Mapa de Leads coloca pines en sus coordenadas geográficas reales, y el mapa de calor de Reportes se alimenta de `/api/mapa/calor`: la ubicación GPS que la app del vendedor captura al registrar cada visita (con respaldo a las coordenadas DENUE del prospecto para visitas sin GPS).
 - **Cómo llegar** abre Google Maps con la dirección o coordenadas reales del prospecto; el mini-mapa del formulario de visita usa OpenStreetMap embebido cuando hay coordenadas.
 
 ## Producción

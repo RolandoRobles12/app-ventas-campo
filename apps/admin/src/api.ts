@@ -22,6 +22,11 @@ export interface MapaLeadsResponse {
   totales: { total: number; porVisitar: number; visitados: number; sincronizadosCrm: number };
   leads: { id: string; nombre: string; direccion: string; estado: string; lat: number; lng: number; vendedor: string; color: string }[];
 }
+export interface MapaCalorResponse {
+  puntos: { lat: number; lng: number; peso: number }[];
+  visitasTotales: number;
+  visitasConUbicacion: number;
+}
 export interface SeguimientoItem {
   id: string; nombre: string; iniciales: string; color: string; producto: string; ciudad: string;
   inicio: string | null; estado: string; realizadas: number; pendientes: number; pct: number; km: number; ubicacionActual: string;
@@ -79,6 +84,8 @@ export const api = {
   dashboardActividad: (producto?: string, vendedor?: string) => req<ActividadVendedor[]>(`/dashboard/actividad${qs({ producto, vendedor })}`),
 
   mapaLeads: (producto?: string, vendedor?: string) => req<MapaLeadsResponse>(`/mapa/leads${qs({ producto, vendedor })}`),
+  mapaCalor: (producto?: string, vendedor?: string, dias?: number) =>
+    req<MapaCalorResponse>(`/mapa/calor${qs({ producto, vendedor, dias: dias ? String(dias) : undefined })}`),
   seguimiento: (producto?: string, vendedor?: string) => req<SeguimientoItem[]>(`/seguimiento${qs({ producto, vendedor })}`),
 
   reportesSummary: (producto?: string, vendedor?: string) => req<ReportesSummary>(`/reportes/summary${qs({ producto, vendedor })}`),
