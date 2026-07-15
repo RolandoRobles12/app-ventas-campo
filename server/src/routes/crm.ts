@@ -3,7 +3,7 @@ import { db, Timestamp } from '../db.js';
 import { toIso } from '../firestore-helpers.js';
 import {
   fetchHubspotDeals, updateHubspotDeal, hubspotDealUrl, isHubspotConfigured,
-  DEAL_STAGE_LABELS, listHubspotOwners,
+  DEAL_STAGE_LABELS, listHubspotOwners, listDealPipelines,
 } from '../integrations/hubspot.js';
 
 export const crmRouter = Router();
@@ -104,7 +104,12 @@ crmRouter.post('/sync', async (_req, res) => {
     let created = 0, updated = 0;
 
     for (const rd of remote) {
-      const dealOwner = vendedores.find((v) => v.nombre.toLowerCase() === (rd.dealOwnerLabel || '').toLowerCase());
+      // Se empareja por email (no por nombre): es el mismo criterio que usa
+      // PATCH /deals/:id al escribir el dueño de vuelta a HubSpot, y evita que
+      // acentos/apodos/orden de nombre dejen el deal sin vendedor asignado.
+      const dealOwner = rd.dealOwnerEmail
+        ? vendedores.find((v) => v.email && v.email.toLowerCase() === rd.dealOwnerEmail!.toLowerCase())
+        : undefined;
       const existingSnap = await db.collection('crmDeals').where('hubspotDealId', '==', rd.hubspotDealId).limit(1).get();
       const data = {
         cliente: rd.cliente, negocio: rd.negocio, etapa: rd.etapa, amount: rd.amount,
@@ -123,6 +128,18 @@ crmRouter.post('/sync', async (_req, res) => {
     res.json({ ok: true, created, updated, total: remote.length });
   } catch (err: any) {
     res.status(502).json({ error: 'HUBSPOT_SYNC_FAILED', message: err?.message || 'Error sincronizando con HubSpot' });
+  }
+});
+
+// Utilidad de configuración: lista los pipelines de deals disponibles para
+// que sea fácil copiar el ID correcto a HUBSPOT_PIPELINE_ID (no la usa la UI).
+crmRouter.get('/pipelines', async (_req, res) => {
+  if (!isHubspotConfigured()) return res.json({ configured: false, pipelines: [] });
+  try {
+    const pipelines = await listDealPipelines();
+    res.json({ configured: true, pipelines });
+  } catch (err: any) {
+    res.status(502).json({ error: 'HUBSPOT_REQUEST_FAILED', message: err?.message });
   }
 });
 
