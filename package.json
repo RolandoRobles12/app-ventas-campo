@@ -17,7 +17,7 @@
     "build:functions": "npm run build -w server && npm run build -w functions",
     "db:seed": "npm run db:seed -w server",
     "db:seed:wait": "wait-on tcp:127.0.0.1:8080 && npm run db:seed",
-    "emulators": "firebase emulators:start --only firestore --project demo-aviva",
+    "emulators": "firebase emulators:start --only firestore --project app-campo-aviva",
     "dev:emulator": "concurrently -n emulator,seed,server,seller,admin -c blue,gray,green,yellow,magenta --kill-others-on-fail \"npm run emulators\" \"npm run db:seed:wait\" \"npm run dev:server\" \"npm run dev:seller\" \"npm run dev:admin\"",
     "firebase:deploy": "npm run build && npm run build:functions && firebase deploy"
   },
