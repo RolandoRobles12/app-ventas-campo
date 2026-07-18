@@ -34,6 +34,23 @@
       ]
     },
     {
+      "collectionGroup": "prospectos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "estado", "order": "ASCENDING" },
+        { "fieldPath": "distanciaKm", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "prospectos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "vendedorId", "order": "ASCENDING" },
+        { "fieldPath": "estado", "order": "ASCENDING" },
+        { "fieldPath": "distanciaKm", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "crmDeals",
       "queryScope": "COLLECTION",
       "fields": [
