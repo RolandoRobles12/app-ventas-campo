@@ -77,7 +77,7 @@ export const api = {
     req<{ creados: number; prospectos: Prospecto[] }>('/prospectos/bulk', { method: 'POST', body: JSON.stringify({ vendedorId, items }) }),
   eliminarProspecto: (id: string) => req<void>(`/prospectos/${id}`, { method: 'DELETE' }),
 
-  denueStatus: () => req<{ configured: boolean }>('/denue/status'),
+  denueStatus: () => req<{ configured: boolean; googleMapsConfigured: boolean }>('/denue/status'),
   consultarDenue: (data: {
     giros: string[]; cantidad: number;
     ciudad?: string; colonia?: string;

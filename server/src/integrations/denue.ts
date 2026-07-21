@@ -5,22 +5,16 @@
  * No mock data: every business name, address and coordinate returned here comes
  * straight from INEGI's response. Requires DENUE_TOKEN in the environment.
  *
- * Dos formas de acotar la búsqueda (mismo endpoint, cambia el segundo segmento):
- *   - Por zona:    /Buscar/{condicion}/{entidad}/{token}         (estado, sin radio real)
- *   - Por GPS:     /Buscar/{condicion}/{lat},{lng}/{radio}/{token} (radio real en metros)
+ * Búsqueda siempre por GPS+radio real: /Buscar/{condicion}/{lat},{lng}/{radio}/{token}.
+ * El DENUE también tiene un modo "por entidad federativa" (código de estado, sin
+ * radio real), pero eso obligaba a mantener a mano una tabla ciudad->entidad que
+ * solo cubría un puñado de municipios de la ZMG y truena en cualquier otro lugar
+ * del país. Como ahora hay vendedores en todo México (import de aviva-hr), el
+ * llamador (server/src/routes/denue.ts) geocodifica "ciudad/colonia/C.P." con
+ * Google Maps antes de llegar aquí, así que este módulo solo necesita el modo GPS.
  */
 
 const DENUE_BASE = 'https://www.inegi.org.mx/app/api/denue/v1/consulta';
-
-// Jalisco is the only state used by the seeded vendor cities today; extend as
-// new cities/states are onboarded. Entidad 0 = búsqueda nacional (fallback).
-const ENTIDAD_POR_CIUDAD: Record<string, string> = {
-  guadalajara: '14',
-  zapopan: '14',
-  tlaquepaque: '14',
-  tonala: '14',
-  tlajomulco: '14',
-};
 
 // DENUE's "Buscar" endpoint matches free text against business name / activity
 // description, so we translate our internal giro labels into search keywords.
@@ -32,16 +26,6 @@ const KEYWORD_POR_GIRO: Record<string, string> = {
   'Talleres mecánicos': 'taller mecanico',
   'Estéticas y belleza': 'estetica',
   'Farmacias': 'farmacia',
-};
-
-// Approximate reference point per city, usado solo para ordenar por cercanía
-// cuando se busca "por zona" (INEGI no acepta un centro lat/lng en ese modo).
-const CENTRO_POR_CIUDAD: Record<string, { lat: number; lng: number }> = {
-  guadalajara: { lat: 20.6597, lng: -103.3496 },
-  zapopan: { lat: 20.7214, lng: -103.3913 },
-  tlaquepaque: { lat: 20.6402, lng: -103.312 },
-  tonala: { lat: 20.6231, lng: -103.2346 },
-  tlajomulco: { lat: 20.4737, lng: -103.4425 },
 };
 
 export interface DenueRawResult {
@@ -201,14 +185,7 @@ function esComidaNoDeseada(nombre: string, claseActividad: string, giro: string)
   return containsWord(texto, PALABRAS_COMIDA);
 }
 
-export interface UbicacionZona {
-  modo: 'zona';
-  ciudad: string;
-  colonia?: string;
-}
-
 export interface UbicacionGps {
-  modo: 'gps';
   lat: number;
   lng: number;
   radioMetros?: number;
@@ -217,7 +194,7 @@ export interface UbicacionGps {
 export async function consultarDenue(opts: {
   giros: string[];
   cantidad: number;
-  ubicacion: UbicacionZona | UbicacionGps;
+  ubicacion: UbicacionGps;
 }): Promise<DenueProspecto[]> {
   const token = process.env.DENUE_TOKEN;
   if (!token) {
@@ -227,35 +204,23 @@ export async function consultarDenue(opts: {
   const giros = opts.giros.length ? opts.giros : ['Comercio de abarrotes'];
   const cantidad = Math.max(1, Math.min(60, opts.cantidad || 10));
   const ubicacion = opts.ubicacion;
-
-  const centro = ubicacion.modo === 'gps'
-    ? { lat: ubicacion.lat, lng: ubicacion.lng }
-    : CENTRO_POR_CIUDAD[normalize(ubicacion.ciudad)];
-  const coloniaFilter = ubicacion.modo === 'zona' && ubicacion.colonia ? normalize(ubicacion.colonia) : null;
-  const coloniaOriginal = ubicacion.modo === 'zona' ? ubicacion.colonia : undefined;
+  const centro = { lat: ubicacion.lat, lng: ubicacion.lng };
 
   const seen = new Set<string>();
   const merged: DenueProspecto[] = [];
 
   for (const giro of giros) {
     const keyword = KEYWORD_POR_GIRO[giro] || normalize(giro);
-    const alcance = ubicacion.modo === 'gps'
-      ? `${ubicacion.lat},${ubicacion.lng}/${ubicacion.radioMetros || 1500}`
-      : ENTIDAD_POR_CIUDAD[normalize(ubicacion.ciudad)] || '0';
+    const alcance = `${ubicacion.lat},${ubicacion.lng}/${ubicacion.radioMetros || 1500}`;
 
     const raw = await buscarDenue(keyword, alcance, token);
 
     for (const r of raw) {
       if (seen.has(r.Id)) continue;
-      if (coloniaFilter) {
-        const col = normalize(r.Colonia || '');
-        const cp = (r.CP || '').trim();
-        if (!col.includes(coloniaFilter) && cp !== coloniaOriginal?.trim()) continue;
-      }
 
       const nombre = r.Nombre || r.Razon_social || 'Negocio sin nombre';
       const calle = [r.Tipo_vialidad, r.Calle, r.Num_Exterior].filter(Boolean).join(' ');
-      const direccion = [calle, r.Colonia, r.Municipio || (ubicacion.modo === 'zona' ? ubicacion.ciudad : '')].filter(Boolean).join(', ') || nombre;
+      const direccion = [calle, r.Colonia, r.Municipio].filter(Boolean).join(', ') || nombre;
       const claseActividad = r.Clase_actividad || '';
 
       if (esGiroExcluido(nombre, direccion, claseActividad)) continue;
@@ -266,13 +231,13 @@ export async function consultarDenue(opts: {
 
       const lat = r.Latitud ? parseFloat(r.Latitud) : undefined;
       const lng = r.Longitud ? parseFloat(r.Longitud) : undefined;
-      const distanciaKm = centro && lat != null && lng != null && !Number.isNaN(lat) && !Number.isNaN(lng)
+      const distanciaKm = lat != null && lng != null && !Number.isNaN(lat) && !Number.isNaN(lng)
         ? Math.round(haversineKm(centro, { lat, lng }) * 10) / 10
         : undefined;
 
       merged.push({
         nombre,
-        direccion: direccion || (ubicacion.modo === 'zona' ? ubicacion.ciudad : 'Ubicación actual'),
+        direccion: direccion || 'Ubicación actual',
         giro,
         telefono: r.Telefono || undefined,
         lat, lng, distanciaKm,
