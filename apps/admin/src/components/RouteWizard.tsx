@@ -121,6 +121,10 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     } catch (err: any) {
       if (err.code === 'DENUE_NOT_CONFIGURED') {
         setWError('El DENUE no está configurado en el servidor todavía. Define DENUE_TOKEN en las variables de entorno para consultar el API real de INEGI.');
+      } else if (err.code === 'GOOGLE_MAPS_NOT_CONFIGURED') {
+        setWError('Búsqueda por municipio/colonia/C.P. requiere GOOGLE_MAPS_API_KEY en el servidor. Mientras tanto, usa la pestaña "Por ubicación (GPS)".');
+      } else if (err.code === 'UBICACION_NO_ENCONTRADA') {
+        setWError(err.message || 'No se encontró esa ubicación.');
       } else {
         setWError(err.message || 'No se pudo consultar el DENUE');
       }
