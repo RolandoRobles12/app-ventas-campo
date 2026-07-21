@@ -22,12 +22,8 @@ export function Rutas() {
     setSyncing(true);
     try {
       const res = await api.avivaHrImportar();
-      const sinPosicion = res.omitidos.filter((o) => o.motivo.startsWith('posición sin mapear')).length;
-      const sinCatalogo = res.omitidos.length - sinPosicion;
-      const partes = [`${res.creados} nuevos`, `${res.actualizados} actualizados`];
-      if (sinPosicion) partes.push(`${sinPosicion} sin posición reconocida`);
-      if (sinCatalogo) partes.push(`${sinCatalogo} sin producto en el catálogo (revisa que existan "Aviva Tu Negocio" / "Aviva Casa Marchand" / "Aviva Construrama" en Productos)`);
-      showToast(`Sincronización completada · ${partes.join(' · ')}`);
+      const omitidosMsg = res.omitidos.length ? ` · ${res.omitidos.length} sin posición reconocida` : '';
+      showToast(`Sincronización completada · ${res.creados} nuevos, ${res.actualizados} actualizados${omitidosMsg}`);
       reload();
     } catch (err: any) {
       showToast(err.code === 'AVIVA_HR_NOT_CONFIGURED' ? 'Configura AVIVA_HR_PROJECT_ID en el servidor para importar desde aviva-hr.' : (err.message || 'Error al sincronizar'));

@@ -47,18 +47,34 @@ export function initialsFor(fullName: string): string {
   return ((parts[0]?.[0] || '') + (parts[1]?.[0] || parts[0]?.[1] || '')).toUpperCase();
 }
 
-// Mapea el `role` (posición) de aviva-hr al `producto` de campo de esta app.
+export interface ProductoDeCampo {
+  nombre: string;
+  giros: string[];
+}
+
+// Mismos giros que usa server/src/seed.ts para "Aviva Tu Negocio" — la
+// posición de aviva-hr no distingue giro, así que un promotor de ese
+// producto queda habilitado para todos.
+const GIROS_ATN = [
+  'Comercio de abarrotes', 'Ferretería y tlapalería', 'Papelerías', 'Restaurantes y alimentos',
+  'Talleres mecánicos', 'Estéticas y belleza', 'Farmacias',
+];
+
+// Mapea el `role` (posición) de aviva-hr al producto de campo de esta app.
 // Confirmado contra documentos reales de la colección `users`:
 //   "Promotor Aviva Tu Negocio"         -> Aviva Tu Negocio
 //   "Promotor Aviva Tu Casa"            -> Aviva Construrama
 //   "Marchand - Promotor Casa Marchand" -> Aviva Casa Marchand
-const ROLE_TO_PRODUCTO: { test: RegExp; producto: string }[] = [
-  { test: /marchand/i, producto: 'Aviva Casa Marchand' },
-  { test: /aviva tu casa/i, producto: 'Aviva Construrama' },
-  { test: /aviva tu negocio/i, producto: 'Aviva Tu Negocio' },
+// El producto y sus giros por defecto (mismos que server/src/seed.ts) se
+// auto-provisionan en `productos` si aún no existen — la posición de HR ya
+// es información suficiente, no hace falta configurar el catálogo a mano.
+const ROLE_TO_PRODUCTO: { test: RegExp; producto: ProductoDeCampo }[] = [
+  { test: /marchand/i, producto: { nombre: 'Aviva Casa Marchand', giros: ['Papelerías'] } },
+  { test: /aviva tu casa/i, producto: { nombre: 'Aviva Construrama', giros: [] } },
+  { test: /aviva tu negocio/i, producto: { nombre: 'Aviva Tu Negocio', giros: GIROS_ATN } },
 ];
 
-export function productoParaRole(role: string): string | null {
+export function productoParaRole(role: string): ProductoDeCampo | null {
   return ROLE_TO_PRODUCTO.find((r) => r.test.test(role))?.producto ?? null;
 }
 
