@@ -202,7 +202,7 @@ export async function consultarDenue(opts: {
   }
 
   const giros = opts.giros.length ? opts.giros : ['Comercio de abarrotes'];
-  const cantidad = Math.max(1, Math.min(60, opts.cantidad || 10));
+  const cantidad = Math.max(1, Math.min(200, opts.cantidad || 10));
   const ubicacion = opts.ubicacion;
   const centro = { lat: ubicacion.lat, lng: ubicacion.lng };
 
