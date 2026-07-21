@@ -4,6 +4,8 @@ import { useFilters } from '../filters';
 import { FilterBar, PageHeader } from '../components/FilterBar';
 import { GeoMap } from '../components/GeoMap';
 
+const VENDEDORES_POR_PAGINA = 8;
+
 export function Reportes() {
   const { fProducto, fVendedor } = useFilters();
   const [summary, setSummary] = useState<ReportesSummary | null>(null);
@@ -11,14 +13,18 @@ export function Reportes() {
   const [resultados, setResultados] = useState<ResultadosDonut | null>(null);
   const [evidencias, setEvidencias] = useState<Evidencia[]>([]);
   const [calor, setCalor] = useState<MapaCalorResponse | null>(null);
+  const [pagina, setPagina] = useState(0);
 
   useEffect(() => {
     api.reportesSummary(fProducto, fVendedor).then(setSummary).catch(() => {});
-    api.reportesVendedores(fProducto, fVendedor).then(setVendedores).catch(() => {});
+    api.reportesVendedores(fProducto, fVendedor).then((v) => { setVendedores(v); setPagina(0); }).catch(() => {});
     api.dashboardResultados(fProducto, fVendedor).then(setResultados).catch(() => {});
     api.reportesEvidencias(fProducto, fVendedor).then(setEvidencias).catch(() => {});
     api.mapaCalor(fProducto, fVendedor).then(setCalor).catch(() => {});
   }, [fProducto, fVendedor]);
+
+  const totalPaginas = Math.max(1, Math.ceil(vendedores.length / VENDEDORES_POR_PAGINA));
+  const vendedoresPagina = vendedores.slice(pagina * VENDEDORES_POR_PAGINA, (pagina + 1) * VENDEDORES_POR_PAGINA);
 
   return (
     <div className="screen">
@@ -46,7 +52,7 @@ export function Reportes() {
         <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, padding: '20px 22px' }}>
           <div style={{ fontSize: 15, fontWeight: 500, color: '#263238', marginBottom: 18 }}>Visitas por vendedor</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
-            {vendedores.map((r) => (
+            {vendedoresPagina.map((r) => (
               <div key={r.id}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
                   <span style={{ fontWeight: 500, color: '#3a4a41' }}>{r.nombre}</span>
@@ -59,9 +65,18 @@ export function Reportes() {
               </div>
             ))}
           </div>
-          <div style={{ display: 'flex', gap: 16, marginTop: 16, fontSize: 12, color: '#8a978f' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: '#22a36c' }} />Solicitudes</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: '#bfe6cf' }} />Otras visitas</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 18 }}>
+            <div style={{ display: 'flex', gap: 16, fontSize: 12, color: '#8a978f' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: '#22a36c' }} />Solicitudes</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: '#bfe6cf' }} />Otras visitas</span>
+            </div>
+            {vendedores.length > VENDEDORES_POR_PAGINA && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: '#6f7d75' }}>
+                <button onClick={() => setPagina((p) => Math.max(0, p - 1))} disabled={pagina === 0} style={pageBtn(pagina === 0)}>‹</button>
+                <span>{pagina + 1} de {totalPaginas}</span>
+                <button onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))} disabled={pagina >= totalPaginas - 1} style={pageBtn(pagina >= totalPaginas - 1)}>›</button>
+              </div>
+            )}
           </div>
         </div>
         <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, padding: '20px 22px' }}>
@@ -76,15 +91,15 @@ export function Reportes() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.1fr', gap: 16, marginTop: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 16, marginTop: 16 }}>
         <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, padding: '20px 22px' }}>
           <div style={{ fontSize: 15, fontWeight: 500, color: '#263238', marginBottom: 6 }}>Cobertura por zona</div>
           <div style={{ fontSize: 12.5, color: '#8a978f', marginBottom: 14 }}>
             Mapa de calor de visitas
             {calor && calor.visitasConUbicacion > 0 && ` · ${calor.visitasConUbicacion.toLocaleString('es-MX')} visitas con ubicación`}
           </div>
-          <div style={{ position: 'relative', height: 250, borderRadius: 10, overflow: 'hidden', background: '#e7ece4' }}>
-            <GeoMap heatPoints={calor?.puntos ?? []} height={250} />
+          <div style={{ position: 'relative', height: 480, borderRadius: 10, overflow: 'hidden', background: '#e7ece4' }}>
+            <GeoMap heatPoints={calor?.puntos ?? []} height={480} />
             {calor && calor.puntos.length === 0 && (
               <div style={{ position: 'absolute', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.72)', color: '#5a665f', fontSize: 12.5, fontWeight: 600, textAlign: 'center', padding: '0 30px' }}>
                 Aún no hay visitas con ubicación GPS. El mapa se llena conforme los vendedores registran visitas desde la app.
@@ -135,3 +150,10 @@ const btnPrimary: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 8, background: '#157347', color: '#fff', border: 'none',
   borderRadius: 6, padding: '10px 16px', fontSize: 13, fontWeight: 600, letterSpacing: '.4px',
 };
+
+function pageBtn(disabled: boolean): React.CSSProperties {
+  return {
+    width: 24, height: 24, border: '1px solid #e0e8e2', background: disabled ? '#f2f5f2' : '#fff',
+    borderRadius: 6, color: disabled ? '#c3ccc5' : '#3a4a41', cursor: disabled ? 'default' : 'pointer', fontSize: 14, lineHeight: 1,
+  };
+}
