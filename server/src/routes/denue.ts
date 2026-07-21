@@ -27,13 +27,18 @@ denueRouter.post('/consulta', async (req, res) => {
   } else if (ciudad || colonia) {
     try {
       // Cualquier combinación sirve: solo C.P., solo colonia, solo ciudad, o
-      // varias — Google resuelve lo que le des. "México" al final evita que
-      // ambigüe con lugares homónimos en otros países.
-      const texto = [colonia, ciudad, 'México'].filter(Boolean).join(', ');
+      // varias — Google resuelve lo que le des. No agregamos "México" como
+      // texto: geocodificar() ya restringe con components=country:MX, y
+      // "México" es AMBIGUO en geografía mexicana (es tanto el país como el
+      // nombre del Estado de México, distinto de Ciudad de México) — como
+      // texto libre puede hacer que Google resuelva un C.P. de CDMX dentro
+      // del Estado de México y devuelva un punto sin relación real.
+      const texto = [colonia, ciudad].filter(Boolean).join(', ');
       const geo = await geocodificar(texto);
       if (!geo) {
         return res.status(404).json({ error: 'UBICACION_NO_ENCONTRADA', message: `No se encontró "${texto}". Intenta ser más específico (ej. agrega el estado).` });
       }
+      console.log(`DENUE: "${texto}" -> ${geo.direccionFormateada} (${geo.lat}, ${geo.lng})`);
       // Sin C.P./colonia (radio amplio para cubrir el municipio completo) vs.
       // con un punto más preciso (colonia aledaña al kiosco, radio más cerrado).
       ubicacion = { lat: geo.lat, lng: geo.lng, radioMetros: radioMetros ?? (colonia ? 2500 : 6000) };
@@ -49,6 +54,7 @@ denueRouter.post('/consulta', async (req, res) => {
 
   try {
     const resultados = await consultarDenue({ giros: giros || [], cantidad: cantidad || 10, ubicacion });
+    console.log(`DENUE: ${resultados.length} resultados en radio ${ubicacion.radioMetros || 1500}m alrededor de (${ubicacion.lat}, ${ubicacion.lng}), giros=${(giros || []).join('|')}`);
     res.json({ resultados });
   } catch (err: any) {
     res.status(502).json({ error: 'DENUE_REQUEST_FAILED', message: err?.message || 'Error consultando el DENUE' });
