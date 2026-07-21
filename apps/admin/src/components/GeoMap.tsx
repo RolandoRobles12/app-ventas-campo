@@ -1,79 +1,133 @@
-import { useEffect, useRef } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import 'leaflet.heat';
+import { useEffect, useRef, useState } from 'react';
 
 export interface HeatPoint { lat: number; lng: number; peso: number }
 export interface MapPin { id: string; lat: number; lng: number; color: string; title: string; subtitle?: string }
 
 // Centro de la zona metropolitana de Guadalajara mientras no hay puntos que encuadrar.
-const DEFAULT_CENTER: L.LatLngExpression = [20.6597, -103.3496];
+const DEFAULT_CENTER = { lat: 20.6597, lng: -103.3496 };
 
-// Rampa secuencial YlOrRd (ColorBrewer): perceptualmente ordenada y segura para daltonismo.
-const HEAT_GRADIENT: Record<number, string> = {
-  0.2: '#ffffb2', 0.45: '#fecc5c', 0.65: '#fd8d3c', 0.85: '#f03b20', 1: '#bd0026',
-};
+// Misma rampa secuencial YlOrRd (ColorBrewer) que se usaba con Leaflet.heat,
+// pero como arreglo ordenado: así es como Google Maps espera un `gradient`.
+const HEAT_GRADIENT = [
+  'rgba(255,255,178,0)', '#ffffb2', '#fecc5c', '#fd8d3c', '#f03b20', '#bd0026',
+];
 
-function pinIcon(color: string): L.DivIcon {
-  return L.divIcon({
-    className: '',
-    html: `<svg width="28" height="28" viewBox="0 0 24 24" fill="${color}" stroke="#fff" stroke-width="1.6" style="filter:drop-shadow(0 3px 4px rgba(0,0,0,.3))"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3" fill="#fff" stroke="none"/></svg>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 28],
+const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
+
+// @types/google.maps ya no modela la Visualization Library heredada (Google
+// la da por legacy en favor de overlays más nuevos), pero la API real en
+// runtime sigue funcionando igual — se declara aquí el pedazo que usamos en
+// vez de confiar en el stub casi vacío que trae el paquete de tipos.
+interface HeatmapLayerLike {
+  setMap(map: google.maps.Map | null): void;
+}
+type HeatmapLayerCtor = new (opts: {
+  data: { location: google.maps.LatLng; weight: number }[];
+  radius?: number;
+  opacity?: number;
+  gradient?: string[];
+}) => HeatmapLayerLike;
+
+let loaderPromise: Promise<typeof google> | null = null;
+
+// Carga el script de la API de Google Maps una sola vez (aunque haya varios
+// <GeoMap> montados a la vez): todos comparten la misma promesa.
+function loadGoogleMaps(): Promise<typeof google> {
+  if (loaderPromise) return loaderPromise;
+  loaderPromise = new Promise((resolve, reject) => {
+    if (window.google?.maps) return resolve(window.google);
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&libraries=visualization&v=weekly`;
+    script.async = true;
+    script.onload = () => resolve(window.google);
+    script.onerror = () => reject(new Error('No se pudo cargar Google Maps'));
+    document.head.appendChild(script);
   });
+  return loaderPromise;
+}
+
+function pinIconUrl(color: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="${color}" stroke="#fff" stroke-width="1.6"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3" fill="#fff" stroke="none"/></svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
 
 export function GeoMap({ heatPoints, pins, height }: { heatPoints?: HeatPoint[]; pins?: MapPin[]; height: number | string }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const heatRef = useRef<L.HeatLayer | null>(null);
-  const pinsRef = useRef<L.LayerGroup | null>(null);
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const heatRef = useRef<HeatmapLayerLike | null>(null);
+  const markersRef = useRef<google.maps.Marker[]>([]);
+  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+  const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-    const map = L.map(containerRef.current, { center: DEFAULT_CENTER, zoom: 12, scrollWheelZoom: false });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    }).addTo(map);
-    mapRef.current = map;
-    return () => { map.remove(); mapRef.current = null; heatRef.current = null; pinsRef.current = null; };
+    if (!API_KEY) { setError('Falta VITE_GOOGLE_MAPS_API_KEY'); return; }
+    let cancelled = false;
+    loadGoogleMaps()
+      .then((g) => {
+        if (cancelled || !containerRef.current || mapRef.current) return;
+        mapRef.current = new g.maps.Map(containerRef.current, {
+          center: DEFAULT_CENTER, zoom: 12, streetViewControl: false, mapTypeControl: false,
+        });
+        infoWindowRef.current = new g.maps.InfoWindow();
+        setReady(true);
+      })
+      .catch((err) => !cancelled && setError(err.message));
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    if (heatRef.current) { map.removeLayer(heatRef.current); heatRef.current = null; }
+    if (!map || !ready) return;
+    if (heatRef.current) { heatRef.current.setMap(null); heatRef.current = null; }
     if (!heatPoints?.length) return;
     const maxPeso = Math.max(...heatPoints.map((p) => p.peso));
-    heatRef.current = L.heatLayer(
-      heatPoints.map((p) => [p.lat, p.lng, p.peso / maxPeso]),
-      { radius: 32, blur: 22, minOpacity: 0.35, gradient: HEAT_GRADIENT },
-    ).addTo(map);
-  }, [heatPoints]);
+    const HeatmapLayer = google.maps.visualization.HeatmapLayer as unknown as HeatmapLayerCtor;
+    heatRef.current = new HeatmapLayer({
+      data: heatPoints.map((p) => ({
+        location: new google.maps.LatLng(p.lat, p.lng),
+        weight: maxPeso > 0 ? p.peso / maxPeso : 0,
+      })),
+      radius: 32, opacity: 0.75, gradient: HEAT_GRADIENT,
+    });
+    heatRef.current.setMap(map);
+  }, [heatPoints, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    if (pinsRef.current) { map.removeLayer(pinsRef.current); pinsRef.current = null; }
-    if (!pins?.length) return;
-    const group = L.layerGroup(pins.map((p) =>
-      L.marker([p.lat, p.lng], { icon: pinIcon(p.color) })
-        .bindTooltip(`<b>${escapeHtml(p.title)}</b>${p.subtitle ? `<br>${escapeHtml(p.subtitle)}` : ''}`, { direction: 'top', offset: [0, -26] }),
-    ));
-    group.addTo(map);
-    pinsRef.current = group;
-  }, [pins]);
+    if (!map || !ready) return;
+    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current = (pins || []).map((p) => {
+      const marker = new google.maps.Marker({
+        position: { lat: p.lat, lng: p.lng },
+        map,
+        icon: { url: pinIconUrl(p.color), scaledSize: new google.maps.Size(28, 28), anchor: new google.maps.Point(14, 28) },
+      });
+      const html = `<b>${escapeHtml(p.title)}</b>${p.subtitle ? `<br>${escapeHtml(p.subtitle)}` : ''}`;
+      marker.addListener('mouseover', () => { infoWindowRef.current?.setContent(html); infoWindowRef.current?.open(map, marker); });
+      marker.addListener('mouseout', () => infoWindowRef.current?.close());
+      return marker;
+    });
+  }, [pins, ready]);
 
   // Encuadra todos los puntos cada vez que cambian los datos.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    const coords: [number, number][] = [...(heatPoints ?? []), ...(pins ?? [])].map((p) => [p.lat, p.lng]);
+    if (!map || !ready) return;
+    const coords = [...(heatPoints ?? []), ...(pins ?? [])];
     if (!coords.length) return;
-    map.fitBounds(L.latLngBounds(coords).pad(0.2), { maxZoom: 15 });
-  }, [heatPoints, pins]);
+    const bounds = new google.maps.LatLngBounds();
+    coords.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
+    map.fitBounds(bounds, 40);
+  }, [heatPoints, pins, ready]);
 
+  if (error) {
+    return (
+      <div style={{ height, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f2f5f2', borderRadius: 10, color: '#8a978f', fontSize: 13, textAlign: 'center', padding: 16 }}>
+        No se pudo cargar Google Maps: {error}
+      </div>
+    );
+  }
   return <div ref={containerRef} style={{ height, width: '100%' }} />;
 }
 
