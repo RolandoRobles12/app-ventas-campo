@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
-import { fetchAvivaHrUsers, isAvivaHrConfigured, productoParaRole, colorForKey, initialsFor } from '../integrations/avivaHr.js';
+import { fetchAvivaHrUsers, isAvivaHrConfigured, productoParaRole, colorForKey, initialsFor, type ProductoDeCampo } from '../integrations/avivaHr.js';
+import { slugify } from '../firestore-helpers.js';
 
 export const vendedoresRouter = Router();
 
@@ -18,9 +19,14 @@ export interface VendedorDoc {
   avivaHrId?: string | null;
 }
 
-async function productoIdPorNombre(nombre: string): Promise<string | null> {
-  const snap = await db.collection('productos').where('nombre', '==', nombre).limit(1).get();
-  return snap.empty ? null : snap.docs[0].id;
+// Igual que server/src/seed.ts: el id de producto es el slug de su nombre.
+// No requiere que el catálogo exista de antemano ni un front para
+// administrarlo — la posición de aviva-hr ya trae suficiente información
+// (nombre + giros por defecto) para crearlo la primera vez que se necesita.
+async function ensureProductoId(producto: ProductoDeCampo): Promise<string> {
+  const id = slugify(producto.nombre);
+  await db.collection('productos').doc(id).set({ nombre: producto.nombre, esDeCampo: true, giros: producto.giros }, { merge: true });
+  return id;
 }
 
 export async function productosPorId(ids: string[]): Promise<Map<string, string>> {
@@ -94,7 +100,7 @@ vendedoresRouter.get('/externos', async (_req, res) => {
       nombre: u.fullName,
       email: u.email,
       role: u.role,
-      producto: productoParaRole(u.role),
+      producto: productoParaRole(u.role)?.nombre ?? null,
       importado: emailsImportados.has(u.email),
     }));
     res.json({ configured: true, candidatos });
@@ -105,9 +111,11 @@ vendedoresRouter.get('/externos', async (_req, res) => {
 
 // Importa/actualiza vendedores desde aviva-hr hacia la colección `vendedores`.
 // Empareja por email: si ya existe, actualiza nombre/estado/producto pero deja
-// intactos ciudad/colonia/giros/drawZone (eso lo sigue configurando el admin
-// a mano con "Configurar ruta"). Si la posición (role) no mapea a un producto
-// de campo conocido, se omite en vez de crear un vendedor sin ruta asignable.
+// intactos ciudad/colonia/drawZone (eso lo sigue configurando el admin a mano
+// con "Configurar ruta"). El producto (con sus giros por defecto) se
+// auto-provisiona si aún no existe en `productos` — no requiere seed previo.
+// Si la posición (role) no mapea a ningún producto de campo conocido, se
+// omite en vez de crear un vendedor sin ruta asignable.
 vendedoresRouter.post('/importar', async (_req, res) => {
   if (!isAvivaHrConfigured()) {
     return res.status(501).json({ error: 'AVIVA_HR_NOT_CONFIGURED', message: 'Configura AVIVA_HR_PROJECT_ID en el servidor para importar desde aviva-hr.' });
@@ -124,16 +132,12 @@ vendedoresRouter.post('/importar', async (_req, res) => {
     const omitidos: { email: string; nombre: string; motivo: string }[] = [];
 
     for (const u of externos) {
-      const productoNombre = productoParaRole(u.role);
-      if (!productoNombre) {
+      const producto = productoParaRole(u.role);
+      if (!producto) {
         omitidos.push({ email: u.email, nombre: u.fullName, motivo: `posición sin mapear: "${u.role}"` });
         continue;
       }
-      const productoId = await productoIdPorNombre(productoNombre);
-      if (!productoId) {
-        omitidos.push({ email: u.email, nombre: u.fullName, motivo: `producto "${productoNombre}" no existe en el catálogo` });
-        continue;
-      }
+      const productoId = await ensureProductoId(producto);
 
       const estado = u.status === 'active' ? 'Activo' : 'Pausado';
       const existingId = porEmail.get(u.email);
@@ -153,7 +157,7 @@ vendedoresRouter.post('/importar', async (_req, res) => {
           colonia: null,
           drawZone: false,
           productoId,
-          giros: [],
+          giros: producto.giros,
           avivaHrId: u.id,
           createdAt: Timestamp.now(),
         });

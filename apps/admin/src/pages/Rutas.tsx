@@ -22,7 +22,7 @@ export function Rutas() {
     setSyncing(true);
     try {
       const res = await api.avivaHrImportar();
-      const omitidosMsg = res.omitidos.length ? ` · ${res.omitidos.length} omitidos (posición sin mapear)` : '';
+      const omitidosMsg = res.omitidos.length ? ` · ${res.omitidos.length} sin posición reconocida` : '';
       showToast(`Sincronización completada · ${res.creados} nuevos, ${res.actualizados} actualizados${omitidosMsg}`);
       reload();
     } catch (err: any) {
