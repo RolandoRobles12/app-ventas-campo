@@ -1,13 +1,36 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { api } from '../api';
 import { useFilters } from '../filters';
+import { useToast } from '../toast';
 import { FilterBar, PageHeader } from '../components/FilterBar';
 import { RouteWizard } from '../components/RouteWizard';
 import { prodBadgeStyle, estadoBadgeStyle } from '../badges';
 
 export function Rutas() {
   const { vendedoresFiltrados, reload } = useFilters();
+  const { showToast } = useToast();
   const [search, setSearch] = useState('');
   const [wizardVendorId, setWizardVendorId] = useState<string | null>(null);
+  const [avivaHrConfigured, setAvivaHrConfigured] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  useEffect(() => {
+    api.avivaHrStatus().then((r) => setAvivaHrConfigured(r.configured)).catch(() => {});
+  }, []);
+
+  const sync = async () => {
+    setSyncing(true);
+    try {
+      const res = await api.avivaHrImportar();
+      const omitidosMsg = res.omitidos.length ? ` · ${res.omitidos.length} omitidos (posición sin mapear)` : '';
+      showToast(`Sincronización completada · ${res.creados} nuevos, ${res.actualizados} actualizados${omitidosMsg}`);
+      reload();
+    } catch (err: any) {
+      showToast(err.code === 'AVIVA_HR_NOT_CONFIGURED' ? 'Configura AVIVA_HR_PROJECT_ID en el servidor para importar desde aviva-hr.' : (err.message || 'Error al sincronizar'));
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const visibles = vendedoresFiltrados.filter((v) => v.nombre.toLowerCase().includes(search.toLowerCase()));
 
@@ -18,6 +41,33 @@ export function Rutas() {
         title="Rutas por vendedor" subtitle="Asigna a cada vendedor su ciudad y giros; el DENUE arma su lista de prospectos a visitar"
       />
       <FilterBar />
+
+      <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#263238' }}>aviva-hr · Directorio de empleados</div>
+          <div style={{ fontSize: 12.5, color: '#8a978f' }}>Importa vendedores reales por posición (Aviva Tu Negocio, Aviva Tu Casa, Casa Marchand)</div>
+        </div>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, borderRadius: 20, padding: '6px 14px',
+          background: avivaHrConfigured ? '#e9f7ef' : '#fdecdb', border: `1px solid ${avivaHrConfigured ? '#bfe6cf' : '#ffd9c2'}`,
+        }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: avivaHrConfigured ? '#22a36c' : '#e07a26' }} />
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: avivaHrConfigured ? '#0f5132' : '#c96a1e' }}>{avivaHrConfigured ? 'Conectado' : 'No configurado'}</span>
+        </div>
+        <button
+          onClick={sync}
+          disabled={syncing || !avivaHrConfigured}
+          style={{ background: '#f2f5f2', color: '#3a4a41', border: 'none', borderRadius: 8, padding: '10px 15px', fontSize: 13.5, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8, opacity: (syncing || !avivaHrConfigured) ? 0.6 : 1 }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3a4a41" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
+          {syncing ? 'Sincronizando…' : 'Sincronizar desde aviva-hr'}
+        </button>
+      </div>
+      {!avivaHrConfigured && (
+        <div style={{ background: '#fff3ec', border: '1px solid #ffd9c2', color: '#c96a1e', borderRadius: 8, padding: '10px 14px', fontSize: 12.5, marginBottom: 16 }}>
+          Configura <b>AVIVA_HR_PROJECT_ID</b> en el servidor para importar vendedores reales desde aviva-hr.
+        </div>
+      )}
 
       <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px 14px' }}>
