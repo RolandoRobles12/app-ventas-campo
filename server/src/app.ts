@@ -1,4 +1,11 @@
 import express from 'express';
+// Debe importarse antes de crear cualquier Router: parchea Express para que
+// un handler async que rechaza (p.ej. una query de Firestore sin índice)
+// llegue al middleware de errores de abajo en vez de quedar como una
+// promesa sin capturar que tumba TODO el proceso (Node la trata como
+// excepción fatal) — antes de esto, un solo request con error apagaba el
+// servidor completo para todos los usuarios, no solo devolvía un 500.
+import 'express-async-errors';
 import cors from 'cors';
 import path from 'node:path';
 
