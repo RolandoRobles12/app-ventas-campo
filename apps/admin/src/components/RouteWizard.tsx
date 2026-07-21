@@ -105,6 +105,20 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
       setWError('Usa tu ubicación actual o escribe latitud/longitud antes de generar la ruta.');
       return;
     }
+
+    // Si ya hay resultados de una búsqueda anterior (no manuales), hay que
+    // preguntar: si se sobrescribe, los que ya estaban guardados en Firestore
+    // (tienen id) hay que borrarlos explícitamente — si no, quedan huérfanos:
+    // desaparecen de este wizard pero le siguen llegando al vendedor.
+    const previos = wResults.filter((r) => !r.manual);
+    const agregar = previos.length > 0
+      ? window.confirm(
+        `Ya hay ${previos.length} prospecto(s) de una búsqueda anterior en la lista.\n\n` +
+        'Aceptar = agregar los nuevos resultados a los que ya están.\n' +
+        'Cancelar = sobrescribir (se eliminarán esos prospectos y quedarán solo los nuevos).',
+      )
+      : true;
+
     setWLoading(true);
     setWError('');
     try {
@@ -112,12 +126,21 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
         ? { giros: wGiros, cantidad: wCantidad, lat: wLat!, lng: wLng!, radioMetros: wRadio }
         : { giros: wGiros, cantidad: wCantidad, ciudad: wCiudad, colonia: wColonia };
       const { resultados } = await api.consultarDenue(params);
-      const manuales = wResults.filter((r) => r.manual);
       const nuevos: WizardItem[] = resultados.map((r: any) => ({
         nombre: r.nombre, direccion: r.direccion, giro: r.giro, distanciaKm: r.distanciaKm,
         lat: r.lat, lng: r.lng, telefono: r.telefono, manual: false,
       }));
-      setWResults([...nuevos, ...manuales]);
+
+      if (agregar) {
+        const existentes = new Set(wResults.map((r) => `${r.nombre}::${r.direccion}`));
+        const soloNuevos = nuevos.filter((n) => !existentes.has(`${n.nombre}::${n.direccion}`));
+        setWResults([...wResults, ...soloNuevos]);
+      } else {
+        const manuales = wResults.filter((r) => r.manual);
+        const aEliminar = previos.filter((r) => r.id);
+        await Promise.all(aEliminar.map((r) => api.eliminarProspecto(r.id!).catch(() => {})));
+        setWResults([...nuevos, ...manuales]);
+      }
     } catch (err: any) {
       if (err.code === 'DENUE_NOT_CONFIGURED') {
         setWError('El DENUE no está configurado en el servidor todavía. Define DENUE_TOKEN en las variables de entorno para consultar el API real de INEGI.');
@@ -290,7 +313,7 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
             right={!isEvidenceOnly && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <label style={{ fontSize: 12.5, color: '#3a4a41' }}>Prospectos a cargar</label>
-                <input type="number" min={1} max={60} value={wCantidad} onChange={(e) => setWCantidad(Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 10)))} style={{ width: 62, border: '1px solid #d9e1db', background: '#f8faf8', borderRadius: 7, padding: 8, fontSize: 13, color: '#263238', textAlign: 'center' }} />
+                <input type="number" min={1} max={200} value={wCantidad} onChange={(e) => setWCantidad(Math.max(1, Math.min(200, parseInt(e.target.value, 10) || 10)))} style={{ width: 62, border: '1px solid #d9e1db', background: '#f8faf8', borderRadius: 7, padding: 8, fontSize: 13, color: '#263238', textAlign: 'center' }} />
                 <button onClick={consultarDenue} disabled={wLoading} style={{ display: 'flex', alignItems: 'center', gap: 7, background: '#0f5132', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 14px', fontSize: 12.5, fontWeight: 600, opacity: wLoading ? 0.7 : 1 }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
                   Generar ruta
