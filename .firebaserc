@@ -1,9 +1,9 @@
 {
   "projects": {
-    "default": "REEMPLAZA-CON-TU-PROJECT-ID"
+    "default": "app-campo-aviva"
   },
   "targets": {
-    "REEMPLAZA-CON-TU-PROJECT-ID": {
+    "app-campo-aviva": {
       "hosting": {
         "seller": ["REEMPLAZA-CON-TU-SITE-ID-VENDEDOR"],
         "admin": ["REEMPLAZA-CON-TU-SITE-ID-ADMIN"]
