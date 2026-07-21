@@ -122,7 +122,24 @@ export function Reportes() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
               {evidencias.map((e) => (
                 <div key={e.id} style={{ border: '1px solid #eef2ee', borderRadius: 9, overflow: 'hidden' }}>
-                  <div style={{ height: 88, backgroundImage: `url(${e.fotoUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                  <div style={{ position: 'relative', height: 88, backgroundImage: `url(${e.fotoUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+                    {e.ubicacionValida !== null && (
+                      <span
+                        title={e.ubicacionValida ? `Ubicación válida · ${e.distanciaValidacionMetros}m del negocio` : `Ubicación inválida · ${e.distanciaValidacionMetros}m del negocio (máx. 50m)`}
+                        style={{
+                          position: 'absolute', top: 6, right: 6, width: 18, height: 18, borderRadius: '50%',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          background: e.ubicacionValida ? '#22a36c' : '#c0392b', boxShadow: '0 1px 3px rgba(0,0,0,.35)',
+                        }}
+                      >
+                        {e.ubicacionValida ? (
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7" /></svg>
+                        ) : (
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                        )}
+                      </span>
+                    )}
+                  </div>
                   <div style={{ padding: '8px 10px' }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#263238', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.nombre}</div>
                     <div style={{ fontSize: 10.5, color: '#8a978f', marginTop: 2 }}>{e.resultado}</div>

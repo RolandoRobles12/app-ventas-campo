@@ -33,7 +33,10 @@ export interface SeguimientoItem {
 }
 export interface ReportesSummary { visitasTotales: number; solicitudes: number; conversion: number; kmRecorridos: number; }
 export interface ReporteVendedor { id: string; nombre: string; total: number; solicitudes: number; km: number; w1: string; w2: string; }
-export interface Evidencia { id: string; nombre: string; resultado: string; fotoUrl: string; createdAt: string; }
+export interface Evidencia {
+  id: string; nombre: string; resultado: string; fotoUrl: string; createdAt: string;
+  ubicacionValida: boolean | null; distanciaValidacionMetros: number | null;
+}
 export interface CrmDeal {
   id: string; hubspotDealId: string | null; cliente: string; negocio: string; producto?: string;
   etapa: string; amount: number | null; dealOwner: string | null; dealOwnerId: string | null;
