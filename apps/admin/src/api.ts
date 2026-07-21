@@ -39,6 +39,10 @@ export interface CrmDeal {
   etapa: string; amount: number | null; dealOwner: string | null; dealOwnerId: string | null;
   serviceOwner: string | null; source: string; lastSyncedAt: string | null; hubspotUrl: string | null;
 }
+export interface AvivaHrImportResult {
+  ok: boolean; creados: number; actualizados: number; total: number;
+  omitidos: { email: string; nombre: string; motivo: string }[];
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await getIdToken();
@@ -65,6 +69,8 @@ export const api = {
   vendedores: (producto?: string) => req<Vendedor[]>(`/vendedores${qs({ producto })}`),
   actualizarRuta: (id: string, data: { productoId?: string; ciudad?: string; colonia?: string; giros?: string[]; drawZone?: boolean }) =>
     req<Vendedor>(`/vendedores/${id}/ruta`, { method: 'PUT', body: JSON.stringify(data) }),
+  avivaHrStatus: () => req<{ configured: boolean }>('/vendedores/externos/status'),
+  avivaHrImportar: () => req<AvivaHrImportResult>('/vendedores/importar', { method: 'POST' }),
 
   prospectos: (vendedorId: string) => req<Prospecto[]>(`/prospectos/vendedor/${vendedorId}`),
   bulkProspectos: (vendedorId: string, items: Partial<Prospecto>[]) =>
