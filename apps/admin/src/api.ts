@@ -7,6 +7,7 @@ export interface Vendedor {
   ciudad: string; colonia: string | null; drawZone: boolean; zonaPoligono: ZonaPunto[] | null;
   producto: string; productoId: string;
   giros: string[]; prospectosCount?: number;
+  metaSolicitudesDia: number; metaVentaMes: number;
 }
 export interface Prospecto {
   id: string; vendedorId: string; nombre: string; direccion: string; giro?: string | null;
@@ -74,6 +75,8 @@ export const api = {
   vendedores: (producto?: string) => req<Vendedor[]>(`/vendedores${qs({ producto })}`),
   actualizarRuta: (id: string, data: { productoId?: string; ciudad?: string; colonia?: string; giros?: string[]; drawZone?: boolean; zonaPoligono?: ZonaPunto[] | null }) =>
     req<Vendedor>(`/vendedores/${id}/ruta`, { method: 'PUT', body: JSON.stringify(data) }),
+  actualizarMetas: (id: string, data: { metaSolicitudesDia?: number; metaVentaMes?: number }) =>
+    req<{ id: string; metaSolicitudesDia: number; metaVentaMes: number }>(`/metas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   avivaHrStatus: () => req<{ configured: boolean }>('/vendedores/externos/status'),
   avivaHrImportar: () => req<AvivaHrImportResult>('/vendedores/importar', { method: 'POST' }),
 

@@ -41,6 +41,8 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
   const [geoError, setGeoError] = useState('');
   const [geoToken, setGeoToken] = useState(0);
   const [wCantidad, setWCantidad] = useState(15);
+  const [wMetaSolicitudesDia, setWMetaSolicitudesDia] = useState(vendedorInicial?.metaSolicitudesDia ?? 5);
+  const [wMetaVentaMes, setWMetaVentaMes] = useState(vendedorInicial?.metaVentaMes ?? 120000);
   const [wResults, setWResults] = useState<WizardItem[]>([]);
   const [wLoading, setWLoading] = useState(false);
   const [wError, setWError] = useState('');
@@ -76,6 +78,8 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     setPolygon(first?.zonaPoligono || []);
     setPolygonResetKey((k) => k + 1);
     setWResults([]);
+    setWMetaSolicitudesDia(first?.metaSolicitudesDia ?? 5);
+    setWMetaVentaMes(first?.metaVentaMes ?? 120000);
   };
 
   const onVendorChange = (vendorId: string) => {
@@ -90,6 +94,8 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     setPolygon(v.zonaPoligono || []);
     setPolygonResetKey((k) => k + 1);
     setWResults([]);
+    setWMetaSolicitudesDia(v.metaSolicitudesDia ?? 5);
+    setWMetaVentaMes(v.metaVentaMes ?? 120000);
   };
 
   const toggleGiro = (g: string) => {
@@ -207,10 +213,13 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     if (!wVendorId) return;
     setSaving(true);
     try {
-      await api.actualizarRuta(wVendorId, {
-        productoId: wProductoId, ciudad: wCiudad, colonia: wColonia, giros: wGiros, drawZone: wDrawZone,
-        zonaPoligono: wDrawZone ? polygon : null,
-      });
+      await Promise.all([
+        api.actualizarRuta(wVendorId, {
+          productoId: wProductoId, ciudad: wCiudad, colonia: wColonia, giros: wGiros, drawZone: wDrawZone,
+          zonaPoligono: wDrawZone ? polygon : null,
+        }),
+        api.actualizarMetas(wVendorId, { metaSolicitudesDia: wMetaSolicitudesDia, metaVentaMes: wMetaVentaMes }),
+      ]);
       const nuevos = wResults.filter((r) => !r.id);
       if (nuevos.length) await api.bulkProspectos(wVendorId, nuevos);
       reload();
@@ -411,6 +420,27 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                   Agregar
                 </button>
+              </div>
+            </div>
+          </Section>
+
+          <Section n={5} title="METAS DEL VENDEDOR" hint="Objetivo de solicitudes por día y de venta (colocación) por mes; se usan para medir su avance en la app del vendedor">
+            <div style={{ display: 'flex', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#3a4a41', marginBottom: 6 }}>Meta de solicitudes / día</label>
+                <input
+                  type="number" min={0} step={1} value={wMetaSolicitudesDia}
+                  onChange={(e) => setWMetaSolicitudesDia(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  style={{ width: '100%', border: '1px solid #d9e1db', background: '#f8faf8', borderRadius: 8, padding: '11px 13px', fontSize: 14, color: '#263238' }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#3a4a41', marginBottom: 6 }}>Meta de venta / mes ($)</label>
+                <input
+                  type="number" min={0} step={1000} value={wMetaVentaMes}
+                  onChange={(e) => setWMetaVentaMes(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  style={{ width: '100%', border: '1px solid #d9e1db', background: '#f8faf8', borderRadius: 8, padding: '11px 13px', fontSize: 14, color: '#263238' }}
+                />
               </div>
             </div>
           </Section>
