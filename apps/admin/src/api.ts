@@ -87,6 +87,7 @@ export const api = {
     giros: string[]; cantidad: number;
     ciudad?: string; colonia?: string;
     lat?: number; lng?: number; radioMetros?: number;
+    poligono?: ZonaPunto[];
   }) => req<{ resultados: any[] }>('/denue/consulta', { method: 'POST', body: JSON.stringify(data) }),
 
   dashboardSummary: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>

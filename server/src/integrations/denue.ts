@@ -218,10 +218,51 @@ export interface UbicacionGps {
   radioMetros?: number;
 }
 
+export interface PuntoGeo {
+  lat: number;
+  lng: number;
+}
+
+// Ray casting: cuenta cuántas veces un rayo horizontal desde el punto hacia
+// la derecha cruza los lados del polígono; un número impar de cruces
+// significa que el punto quedó dentro del contorno.
+export function puntoEnPoligono(punto: PuntoGeo, poligono: PuntoGeo[]): boolean {
+  let dentro = false;
+  for (let i = 0, j = poligono.length - 1; i < poligono.length; j = i++) {
+    const xi = poligono[i].lng, yi = poligono[i].lat;
+    const xj = poligono[j].lng, yj = poligono[j].lat;
+    const cruza = yi > punto.lat !== yj > punto.lat
+      && punto.lng < ((xj - xi) * (punto.lat - yi)) / (yj - yi) + xi;
+    if (cruza) dentro = !dentro;
+  }
+  return dentro;
+}
+
+// El DENUE no soporta buscar "dentro de un polígono": su único modo real de
+// búsqueda geográfica es punto+radio. Para que el polígono dibujado en el
+// wizard sí tenga efecto, lo envolvemos en el círculo más chico que lo cubre
+// (centro = centroide de los vértices, radio = distancia al vértice más
+// lejano + 15% de margen) para la consulta al DENUE, y luego los resultados
+// se filtran con puntoEnPoligono() para quedarnos solo con los que caen
+// realmente dentro del contorno dibujado, no solo dentro del círculo.
+export function centroYRadioDePoligono(poligono: PuntoGeo[]): UbicacionGps {
+  const lat = poligono.reduce((s, p) => s + p.lat, 0) / poligono.length;
+  const lng = poligono.reduce((s, p) => s + p.lng, 0) / poligono.length;
+  const centro = { lat, lng };
+  const radioVertices = Math.max(...poligono.map((p) => haversineMetros(centro, p)));
+  // Mismo tope de 10000m que ya usa el campo "Radio (m)" del modo GPS: un
+  // círculo más grande que eso vuelve la búsqueda al DENUE lenta o propensa
+  // a timeout sin ganar precisión real (el filtro por polígono ya recorta
+  // lo que sobra del círculo).
+  const radioMetros = Math.min(10000, Math.max(300, Math.round(radioVertices * 1.15)));
+  return { lat, lng, radioMetros };
+}
+
 export async function consultarDenue(opts: {
   giros: string[];
   cantidad: number;
   ubicacion: UbicacionGps;
+  poligono?: PuntoGeo[];
 }): Promise<DenueProspecto[]> {
   const token = process.env.DENUE_TOKEN;
   if (!token) {
@@ -290,6 +331,14 @@ export async function consultarDenue(opts: {
     throw new Error(errores[0]);
   }
 
-  merged.sort((a, b) => (a.distanciaKm ?? Infinity) - (b.distanciaKm ?? Infinity));
-  return merged.slice(0, cantidad);
+  // El DENUE ya respondió con el círculo que envuelve el polígono (ver
+  // centroYRadioDePoligono); aquí se descarta lo que cayó dentro del círculo
+  // pero fuera del contorno real que dibujó el usuario. Sin lat/lng no hay
+  // forma de ubicar el resultado, así que ante la duda se descarta.
+  const dentroDeZona = opts.poligono && opts.poligono.length >= 3
+    ? merged.filter((p) => p.lat != null && p.lng != null && puntoEnPoligono({ lat: p.lat, lng: p.lng }, opts.poligono!))
+    : merged;
+
+  dentroDeZona.sort((a, b) => (a.distanciaKm ?? Infinity) - (b.distanciaKm ?? Infinity));
+  return dentroDeZona.slice(0, cantidad);
 }
