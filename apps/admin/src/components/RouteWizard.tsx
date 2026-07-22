@@ -144,11 +144,18 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
       const zonaResuelta = selectedColonia?.description === wColonia && wColonia ? selectedColonia
         : selectedCiudad?.description === wCiudad && wCiudad ? selectedCiudad
         : null;
-      const params = wModo === 'gps'
+      const params: Parameters<typeof api.consultarDenue>[0] = wModo === 'gps'
         ? { giros: wGiros, cantidad: wCantidad, lat: wLat!, lng: wLng!, radioMetros: wRadio }
         : zonaResuelta
           ? { giros: wGiros, cantidad: wCantidad, lat: zonaResuelta.lat, lng: zonaResuelta.lng, radioMetros: selectedColonia === zonaResuelta ? 2500 : 6000 }
           : { giros: wGiros, cantidad: wCantidad, ciudad: wCiudad, colonia: wColonia };
+      // El polígono manda sobre cualquier otro modo: si el usuario dibujó una
+      // zona, el servidor usa esos vértices para centrar y acotar la búsqueda
+      // (ver centroYRadioDePoligono en server/src/integrations/denue.ts) y
+      // filtra los resultados para quedarse solo con los que caen dentro.
+      if (wDrawZone && polygon.length >= 3) {
+        params.poligono = polygon;
+      }
       const { resultados } = await api.consultarDenue(params);
       const nuevos: WizardItem[] = resultados.map((r: any) => ({
         nombre: r.nombre, direccion: r.direccion, giro: r.giro, distanciaKm: r.distanciaKm,
@@ -312,7 +319,7 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ fontSize: 12, color: '#8a978f', display: 'flex', alignItems: 'center', gap: 7 }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a978f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
-                    Haz clic para agregar puntos y dibujar el contorno de la zona; arrastra un punto para ajustarlo.
+                    Haz clic para agregar puntos y dibujar el contorno de la zona; arrastra un punto para ajustarlo. Al generar la ruta, los prospectos se acotan a este contorno.
                   </div>
                   <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #e6ece7', position: 'relative' }}>
                     <PolygonDrawMap key={polygonResetKey} points={polygon} onChange={setPolygon} height={220} />

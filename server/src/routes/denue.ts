@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { consultarDenue, isDenueConfigured, type UbicacionGps } from '../integrations/denue.js';
+import { consultarDenue, isDenueConfigured, centroYRadioDePoligono, type UbicacionGps, type PuntoGeo } from '../integrations/denue.js';
 import { geocodificar, isGoogleMapsConfigured } from '../integrations/googleMaps.js';
 
 export const denueRouter = Router();
@@ -15,14 +15,25 @@ denueRouter.post('/consulta', async (req, res) => {
       message: 'Configura DENUE_TOKEN en el servidor para consultar el API real del DENUE (INEGI).',
     });
   }
-  const { giros, cantidad, ciudad, colonia, lat, lng, radioMetros } = req.body as {
+  const { giros, cantidad, ciudad, colonia, lat, lng, radioMetros, poligono } = req.body as {
     giros: string[]; cantidad: number;
     ciudad?: string; colonia?: string;
     lat?: number; lng?: number; radioMetros?: number;
+    poligono?: PuntoGeo[];
   };
 
+  const poligonoValido = Array.isArray(poligono) && poligono.length >= 3
+    && poligono.every((p) => typeof p?.lat === 'number' && typeof p?.lng === 'number')
+    ? poligono
+    : null;
+
   let ubicacion: UbicacionGps;
-  if (lat != null && lng != null) {
+  if (poligonoValido) {
+    // El polígono manda sobre ciudad/colonia/GPS: si el usuario dibujó una
+    // zona a mano, es la delimitación más precisa que dio, así que se usa
+    // para centrar y acotar la búsqueda en vez de cualquier otro modo.
+    ubicacion = centroYRadioDePoligono(poligonoValido);
+  } else if (lat != null && lng != null) {
     ubicacion = { lat, lng, radioMetros };
   } else if (ciudad || colonia) {
     try {
@@ -53,8 +64,9 @@ denueRouter.post('/consulta', async (req, res) => {
   }
 
   try {
-    const resultados = await consultarDenue({ giros: giros || [], cantidad: cantidad || 10, ubicacion });
-    console.log(`DENUE: ${resultados.length} resultados en radio ${ubicacion.radioMetros || 1500}m alrededor de (${ubicacion.lat}, ${ubicacion.lng}), giros=${(giros || []).join('|')}`);
+    const resultados = await consultarDenue({ giros: giros || [], cantidad: cantidad || 10, ubicacion, poligono: poligonoValido || undefined });
+    const zona = poligonoValido ? `polígono de ${poligonoValido.length} puntos (círculo ${ubicacion.radioMetros}m)` : `radio ${ubicacion.radioMetros || 1500}m`;
+    console.log(`DENUE: ${resultados.length} resultados en ${zona} alrededor de (${ubicacion.lat}, ${ubicacion.lng}), giros=${(giros || []).join('|')}`);
     res.json({ resultados });
   } catch (err: any) {
     res.status(502).json({ error: 'DENUE_REQUEST_FAILED', message: err?.message || 'Error consultando el DENUE' });
