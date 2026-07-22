@@ -14,6 +14,8 @@
  * Google Maps antes de llegar aquí, así que este módulo solo necesita el modo GPS.
  */
 
+import { haversineMetros } from '../firestore-helpers.js';
+
 const DENUE_BASE = 'https://www.inegi.org.mx/app/api/denue/v1/consulta';
 
 // DENUE's "Buscar" endpoint matches free text against business name / activity
@@ -65,13 +67,7 @@ function normalize(s: string): string {
 }
 
 function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const lat1 = (a.lat * Math.PI) / 180;
-  const lat2 = (b.lat * Math.PI) / 180;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  return haversineMetros(a, b) / 1000;
 }
 
 export function isDenueConfigured(): boolean {

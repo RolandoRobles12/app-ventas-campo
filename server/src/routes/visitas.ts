@@ -1,12 +1,18 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { db, Timestamp } from '../db.js';
-import { toIso } from '../firestore-helpers.js';
+import { toIso, haversineMetros } from '../firestore-helpers.js';
 import { saveUpload } from '../storage.js';
 
 export const visitasRouter = Router();
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+
+// Radio dentro del cual la ubicación GPS capturada en la visita se considera
+// que corresponde al negocio. Solo aplica a prospectos que vienen del DENUE
+// (coordenadas reales de INEGI) — un negocio agregado a mano o "nuevo" no
+// tiene una ubicación de referencia contra la cual validar.
+const RADIO_UBICACION_VALIDA_METROS = 50;
 
 interface VisitaDoc {
   vendedorId: string;
@@ -20,12 +26,15 @@ interface VisitaDoc {
   lat: number | null;
   lng: number | null;
   gpsAccuracy: number | null;
+  ubicacionValida: boolean | null;
+  distanciaValidacionMetros: number | null;
   createdAt: Timestamp;
 }
 
 interface ProspectoDoc {
   nombre: string;
   direccion: string;
+  origen?: string;
   lat?: number | null;
   lng?: number | null;
 }
@@ -49,6 +58,8 @@ function shape(id: string, v: VisitaDoc) {
     fotoUrl: v.fotoUrl,
     lat: v.lat ?? null,
     lng: v.lng ?? null,
+    ubicacionValida: v.ubicacionValida ?? null,
+    distanciaValidacionMetros: v.distanciaValidacionMetros ?? null,
     createdAt: toIso(v.createdAt),
   };
 }
@@ -89,6 +100,19 @@ visitasRouter.post('/', upload.single('foto'), async (req, res) => {
 
   const fotoUrl = req.file ? await saveUpload(req.file) : null;
 
+  // Valida la ubicación solo cuando el teléfono entregó GPS real (no la
+  // coordenada de respaldo del prospecto, que trivialmente daría distancia 0)
+  // y el prospecto viene del DENUE (tiene una ubicación de referencia real de
+  // INEGI). Negocios manuales/nuevos no tienen contra qué validar: se dejan
+  // en null (no aplica), no en false.
+  let ubicacionValida: boolean | null = null;
+  let distanciaValidacionMetros: number | null = null;
+  if (hasGps && prospecto?.origen === 'denue' && prospecto.lat != null && prospecto.lng != null) {
+    const distancia = haversineMetros({ lat: gpsLat!, lng: gpsLng! }, { lat: prospecto.lat, lng: prospecto.lng });
+    distanciaValidacionMetros = Math.round(distancia);
+    ubicacionValida = distancia <= RADIO_UBICACION_VALIDA_METROS;
+  }
+
   // Si el teléfono no entregó GPS, usamos la ubicación conocida del prospecto
   // (p. ej. coordenadas DENUE) para que la visita siga apareciendo en el mapa de calor.
   const visitaData: VisitaDoc = {
@@ -103,6 +127,8 @@ visitasRouter.post('/', upload.single('foto'), async (req, res) => {
     lat: hasGps ? gpsLat : prospecto?.lat ?? null,
     lng: hasGps ? gpsLng : prospecto?.lng ?? null,
     gpsAccuracy: hasGps ? parseCoord(gpsAccuracy, 0, 100000) : null,
+    ubicacionValida,
+    distanciaValidacionMetros,
     createdAt: Timestamp.now(),
   };
   const ref = await db.collection('visitas').add(visitaData);

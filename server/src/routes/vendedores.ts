@@ -5,6 +5,8 @@ import { slugify } from '../firestore-helpers.js';
 
 export const vendedoresRouter = Router();
 
+export interface ZonaPunto { lat: number; lng: number }
+
 export interface VendedorDoc {
   nombre: string;
   iniciales: string;
@@ -14,6 +16,7 @@ export interface VendedorDoc {
   ciudad: string;
   colonia: string | null;
   drawZone: boolean;
+  zonaPoligono?: ZonaPunto[] | null;
   productoId: string;
   giros: string[];
   avivaHrId?: string | null;
@@ -53,6 +56,7 @@ export async function shapeVendedor(id: string, v: VendedorDoc, productoNombre?:
     ciudad: v.ciudad,
     colonia: v.colonia,
     drawZone: v.drawZone,
+    zonaPoligono: v.zonaPoligono ?? null,
     producto: productoNombre,
     productoId: v.productoId,
     giros: v.giros || [],
@@ -181,8 +185,8 @@ vendedoresRouter.get('/:id', async (req, res) => {
 
 // Configura (o reconfigura) la ruta de un vendedor: producto, zona y giros.
 vendedoresRouter.put('/:id/ruta', async (req, res) => {
-  const { productoId, ciudad, colonia, giros, drawZone } = req.body as {
-    productoId?: string; ciudad?: string; colonia?: string; giros?: string[]; drawZone?: boolean;
+  const { productoId, ciudad, colonia, giros, drawZone, zonaPoligono } = req.body as {
+    productoId?: string; ciudad?: string; colonia?: string; giros?: string[]; drawZone?: boolean; zonaPoligono?: ZonaPunto[] | null;
   };
 
   const data: Record<string, unknown> = {};
@@ -190,6 +194,7 @@ vendedoresRouter.put('/:id/ruta', async (req, res) => {
   if (ciudad !== undefined) data.ciudad = ciudad;
   if (colonia !== undefined) data.colonia = colonia;
   if (drawZone !== undefined) data.drawZone = drawZone;
+  if (zonaPoligono !== undefined) data.zonaPoligono = zonaPoligono && zonaPoligono.length >= 3 ? zonaPoligono : null;
   if (giros) data.giros = giros;
 
   const ref = db.collection('vendedores').doc(req.params.id);

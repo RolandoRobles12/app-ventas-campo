@@ -10,6 +10,8 @@ interface VisitaDoc {
   nombreNegocio: string;
   resultado: string;
   fotoUrl?: string | null;
+  ubicacionValida?: boolean | null;
+  distanciaValidacionMetros?: number | null;
   createdAt: FirebaseFirestore.Timestamp;
 }
 
@@ -81,5 +83,9 @@ reportesRouter.get('/evidencias', async (req, res) => {
     .filter((v) => v.fotoUrl)
     .slice(0, 12);
 
-  res.json(visitas.map((v) => ({ id: v.id, nombre: v.nombreNegocio, resultado: v.resultado, fotoUrl: v.fotoUrl, createdAt: toIso(v.createdAt) })));
+  res.json(visitas.map((v) => ({
+    id: v.id, nombre: v.nombreNegocio, resultado: v.resultado, fotoUrl: v.fotoUrl,
+    ubicacionValida: v.ubicacionValida ?? null, distanciaValidacionMetros: v.distanciaValidacionMetros ?? null,
+    createdAt: toIso(v.createdAt),
+  })));
 });
