@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type DashboardSummary, type WeekBar, type ResultadosDonut, type ActividadVendedor } from '../api';
 import { useFilters } from '../filters';
+import { RANGO_LABELS } from '../lib/dateRanges';
 import { FilterBar, PageHeader } from '../components/FilterBar';
 import { estadoBadgeStyle, prodBadgeStyle } from '../badges';
 
@@ -15,21 +16,30 @@ function conicGradient(items: ResultadosDonut['items']): string {
   return `conic-gradient(${parts.join(', ')})`;
 }
 
+const ACTIVIDAD_POR_PAGINA = 10;
+
 export function Dashboard() {
-  const { fProducto, fVendedor } = useFilters();
+  const { fProducto, fVendedor, fRango, fDesde, fHasta } = useFilters();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [semana, setSemana] = useState<WeekBar[]>([]);
   const [resultados, setResultados] = useState<ResultadosDonut | null>(null);
   const [actividad, setActividad] = useState<ActividadVendedor[]>([]);
+  const [pagina, setPagina] = useState(0);
 
   useEffect(() => {
-    api.dashboardSummary(fProducto, fVendedor).then(setSummary).catch(() => {});
+    api.dashboardSummary(fProducto, fVendedor, fDesde ?? undefined, fHasta ?? undefined).then(setSummary).catch(() => {});
     api.dashboardSemana(fProducto, fVendedor).then(setSemana).catch(() => {});
-    api.dashboardResultados(fProducto, fVendedor).then(setResultados).catch(() => {});
-    api.dashboardActividad(fProducto, fVendedor).then(setActividad).catch(() => {});
-  }, [fProducto, fVendedor]);
+    api.dashboardResultados(fProducto, fVendedor, fDesde ?? undefined, fHasta ?? undefined).then(setResultados).catch(() => {});
+    api.dashboardActividad(fProducto, fVendedor, fDesde ?? undefined, fHasta ?? undefined).then((a) => { setActividad(a); setPagina(0); }).catch(() => {});
+  }, [fProducto, fVendedor, fDesde, fHasta]);
+
+  const rangoActivo = fRango !== 'todo';
+  const visitasLabel = rangoActivo ? `Visitas · ${RANGO_LABELS[fRango]}` : 'Visitas hoy';
+  const actividadLabel = rangoActivo ? `Actividad por vendedor · ${RANGO_LABELS[fRango].toLowerCase()}` : 'Actividad por vendedor · hoy';
 
   const maxVal = Math.max(1, ...semana.map((b) => b.val));
+  const totalPaginas = Math.max(1, Math.ceil(actividad.length / ACTIVIDAD_POR_PAGINA));
+  const actividadPagina = actividad.slice(pagina * ACTIVIDAD_POR_PAGINA, (pagina + 1) * ACTIVIDAD_POR_PAGINA);
 
   return (
     <div className="screen">
@@ -41,7 +51,7 @@ export function Dashboard() {
       <FilterBar />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 16 }}>
-        <Kpi border="#0f5132" label="Visitas hoy" value={summary?.visitasHoy ?? '—'} sub={summary?.visitasAyerPct != null ? `${summary.visitasAyerPct >= 0 ? '▲' : '▼'} ${Math.abs(summary.visitasAyerPct)}% vs ayer` : 'sin datos de ayer'} subColor="#22a36c" />
+        <Kpi border="#0f5132" label={visitasLabel} value={summary?.visitasHoy ?? '—'} sub={summary?.visitasAyerPct != null ? `${summary.visitasAyerPct >= 0 ? '▲' : '▼'} ${Math.abs(summary.visitasAyerPct)}% vs ayer` : rangoActivo ? 'en el rango seleccionado' : 'sin datos de ayer'} subColor="#22a36c" />
         <Kpi border="#ef8b3e" label="Por visitar" value={summary?.porVisitar ?? '—'} sub="en listas de hoy" subColor="#8a978f" />
         <Kpi border="#2a6fdb" label="Conversión" value={summary ? `${summary.conversion}%` : '—'} sub="visitas → solicitud" subColor="#8a978f" />
         <Kpi border="#22a36c" label="Vendedores activos" value={<>{summary?.vendedoresActivos ?? '—'}<span style={{ fontSize: 18, color: '#8a978f' }}>/{summary?.vendedoresTotal ?? '—'}</span></>} sub="en el filtro actual" subColor="#8a978f" />
@@ -86,13 +96,13 @@ export function Dashboard() {
 
       <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 22px 12px' }}>
-          <div style={{ fontSize: 15, fontWeight: 500, color: '#263238' }}>Actividad por vendedor · hoy</div>
+          <div style={{ fontSize: 15, fontWeight: 500, color: '#263238' }}>{actividadLabel}</div>
           <Link to="/seguimiento" style={{ fontSize: 13, fontWeight: 500 }}>Ver seguimiento en vivo →</Link>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.2fr 1fr .8fr .9fr', padding: '0 22px 8px', fontSize: 12, fontWeight: 700, letterSpacing: '.5px', color: '#8a978f', borderBottom: '1px solid #eef2ee' }}>
-          <div>VENDEDOR</div><div>PRODUCTO</div><div>CIUDAD</div><div>VISITAS HOY</div><div>ESTADO</div>
+          <div>VENDEDOR</div><div>PRODUCTO</div><div>CIUDAD</div><div>{rangoActivo ? 'VISITAS' : 'VISITAS HOY'}</div><div>ESTADO</div>
         </div>
-        {actividad.map((v) => (
+        {actividadPagina.map((v) => (
           <div key={v.id} className="rowh" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.2fr 1fr .8fr .9fr', alignItems: 'center', padding: '13px 22px', borderBottom: '1px solid #f2f5f2', fontSize: 13.5 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
               <span style={{ width: 34, height: 34, borderRadius: '50%', background: v.color, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 600 }}>{v.iniciales}</span>
@@ -104,9 +114,23 @@ export function Dashboard() {
             <div><span style={estadoBadgeStyle(v.estado)}>{v.estado}</span></div>
           </div>
         ))}
+        {actividad.length > ACTIVIDAD_POR_PAGINA && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, padding: '12px 22px', fontSize: 12.5, color: '#6f7d75' }}>
+            <span>{pagina * ACTIVIDAD_POR_PAGINA + 1}–{Math.min((pagina + 1) * ACTIVIDAD_POR_PAGINA, actividad.length)} de {actividad.length}</span>
+            <button onClick={() => setPagina((p) => Math.max(0, p - 1))} disabled={pagina === 0} style={pageBtn(pagina === 0)}>‹</button>
+            <button onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))} disabled={pagina >= totalPaginas - 1} style={pageBtn(pagina >= totalPaginas - 1)}>›</button>
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function pageBtn(disabled: boolean): React.CSSProperties {
+  return {
+    width: 24, height: 24, border: '1px solid #e0e8e2', background: disabled ? '#f2f5f2' : '#fff',
+    borderRadius: 6, color: disabled ? '#c3ccc5' : '#3a4a41', cursor: disabled ? 'default' : 'pointer', fontSize: 14, lineHeight: 1,
+  };
 }
 
 function Kpi({ border, label, value, sub, subColor }: { border: string; label: string; value: React.ReactNode; sub: string; subColor: string }) {

@@ -89,22 +89,30 @@ export const api = {
     lat?: number; lng?: number; radioMetros?: number;
   }) => req<{ resultados: any[] }>('/denue/consulta', { method: 'POST', body: JSON.stringify(data) }),
 
-  dashboardSummary: (producto?: string, vendedor?: string) => req<DashboardSummary>(`/dashboard/summary${qs({ producto, vendedor })}`),
+  dashboardSummary: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
+    req<DashboardSummary>(`/dashboard/summary${qs({ producto, vendedor, desde, hasta })}`),
   dashboardSemana: (producto?: string, vendedor?: string) => req<WeekBar[]>(`/dashboard/semana${qs({ producto, vendedor })}`),
-  dashboardResultados: (producto?: string, vendedor?: string) => req<ResultadosDonut>(`/dashboard/resultados${qs({ producto, vendedor })}`),
-  dashboardActividad: (producto?: string, vendedor?: string) => req<ActividadVendedor[]>(`/dashboard/actividad${qs({ producto, vendedor })}`),
+  dashboardResultados: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
+    req<ResultadosDonut>(`/dashboard/resultados${qs({ producto, vendedor, desde, hasta })}`),
+  dashboardActividad: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
+    req<ActividadVendedor[]>(`/dashboard/actividad${qs({ producto, vendedor, desde, hasta })}`),
 
-  mapaLeads: (producto?: string, vendedor?: string) => req<MapaLeadsResponse>(`/mapa/leads${qs({ producto, vendedor })}`),
-  mapaCalor: (producto?: string, vendedor?: string, dias?: number) =>
-    req<MapaCalorResponse>(`/mapa/calor${qs({ producto, vendedor, dias: dias ? String(dias) : undefined })}`),
+  mapaLeads: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
+    req<MapaLeadsResponse>(`/mapa/leads${qs({ producto, vendedor, desde, hasta })}`),
+  mapaCalor: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
+    req<MapaCalorResponse>(`/mapa/calor${qs({ producto, vendedor, desde, hasta })}`),
   seguimiento: (producto?: string, vendedor?: string) => req<SeguimientoItem[]>(`/seguimiento${qs({ producto, vendedor })}`),
 
-  reportesSummary: (producto?: string, vendedor?: string) => req<ReportesSummary>(`/reportes/summary${qs({ producto, vendedor })}`),
-  reportesVendedores: (producto?: string, vendedor?: string) => req<ReporteVendedor[]>(`/reportes/vendedores${qs({ producto, vendedor })}`),
-  reportesEvidencias: (producto?: string, vendedor?: string) => req<Evidencia[]>(`/reportes/evidencias${qs({ producto, vendedor })}`),
+  reportesSummary: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
+    req<ReportesSummary>(`/reportes/summary${qs({ producto, vendedor, desde, hasta })}`),
+  reportesVendedores: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
+    req<ReporteVendedor[]>(`/reportes/vendedores${qs({ producto, vendedor, desde, hasta })}`),
+  reportesEvidencias: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
+    req<Evidencia[]>(`/reportes/evidencias${qs({ producto, vendedor, desde, hasta })}`),
 
   crmStatus: () => req<{ configured: boolean; stages: string[] }>('/crm/status'),
-  crmDeals: (producto?: string, vendedor?: string) => req<CrmDeal[]>(`/crm/deals${qs({ producto, vendedor })}`),
+  crmDeals: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
+    req<CrmDeal[]>(`/crm/deals${qs({ producto, vendedor, desde, hasta })}`),
   crmSync: () => req<{ ok: boolean; created: number; updated: number; total: number }>('/crm/sync', { method: 'POST' }),
   crmUpdate: (id: string, data: Partial<{ cliente: string; negocio: string; etapa: string; amount: number; dealOwnerId: string; serviceOwner: string }>) =>
     req<CrmDeal & { hubspotWarning?: string }>(`/crm/deals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),

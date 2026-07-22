@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, Timestamp, FieldPath } from '../db.js';
 import { resolveVendedorIds } from './_filters.js';
-import { isEmptyRestriction } from '../firestore-helpers.js';
+import { isEmptyRestriction, parseDateRangeQuery } from '../firestore-helpers.js';
 
 export const dashboardRouter = Router();
 
@@ -52,28 +52,39 @@ async function countVendedores(ids: string[] | null, extra: (q: FirebaseFirestor
 }
 
 dashboardRouter.get('/summary', async (req, res) => {
-  const { producto, vendedor } = req.query as { producto?: string; vendedor?: string };
+  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
   const ids = await resolveVendedorIds(producto, vendedor);
+  const rango = parseDateRangeQuery(desde, hasta);
 
   const start = new Date(); start.setHours(0, 0, 0, 0);
   const end = new Date(start); end.setDate(end.getDate() + 1);
   const yStart = new Date(start); yStart.setDate(yStart.getDate() - 1);
 
-  const [visitasHoy, visitasAyer, porVisitar, totalVisitas, solicitudes, vendedoresTotal, vendedoresActivos] = await Promise.all([
-    countVisitas(ids, (q) => q.where('createdAt', '>=', Timestamp.fromDate(start)).where('createdAt', '<', Timestamp.fromDate(end))),
-    countVisitas(ids, (q) => q.where('createdAt', '>=', Timestamp.fromDate(yStart)).where('createdAt', '<', Timestamp.fromDate(start))),
+  // Sin filtro de fecha ("Todo"): mismo comportamiento de siempre, hoy vs
+  // ayer. Con filtro activo, el KPI refleja el rango elegido — "vs ayer" ya
+  // no aplica (comparar "esta semana" contra "ayer" no tiene sentido), así
+  // que se omite.
+  const periodo = rango ?? { start, end };
+
+  const [visitas, visitasAyer, porVisitar, totalVisitas, solicitudes, vendedoresTotal, vendedoresActivos] = await Promise.all([
+    countVisitas(ids, (q) => q.where('createdAt', '>=', Timestamp.fromDate(periodo.start)).where('createdAt', '<', Timestamp.fromDate(periodo.end))),
+    rango ? Promise.resolve(0) : countVisitas(ids, (q) => q.where('createdAt', '>=', Timestamp.fromDate(yStart)).where('createdAt', '<', Timestamp.fromDate(start))),
     countProspectos(ids, (q) => q.where('estado', '==', 'por_visitar')),
-    countVisitas(ids, (q) => q),
-    countVisitas(ids, (q) => q.where('resultado', '==', 'Se realizó solicitud')),
+    rango
+      ? countVisitas(ids, (q) => q.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end)))
+      : countVisitas(ids, (q) => q),
+    rango
+      ? countVisitas(ids, (q) => q.where('resultado', '==', 'Se realizó solicitud').where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end)))
+      : countVisitas(ids, (q) => q.where('resultado', '==', 'Se realizó solicitud')),
     countVendedores(ids, (q) => q),
     countVendedores(ids, (q) => q.where('estado', '==', 'Activo')),
   ]);
 
   const conversion = totalVisitas > 0 ? Math.round((solicitudes / totalVisitas) * 100) : 0;
-  const vsAyerPct = visitasAyer > 0 ? Math.round(((visitasHoy - visitasAyer) / visitasAyer) * 100) : null;
+  const vsAyerPct = !rango && visitasAyer > 0 ? Math.round(((visitas - visitasAyer) / visitasAyer) * 100) : null;
 
   res.json({
-    visitasHoy, visitasAyerPct: vsAyerPct, porVisitar, conversion, vendedoresTotal, vendedoresActivos,
+    visitasHoy: visitas, visitasAyerPct: vsAyerPct, porVisitar, conversion, vendedoresTotal, vendedoresActivos,
   });
 });
 
@@ -93,10 +104,15 @@ dashboardRouter.get('/semana', async (req, res) => {
 });
 
 dashboardRouter.get('/resultados', async (req, res) => {
-  const { producto, vendedor } = req.query as { producto?: string; vendedor?: string };
+  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
   const ids = await resolveVendedorIds(producto, vendedor);
+  const rango = parseDateRangeQuery(desde, hasta);
 
-  const counts = await Promise.all(RESULTADOS.map((r) => countVisitas(ids, (q) => q.where('resultado', '==', r))));
+  const counts = await Promise.all(RESULTADOS.map((r) => countVisitas(ids, (q) => {
+    let query = q.where('resultado', '==', r);
+    if (rango) query = query.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end));
+    return query;
+  })));
   const total = counts.reduce((a, b) => a + b, 0);
   res.json({
     total,
@@ -105,9 +121,10 @@ dashboardRouter.get('/resultados', async (req, res) => {
 });
 
 dashboardRouter.get('/actividad', async (req, res) => {
-  const { producto, vendedor } = req.query as { producto?: string; vendedor?: string };
+  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
   const ids = await resolveVendedorIds(producto, vendedor);
   if (isEmptyRestriction(ids)) return res.json([]);
+  const rango = parseDateRangeQuery(desde, hasta);
 
   const vendedoresSnap = ids
     ? await db.collection('vendedores').where(FieldPath.documentId(), 'in', ids).get()
@@ -125,11 +142,12 @@ dashboardRouter.get('/actividad', async (req, res) => {
   const start = new Date(); start.setHours(0, 0, 0, 0);
   const end = new Date(start); end.setDate(end.getDate() + 1);
   const fecha = start.toISOString().slice(0, 10);
+  const periodo = rango ?? { start, end };
 
   const out = await Promise.all(vendedores.map(async (v) => {
     const [hoySnap, jornadaDoc] = await Promise.all([
       db.collection('visitas').where('vendedorId', '==', v.id)
-        .where('createdAt', '>=', Timestamp.fromDate(start)).where('createdAt', '<', Timestamp.fromDate(end)).count().get(),
+        .where('createdAt', '>=', Timestamp.fromDate(periodo.start)).where('createdAt', '<', Timestamp.fromDate(periodo.end)).count().get(),
       db.collection('jornadas').doc(`${v.id}_${fecha}`).get(),
     ]);
     const jornada = jornadaDoc.data() as JornadaDoc | undefined;

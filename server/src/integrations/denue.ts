@@ -77,7 +77,18 @@ export function isDenueConfigured(): boolean {
 async function buscarDenue(condicion: string, alcance: string, token: string): Promise<DenueRawResult[]> {
   const url = `${DENUE_BASE}/Buscar/${encodeURIComponent(condicion)}/${alcance}/${token}`;
 
-  const res = await fetch(url);
+  let res: Response;
+  try {
+    // 20s: el DENUE de INEGI a veces tarda o se cuelga; sin timeout, un
+    // request colgado deja "Consultando el DENUE..." girando para siempre.
+    res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  } catch (err: any) {
+    // fetch() lanza "fetch failed" genérico para cualquier falla de red — el
+    // motivo real (DNS, timeout, conexión rechazada/reseteada) viaja en
+    // `.cause`, que el mensaje por sí solo no muestra.
+    const causa = err?.cause?.code || err?.cause?.message || err?.name;
+    throw new Error(`No se pudo conectar con el DENUE${causa ? ` (${causa})` : ''}: ${err?.message || err}`);
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`DENUE respondió ${res.status}: ${body.slice(0, 200)}`);

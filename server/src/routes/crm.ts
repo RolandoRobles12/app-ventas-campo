@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
-import { toIso } from '../firestore-helpers.js';
+import { toIso, parseDateRangeQuery } from '../firestore-helpers.js';
 import {
   fetchHubspotDeals, updateHubspotDeal, hubspotDealUrl, isHubspotConfigured,
   DEAL_STAGE_LABELS, listHubspotOwners, listDealPipelines,
@@ -71,7 +71,8 @@ crmRouter.get('/status', (_req, res) => {
 });
 
 crmRouter.get('/deals', async (req, res) => {
-  const { producto, vendedor } = req.query as { producto?: string; vendedor?: string };
+  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
+  const rango = parseDateRangeQuery(desde, hasta);
 
   let productoId: string | undefined;
   if (producto && producto !== 'Todos los productos') {
@@ -88,6 +89,10 @@ crmRouter.get('/deals', async (req, res) => {
   let deals = snap.docs.map((d) => ({ id: d.id, data: d.data() as CrmDealDoc }));
   if (productoId) deals = deals.filter((d) => d.data.productoId === productoId);
   if (dealOwnerId) deals = deals.filter((d) => d.data.dealOwnerId === dealOwnerId);
+  if (rango) deals = deals.filter((d) => {
+    const created = d.data.createdAt?.toDate();
+    return created && created >= rango.start && created < rango.end;
+  });
 
   const { productos, dealOwners } = await lookupNames(deals);
   res.json(await Promise.all(deals.map((d) => shape(d.id, d.data, productos.get(d.data.productoId || ''), dealOwners.get(d.data.dealOwnerId || '')))));
