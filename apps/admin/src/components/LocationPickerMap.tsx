@@ -115,10 +115,14 @@ export function PolygonDrawMap({
       const center = pointsRef.current[0] || DEFAULT_CENTER;
       const map = new g.maps.Map(containerRef.current, { center, zoom: 13, streetViewControl: false, mapTypeControl: false });
       mapRef.current = map;
+      // Sin `paths` en el constructor: así el Polygon arranca con un MVCArray
+      // vacío pero válido (patrón recomendado por Google para dibujar a
+      // clics). Pasar `paths: []` explícito es el patrón que se rompía.
       polygonRef.current = new g.maps.Polygon({
-        paths: pointsRef.current, map, editable: true,
+        map, editable: true,
         fillColor: '#157347', fillOpacity: 0.15, strokeColor: '#0f5132', strokeWeight: 2.5,
       });
+      if (pointsRef.current.length) polygonRef.current.setPath(pointsRef.current);
 
       const syncFromPolygon = () => {
         const path = polygonRef.current!.getPath();
