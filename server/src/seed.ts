@@ -134,17 +134,13 @@ async function main() {
     await batch.commit();
   }
 
-  // Metas de ejemplo (hoy / este mes) por vendedor
+  // Metas de ejemplo por vendedor (solicitudes/día y venta/mes)
   const today = new Date();
   const fechaHoy = today.toISOString().slice(0, 10);
-  const fechaMes = today.toISOString().slice(0, 7);
   for (const nombre of Object.keys(vendedorRecords)) {
     const id = vendedorRecords[nombre];
-    await db.collection('metas').doc(`${id}_solicitudes_hoy_${fechaHoy}`).set({
-      vendedorId: id, tipo: 'solicitudes_hoy', periodo: fechaHoy, valorActual: 2, valorMeta: 5,
-    }, { merge: true });
-    await db.collection('metas').doc(`${id}_colocacion_mes_${fechaMes}`).set({
-      vendedorId: id, tipo: 'colocacion_mes', periodo: fechaMes, valorActual: 35000, valorMeta: 120000,
+    await db.collection('vendedores').doc(id).set({
+      metaSolicitudesDia: 5, metaVentaMes: 120000,
     }, { merge: true });
     await db.collection('jornadas').doc(`${id}_${fechaHoy}`).set({
       vendedorId: id, fecha: fechaHoy, horaEntrada: '09:30', horaSalidaComer: null, horaRegreso: null,

@@ -20,6 +20,8 @@ export interface VendedorDoc {
   productoId: string;
   giros: string[];
   avivaHrId?: string | null;
+  metaSolicitudesDia?: number;
+  metaVentaMes?: number;
 }
 
 // Igual que server/src/seed.ts: el id de producto es el slug de su nombre.
@@ -60,6 +62,8 @@ export async function shapeVendedor(id: string, v: VendedorDoc, productoNombre?:
     producto: productoNombre,
     productoId: v.productoId,
     giros: v.giros || [],
+    metaSolicitudesDia: v.metaSolicitudesDia ?? 5,
+    metaVentaMes: v.metaVentaMes ?? 120000,
     prospectosCount,
   };
 }
