@@ -14,6 +14,7 @@
  * Google Maps antes de llegar aquí, así que este módulo solo necesita el modo GPS.
  */
 
+import https from 'node:https';
 import { haversineMetros } from '../firestore-helpers.js';
 
 const DENUE_BASE = 'https://www.inegi.org.mx/app/api/denue/v1/consulta';
@@ -74,35 +75,46 @@ export function isDenueConfigured(): boolean {
   return !!process.env.DENUE_TOKEN;
 }
 
+// El DENUE se consulta con node:https en vez de fetch(): fetch() (undici)
+// tronaba con "ERR_ASSERTION" contra el API del DENUE específicamente —ese
+// mismo proceso sí consulta bien la Geocoding API de Google con fetch(), así
+// que el problema es cómo undici interpreta la respuesta del DENUE (INEGI no
+// siempre es estrictamente conforme al estándar HTTP), no un bug genérico de
+// Node. https, el módulo nativo más antiguo, es más tolerante.
+function httpsGetText(url: string, timeoutMs: number): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { timeout: timeoutMs }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve({ status: res.statusCode || 0, body: Buffer.concat(chunks).toString('utf-8') }));
+      res.on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error('Tiempo de espera agotado')));
+    req.on('error', reject);
+  });
+}
+
 async function buscarDenue(condicion: string, alcance: string, token: string): Promise<DenueRawResult[]> {
   const url = `${DENUE_BASE}/Buscar/${encodeURIComponent(condicion)}/${alcance}/${token}`;
 
-  // 20s: el DENUE de INEGI a veces tarda o se cuelga; sin timeout, un request
-  // colgado deja "Consultando el DENUE..." girando para siempre. Se usa
-  // AbortController manual en vez de AbortSignal.timeout(): esta última tiene
-  // bugs conocidos de "ERR_ASSERTION" en Node/undici cuando se crean varias
-  // seguidas (aquí se llama una vez por giro, en secuencia).
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000);
-
-  let res: Response;
+  let status: number, body: string;
   try {
-    res = await fetch(url, { signal: controller.signal });
+    // 20s: el DENUE a veces tarda o se cuelga; sin timeout, un request
+    // colgado deja "Consultando el DENUE..." girando para siempre.
+    ({ status, body } = await httpsGetText(url, 20000));
   } catch (err: any) {
-    // fetch() lanza "fetch failed" genérico para cualquier falla de red — el
-    // motivo real (DNS, timeout, conexión rechazada/reseteada) viaja en
-    // `.cause`, que el mensaje por sí solo no muestra.
-    const causa = err?.cause?.code || err?.cause?.message || err?.name;
-    throw new Error(`No se pudo conectar con el DENUE${causa ? ` (${causa})` : ''}: ${err?.message || err}`);
-  } finally {
-    clearTimeout(timeoutId);
+    throw new Error(`No se pudo conectar con el DENUE: ${err?.message || err}`);
   }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`DENUE respondió ${res.status}: ${body.slice(0, 200)}`);
+  if (status < 200 || status >= 300) {
+    throw new Error(`DENUE respondió ${status}: ${body.slice(0, 200)}`);
   }
-  const data = (await res.json()) as DenueRawResult[];
-  return Array.isArray(data) ? data : [];
+  let data: unknown;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    throw new Error(`DENUE respondió algo que no es JSON: ${body.slice(0, 200)}`);
+  }
+  return Array.isArray(data) ? (data as DenueRawResult[]) : [];
 }
 
 // ---------------------------------------------------------------------------
