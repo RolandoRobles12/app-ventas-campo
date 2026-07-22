@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { loadGoogleMaps } from '../lib/googleMaps';
 
 export interface HeatPoint { lat: number; lng: number; peso: number }
 export interface MapPin { id: string; lat: number; lng: number; color: string; title: string; subtitle?: string }
@@ -11,8 +12,6 @@ const DEFAULT_CENTER = { lat: 20.6597, lng: -103.3496 };
 const HEAT_GRADIENT = [
   'rgba(255,255,178,0)', '#ffffb2', '#fecc5c', '#fd8d3c', '#f03b20', '#bd0026',
 ];
-
-const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
 
 // @types/google.maps ya no modela la Visualization Library heredada (Google
 // la da por legacy en favor de overlays más nuevos), pero la API real en
@@ -27,24 +26,6 @@ type HeatmapLayerCtor = new (opts: {
   opacity?: number;
   gradient?: string[];
 }) => HeatmapLayerLike;
-
-let loaderPromise: Promise<typeof google> | null = null;
-
-// Carga el script de la API de Google Maps una sola vez (aunque haya varios
-// <GeoMap> montados a la vez): todos comparten la misma promesa.
-function loadGoogleMaps(): Promise<typeof google> {
-  if (loaderPromise) return loaderPromise;
-  loaderPromise = new Promise((resolve, reject) => {
-    if (window.google?.maps) return resolve(window.google);
-    const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&libraries=visualization&v=weekly`;
-    script.async = true;
-    script.onload = () => resolve(window.google);
-    script.onerror = () => reject(new Error('No se pudo cargar Google Maps'));
-    document.head.appendChild(script);
-  });
-  return loaderPromise;
-}
 
 function pinIconUrl(color: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="${color}" stroke="#fff" stroke-width="1.6"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3" fill="#fff" stroke="none"/></svg>`;
@@ -61,7 +42,6 @@ export function GeoMap({ heatPoints, pins, height }: { heatPoints?: HeatPoint[];
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!API_KEY) { setError('Falta VITE_GOOGLE_MAPS_API_KEY'); return; }
     let cancelled = false;
     loadGoogleMaps()
       .then((g) => {

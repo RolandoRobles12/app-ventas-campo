@@ -1,9 +1,11 @@
 import { getIdToken } from '@aviva/ui';
 
 export interface Producto { id: string; nombre: string; esDeCampo: boolean; giros: string[]; }
+export interface ZonaPunto { lat: number; lng: number }
 export interface Vendedor {
   id: string; nombre: string; iniciales: string; color: string; email: string | null; estado: string;
-  ciudad: string; colonia: string | null; drawZone: boolean; producto: string; productoId: string;
+  ciudad: string; colonia: string | null; drawZone: boolean; zonaPoligono: ZonaPunto[] | null;
+  producto: string; productoId: string;
   giros: string[]; prospectosCount?: number;
 }
 export interface Prospecto {
@@ -70,7 +72,7 @@ function qs(params: Record<string, string | undefined>): string {
 export const api = {
   productos: () => req<Producto[]>('/productos/de-campo'),
   vendedores: (producto?: string) => req<Vendedor[]>(`/vendedores${qs({ producto })}`),
-  actualizarRuta: (id: string, data: { productoId?: string; ciudad?: string; colonia?: string; giros?: string[]; drawZone?: boolean }) =>
+  actualizarRuta: (id: string, data: { productoId?: string; ciudad?: string; colonia?: string; giros?: string[]; drawZone?: boolean; zonaPoligono?: ZonaPunto[] | null }) =>
     req<Vendedor>(`/vendedores/${id}/ruta`, { method: 'PUT', body: JSON.stringify(data) }),
   avivaHrStatus: () => req<{ configured: boolean }>('/vendedores/externos/status'),
   avivaHrImportar: () => req<AvivaHrImportResult>('/vendedores/importar', { method: 'POST' }),

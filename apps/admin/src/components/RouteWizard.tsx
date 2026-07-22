@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { api, type Prospecto } from '../api';
+import { api, type Prospecto, type ZonaPunto } from '../api';
 import { useFilters } from '../filters';
 import { useToast } from '../toast';
+import { PlaceAutocompleteInput, type PlaceResult } from './PlaceAutocompleteInput';
+import { MarkerPickerMap, PolygonDrawMap } from './LocationPickerMap';
 
 interface WizardItem {
   id?: string;
@@ -25,15 +27,19 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
   const [wVendorId, setWVendorId] = useState(vendedorInicial?.id || '');
   const [wCiudad, setWCiudad] = useState(vendedorInicial?.ciudad || '');
   const [wColonia, setWColonia] = useState(vendedorInicial?.colonia || '');
+  const [selectedCiudad, setSelectedCiudad] = useState<PlaceResult | null>(null);
+  const [selectedColonia, setSelectedColonia] = useState<PlaceResult | null>(null);
   const [wGiros, setWGiros] = useState<string[]>(vendedorInicial?.giros || []);
   const [wDrawZone, setWDrawZone] = useState(vendedorInicial?.drawZone || false);
-  const [polygon, setPolygon] = useState<{ x: number; y: number }[]>([]);
+  const [polygon, setPolygon] = useState<ZonaPunto[]>(vendedorInicial?.zonaPoligono || []);
+  const [polygonResetKey, setPolygonResetKey] = useState(0);
   const [wModo, setWModo] = useState<'zona' | 'gps'>('zona');
   const [wLat, setWLat] = useState<number | null>(null);
   const [wLng, setWLng] = useState<number | null>(null);
   const [wRadio, setWRadio] = useState(1500);
   const [geoLoading, setGeoLoading] = useState(false);
   const [geoError, setGeoError] = useState('');
+  const [geoToken, setGeoToken] = useState(0);
   const [wCantidad, setWCantidad] = useState(15);
   const [wResults, setWResults] = useState<WizardItem[]>([]);
   const [wLoading, setWLoading] = useState(false);
@@ -64,7 +70,11 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     setWVendorId(first?.id || '');
     setWCiudad(first?.ciudad || '');
     setWColonia(first?.colonia || '');
+    setSelectedCiudad(null);
+    setSelectedColonia(null);
     setWGiros(first?.giros || []);
+    setPolygon(first?.zonaPoligono || []);
+    setPolygonResetKey((k) => k + 1);
     setWResults([]);
   };
 
@@ -74,7 +84,11 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     setWVendorId(v.id);
     setWCiudad(v.ciudad);
     setWColonia(v.colonia || '');
+    setSelectedCiudad(null);
+    setSelectedColonia(null);
     setWGiros(v.giros);
+    setPolygon(v.zonaPoligono || []);
+    setPolygonResetKey((k) => k + 1);
     setWResults([]);
   };
 
@@ -90,6 +104,7 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
       (pos) => {
         setWLat(pos.coords.latitude);
         setWLng(pos.coords.longitude);
+        setGeoToken((t) => t + 1);
         setGeoLoading(false);
       },
       (err) => {
@@ -122,9 +137,18 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     setWLoading(true);
     setWError('');
     try {
+      // Si el usuario eligió una sugerencia real del autocomplete (y no la
+      // editó después), usamos esas coordenadas directo — más confiable que
+      // volver a geocodificar el texto en el servidor. Si no, cae al texto
+      // libre de siempre (ciudad/colonia), que el servidor geocodifica.
+      const zonaResuelta = selectedColonia?.description === wColonia && wColonia ? selectedColonia
+        : selectedCiudad?.description === wCiudad && wCiudad ? selectedCiudad
+        : null;
       const params = wModo === 'gps'
         ? { giros: wGiros, cantidad: wCantidad, lat: wLat!, lng: wLng!, radioMetros: wRadio }
-        : { giros: wGiros, cantidad: wCantidad, ciudad: wCiudad, colonia: wColonia };
+        : zonaResuelta
+          ? { giros: wGiros, cantidad: wCantidad, lat: zonaResuelta.lat, lng: zonaResuelta.lng, radioMetros: selectedColonia === zonaResuelta ? 2500 : 6000 }
+          : { giros: wGiros, cantidad: wCantidad, ciudad: wCiudad, colonia: wColonia };
       const { resultados } = await api.consultarDenue(params);
       const nuevos: WizardItem[] = resultados.map((r: any) => ({
         nombre: r.nombre, direccion: r.direccion, giro: r.giro, distanciaKm: r.distanciaKm,
@@ -176,7 +200,10 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     if (!wVendorId) return;
     setSaving(true);
     try {
-      await api.actualizarRuta(wVendorId, { productoId: wProductoId, ciudad: wCiudad, colonia: wColonia, giros: wGiros, drawZone: wDrawZone });
+      await api.actualizarRuta(wVendorId, {
+        productoId: wProductoId, ciudad: wCiudad, colonia: wColonia, giros: wGiros, drawZone: wDrawZone,
+        zonaPoligono: wDrawZone ? polygon : null,
+      });
       const nuevos = wResults.filter((r) => !r.id);
       if (nuevos.length) await api.bulkProspectos(wVendorId, nuevos);
       reload();
@@ -189,13 +216,6 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     } finally {
       setSaving(false);
     }
-  };
-
-  const onMapClick: React.MouseEventHandler<SVGSVGElement> = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 560;
-    const y = ((e.clientY - rect.top) / rect.height) * 150;
-    setPolygon((prev) => [...prev, { x, y }]);
   };
 
   return (
@@ -224,33 +244,61 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
               {wModo === 'zona' ? (
                 <>
                   <div style={{ display: 'flex', gap: 12 }}>
-                    <FieldInput label="Ciudad / Municipio" value={wCiudad} onChange={setWCiudad} />
-                    <FieldInput label="Colonia o C.P." value={wColonia} onChange={setWColonia} placeholder="Ej. Centro / 44100" />
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#3a4a41', marginBottom: 6 }}>Ciudad / Municipio</label>
+                      <PlaceAutocompleteInput
+                        value={wCiudad}
+                        onChange={setWCiudad}
+                        onPlaceSelected={setSelectedCiudad}
+                        placeholder="Ej. Guadalajara, Jalisco"
+                        types={['(cities)']}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#3a4a41', marginBottom: 6 }}>Colonia o C.P.</label>
+                      <PlaceAutocompleteInput
+                        value={wColonia}
+                        onChange={setWColonia}
+                        onPlaceSelected={setSelectedColonia}
+                        placeholder="Ej. Centro / 44100"
+                        types={['geocode']}
+                      />
+                    </div>
                   </div>
                   <div style={{ fontSize: 12, color: '#8a978f', display: 'flex', alignItems: 'center', gap: 7 }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a978f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
-                    Con municipio o C.P. es suficiente; incluye colonias aledañas al kiosco.
+                    Elige una sugerencia de la lista para asegurar la ubicación correcta; con municipio o C.P. es suficiente, incluye colonias aledañas al kiosco.
                   </div>
                 </>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
-                    <FieldInput label="Latitud" value={wLat != null ? String(wLat) : ''} onChange={(v) => setWLat(v ? parseFloat(v) : null)} placeholder="20.6597" />
-                    <FieldInput label="Longitud" value={wLng != null ? String(wLng) : ''} onChange={(v) => setWLng(v ? parseFloat(v) : null)} placeholder="-103.3496" />
+                    <button onClick={usarUbicacionActual} disabled={geoLoading} style={{ display: 'flex', alignItems: 'center', gap: 7, background: '#eef2ee', color: '#0f5132', border: 'none', borderRadius: 8, padding: '9px 14px', fontSize: 12.5, fontWeight: 600, opacity: geoLoading ? 0.7 : 1 }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0f5132" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></svg>
+                      {geoLoading ? 'Obteniendo ubicación…' : 'Usar mi ubicación actual'}
+                    </button>
                     <div style={{ flex: 1 }}>
                       <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#3a4a41', marginBottom: 6 }}>Radio (m)</label>
                       <input type="number" min={200} max={10000} step={100} value={wRadio} onChange={(e) => setWRadio(Math.max(200, Math.min(10000, parseInt(e.target.value, 10) || 1500)))} style={{ width: '100%', border: '1px solid #d9e1db', background: '#f8faf8', borderRadius: 8, padding: '11px 13px', fontSize: 14, color: '#263238' }} />
                     </div>
                   </div>
-                  <button onClick={usarUbicacionActual} disabled={geoLoading} style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 7, background: '#eef2ee', color: '#0f5132', border: 'none', borderRadius: 8, padding: '9px 14px', fontSize: 12.5, fontWeight: 600, opacity: geoLoading ? 0.7 : 1 }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0f5132" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></svg>
-                    {geoLoading ? 'Obteniendo ubicación…' : 'Usar mi ubicación actual'}
-                  </button>
                   {geoError && <div style={{ fontSize: 12, color: '#c0392b' }}>{geoError}</div>}
                   <div style={{ fontSize: 12, color: '#8a978f', display: 'flex', alignItems: 'center', gap: 7 }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a978f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
-                    Busca en un radio real alrededor de un punto — útil si estás parado en el kiosco o zona exacta.
+                    Haz clic en el mapa para colocar el punto (o arrastra el marcador) — busca en un radio real alrededor de él.
                   </div>
+                  <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #e6ece7' }}>
+                    <MarkerPickerMap
+                      lat={wLat} lng={wLng}
+                      onPick={(p) => { setWLat(p.lat); setWLng(p.lng); }}
+                      radioMetros={wRadio}
+                      recenterToken={geoToken}
+                      height={220}
+                    />
+                  </div>
+                  {wLat != null && wLng != null && (
+                    <div style={{ fontSize: 11.5, color: '#9aa39c' }}>{wLat.toFixed(5)}, {wLng.toFixed(5)}</div>
+                  )}
                 </div>
               )}
 
@@ -261,25 +309,20 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
                 <span style={{ fontSize: 13, color: '#3a4a41' }}>Dibujar zona en el mapa <span style={{ color: '#8a978f' }}>(opcional)</span></span>
               </label>
               {wDrawZone && (
-                <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #e6ece7' }}>
-                  <div style={{ position: 'relative', height: 150, background: '#e7ece4' }}>
-                    <svg onClick={onMapClick} width="100%" height="100%" viewBox="0 0 560 150" preserveAspectRatio="xMidYMid slice" style={{ position: 'absolute', inset: 0, cursor: 'crosshair' }}>
-                      <rect width="560" height="150" fill="#e7ece4" />
-                      <g stroke="#d6ddd0" strokeWidth="6"><line x1="0" y1="50" x2="560" y2="50" /><line x1="0" y1="105" x2="560" y2="105" /><line x1="150" y1="0" x2="150" y2="150" /><line x1="320" y1="0" x2="320" y2="150" /><line x1="450" y1="0" x2="450" y2="150" /></g>
-                      <g stroke="#ffffff" strokeWidth="3"><line x1="0" y1="50" x2="560" y2="50" /><line x1="0" y1="105" x2="560" y2="105" /><line x1="150" y1="0" x2="150" y2="150" /><line x1="320" y1="0" x2="320" y2="150" /><line x1="450" y1="0" x2="450" y2="150" /></g>
-                      {polygon.length > 1 && (
-                        <polygon points={polygon.map((p) => `${p.x},${p.y}`).join(' ')} fill="rgba(15,81,50,.13)" stroke="#0f5132" strokeWidth="2.5" strokeDasharray="8 6" />
-                      )}
-                      {polygon.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={4} fill="#0f5132" />)}
-                    </svg>
-                    <div style={{ position: 'absolute', left: 12, top: 12, background: '#0f5132', color: '#fff', borderRadius: 7, padding: '7px 12px', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 7 }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3 7 7 .5-5.5 4.5L18 21l-6-4-6 4 1.5-7L2 9.5 9 9z" /></svg>
-                      Haz clic para dibujar la zona
-                    </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ fontSize: 12, color: '#8a978f', display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a978f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
+                    Haz clic para agregar puntos y dibujar el contorno de la zona; arrastra un punto para ajustarlo.
+                  </div>
+                  <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #e6ece7', position: 'relative' }}>
+                    <PolygonDrawMap key={polygonResetKey} points={polygon} onChange={setPolygon} height={220} />
                     {polygon.length > 0 && (
-                      <button onClick={() => setPolygon([])} style={{ position: 'absolute', right: 12, top: 12, background: '#fff', border: 'none', borderRadius: 7, padding: '6px 10px', fontSize: 12, fontWeight: 600, color: '#c0392b' }}>Limpiar</button>
+                      <button onClick={() => { setPolygon([]); setPolygonResetKey((k) => k + 1); }} style={{ position: 'absolute', right: 12, top: 12, background: '#fff', border: 'none', borderRadius: 7, padding: '6px 10px', fontSize: 12, fontWeight: 600, color: '#c0392b', boxShadow: '0 1px 4px rgba(0,0,0,.2)' }}>Limpiar</button>
                     )}
                   </div>
+                  {polygon.length > 0 && polygon.length < 3 && (
+                    <div style={{ fontSize: 11.5, color: '#c96a1e' }}>Agrega al menos 3 puntos para que la zona sea válida.</div>
+                  )}
                 </div>
               )}
             </div>
@@ -418,15 +461,6 @@ function FieldSelect({ label, value, onChange, options }: { label: string; value
         </select>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6f7d75" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}><polyline points="6 9 12 15 18 9" /></svg>
       </div>
-    </div>
-  );
-}
-
-function FieldInput({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
-  return (
-    <div style={{ flex: 1 }}>
-      <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#3a4a41', marginBottom: 6 }}>{label}</label>
-      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={{ width: '100%', border: '1px solid #d9e1db', background: '#f8faf8', borderRadius: 8, padding: '11px 13px', fontSize: 14, color: '#263238' }} />
     </div>
   );
 }
