@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { AggregateField } from 'firebase-admin/firestore';
-import { db, FieldPath } from '../db.js';
+import { db, FieldPath, Timestamp } from '../db.js';
 import { resolveVendedorIds } from './_filters.js';
-import { isEmptyRestriction, toIso } from '../firestore-helpers.js';
+import { isEmptyRestriction, toIso, parseDateRangeQuery } from '../firestore-helpers.js';
 
 export const reportesRouter = Router();
 
@@ -32,13 +32,19 @@ async function kmRecorridos(vendedorId: string | null, ids: string[] | null): Pr
   return Math.round(((snap.data().sum as number | null) || 0) * 10) / 10;
 }
 
+function conRango(q: FirebaseFirestore.Query, rango: { start: Date; end: Date } | null): FirebaseFirestore.Query {
+  if (!rango) return q;
+  return q.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end));
+}
+
 reportesRouter.get('/summary', async (req, res) => {
-  const { producto, vendedor } = req.query as { producto?: string; vendedor?: string };
+  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
   const ids = await resolveVendedorIds(producto, vendedor);
+  const rango = parseDateRangeQuery(desde, hasta);
 
   const [visitasTotales, solicitudes, km] = await Promise.all([
-    countVisitas(ids, (q) => q),
-    countVisitas(ids, (q) => q.where('resultado', '==', 'Se realizó solicitud')),
+    countVisitas(ids, (q) => conRango(q, rango)),
+    countVisitas(ids, (q) => conRango(q.where('resultado', '==', 'Se realizó solicitud'), rango)),
     kmRecorridos(null, ids),
   ]);
   const conversion = visitasTotales > 0 ? Math.round((solicitudes / visitasTotales) * 100) : 0;
@@ -47,9 +53,10 @@ reportesRouter.get('/summary', async (req, res) => {
 });
 
 reportesRouter.get('/vendedores', async (req, res) => {
-  const { producto, vendedor } = req.query as { producto?: string; vendedor?: string };
+  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
   const ids = await resolveVendedorIds(producto, vendedor);
   if (isEmptyRestriction(ids)) return res.json([]);
+  const rango = parseDateRangeQuery(desde, hasta);
 
   const snap = ids
     ? await db.collection('vendedores').where(FieldPath.documentId(), 'in', ids).get()
@@ -58,8 +65,8 @@ reportesRouter.get('/vendedores', async (req, res) => {
 
   const out = await Promise.all(vendedores.map(async (v) => {
     const [total, solicitudes, km] = await Promise.all([
-      countVisitas([v.id], (q) => q),
-      countVisitas([v.id], (q) => q.where('resultado', '==', 'Se realizó solicitud')),
+      countVisitas([v.id], (q) => conRango(q, rango)),
+      countVisitas([v.id], (q) => conRango(q.where('resultado', '==', 'Se realizó solicitud'), rango)),
       kmRecorridos(v.id, null),
     ]);
     const w1 = total > 0 ? Math.round((solicitudes / total) * 100) : 0;
@@ -69,12 +76,14 @@ reportesRouter.get('/vendedores', async (req, res) => {
 });
 
 reportesRouter.get('/evidencias', async (req, res) => {
-  const { producto, vendedor } = req.query as { producto?: string; vendedor?: string };
+  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
   const ids = await resolveVendedorIds(producto, vendedor);
   if (isEmptyRestriction(ids)) return res.json([]);
+  const rango = parseDateRangeQuery(desde, hasta);
 
   let query: FirebaseFirestore.Query = db.collection('visitas');
   if (ids) query = query.where('vendedorId', 'in', ids);
+  query = conRango(query, rango);
   // fotoUrl != null no se puede combinar con orderBy(createdAt) en Firestore;
   // se pide de más y se filtra/recorta en memoria.
   const snap = await query.orderBy('createdAt', 'desc').limit(50).get();

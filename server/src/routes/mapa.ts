@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
 import { resolveVendedorIds } from './_filters.js';
-import { isEmptyRestriction } from '../firestore-helpers.js';
+import { isEmptyRestriction, parseDateRangeQuery } from '../firestore-helpers.js';
 
 export const mapaRouter = Router();
 
@@ -30,13 +30,15 @@ async function countProspectos(ids: string[] | null, extra: (q: FirebaseFirestor
 }
 
 mapaRouter.get('/leads', async (req, res) => {
-  const { producto, vendedor } = req.query as { producto?: string; vendedor?: string };
+  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
   const ids = await resolveVendedorIds(producto, vendedor);
+  const rango = parseDateRangeQuery(desde, hasta);
 
   let leads: { id: string; data: ProspectoDoc }[] = [];
   if (!isEmptyRestriction(ids)) {
     let query: FirebaseFirestore.Query = db.collection('prospectos');
     if (ids) query = query.where('vendedorId', 'in', ids);
+    if (rango) query = query.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end));
     // Se pide de más porque filtramos lat/lng en memoria (Firestore no permite
     // combinar dos filtros "!= null" en la misma consulta).
     const snap = await query.orderBy('createdAt', 'desc').limit(600).get();
@@ -53,10 +55,13 @@ mapaRouter.get('/leads', async (req, res) => {
     if (doc.exists) vendedores.set(id, (doc.data() as { nombre: string }).nombre);
   }));
 
+  const conRango = (q: FirebaseFirestore.Query) => rango
+    ? q.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end))
+    : q;
   const [total, porVisitar, visitados] = await Promise.all([
-    countProspectos(ids, (q) => q),
-    countProspectos(ids, (q) => q.where('estado', '==', 'por_visitar')),
-    countProspectos(ids, (q) => q.where('estado', '==', 'visitado')),
+    countProspectos(ids, conRango),
+    countProspectos(ids, (q) => conRango(q.where('estado', '==', 'por_visitar'))),
+    countProspectos(ids, (q) => conRango(q.where('estado', '==', 'visitado'))),
   ]);
   const sincronizadosCrm = (await db.collection('crmDeals').where('source', '==', 'hubspot').count().get()).data().count;
 
@@ -72,18 +77,14 @@ mapaRouter.get('/leads', async (req, res) => {
 // Puntos para el mapa de calor: la ubicación GPS de cada visita registrada.
 // Las visitas antiguas (sin GPS propio) heredan las coordenadas de su prospecto.
 mapaRouter.get('/calor', async (req, res) => {
-  const { producto, vendedor, dias } = req.query as { producto?: string; vendedor?: string; dias?: string };
+  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
   const ids = await resolveVendedorIds(producto, vendedor);
   if (isEmptyRestriction(ids)) return res.json({ puntos: [], visitasTotales: 0, visitasConUbicacion: 0 });
+  const rango = parseDateRangeQuery(desde, hasta);
 
   let query: FirebaseFirestore.Query = db.collection('visitas');
   if (ids) query = query.where('vendedorId', 'in', ids);
-  const nDias = Number(dias);
-  if (Number.isFinite(nDias) && nDias > 0) {
-    const desde = new Date();
-    desde.setDate(desde.getDate() - nDias);
-    query = query.where('createdAt', '>=', Timestamp.fromDate(desde));
-  }
+  if (rango) query = query.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end));
   const snap = await query.orderBy('createdAt', 'desc').limit(2000).get();
   const visitas = snap.docs.map((d) => d.data() as VisitaGeoDoc);
 

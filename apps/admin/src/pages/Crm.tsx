@@ -12,7 +12,7 @@ const STAGE_ACCENTS: Record<string, string> = {
 };
 
 export function Crm() {
-  const { fProducto, fVendedor } = useFilters();
+  const { fProducto, fVendedor, fDesde, fHasta } = useFilters();
   const { showToast } = useToast();
   const [deals, setDeals] = useState<CrmDeal[]>([]);
   const [status, setStatus] = useState<{ configured: boolean } | null>(null);
@@ -21,10 +21,10 @@ export function Crm() {
   const [editing, setEditing] = useState<CrmDeal | null>(null);
 
   const load = () => {
-    api.crmDeals(fProducto, fVendedor).then(setDeals).catch(() => {});
+    api.crmDeals(fProducto, fVendedor, fDesde ?? undefined, fHasta ?? undefined).then(setDeals).catch(() => {});
   };
 
-  useEffect(load, [fProducto, fVendedor]);
+  useEffect(load, [fProducto, fVendedor, fDesde, fHasta]);
   useEffect(() => { api.crmStatus().then(setStatus).catch(() => {}); }, []);
 
   const sync = async () => {

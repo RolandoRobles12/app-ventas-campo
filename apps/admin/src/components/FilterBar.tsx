@@ -1,4 +1,5 @@
 import { useFilters, TODOS_PRODUCTOS, TODOS_VENDEDORES } from '../filters';
+import { RANGO_LABELS, type RangoPreset } from '../lib/dateRanges';
 
 function SelectChevron() {
   return (
@@ -6,8 +7,15 @@ function SelectChevron() {
   );
 }
 
+const dateInputStyle: React.CSSProperties = {
+  border: '1px solid #d9e1db', background: '#fff', borderRadius: 8, padding: '8px 10px', fontSize: 13, color: '#263238',
+};
+
 export function FilterBar({ extra }: { extra?: React.ReactNode }) {
-  const { productos, vendedoresFiltrados, fProducto, fVendedor, setFProducto, setFVendedor } = useFilters();
+  const {
+    productos, vendedoresFiltrados, fProducto, fVendedor, setFProducto, setFVendedor,
+    fRango, setFRango, fDesdePersonalizado, fHastaPersonalizado, setFDesdePersonalizado, setFHastaPersonalizado,
+  } = useFilters();
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -29,6 +37,19 @@ export function FilterBar({ extra }: { extra?: React.ReactNode }) {
         </select>
         <SelectChevron />
       </div>
+      <div style={{ position: 'relative' }}>
+        <select className="fsel" value={fRango} onChange={(e) => setFRango(e.target.value as RangoPreset)}>
+          {(Object.keys(RANGO_LABELS) as RangoPreset[]).map((r) => <option key={r} value={r}>{RANGO_LABELS[r]}</option>)}
+        </select>
+        <SelectChevron />
+      </div>
+      {fRango === 'personalizado' && (
+        <>
+          <input type="date" value={fDesdePersonalizado ?? ''} onChange={(e) => setFDesdePersonalizado(e.target.value || null)} style={dateInputStyle} />
+          <span style={{ color: '#8a978f', fontSize: 12.5 }}>a</span>
+          <input type="date" value={fHastaPersonalizado ?? ''} onChange={(e) => setFHastaPersonalizado(e.target.value || null)} style={dateInputStyle} />
+        </>
+      )}
       {extra}
     </div>
   );
