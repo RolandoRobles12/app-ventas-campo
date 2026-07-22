@@ -236,12 +236,23 @@ export async function consultarDenue(opts: {
   const seen = new Set<string>();
   const merged: DenueProspecto[] = [];
 
-  for (const giro of giros) {
+  // En paralelo, no secuencial: con varios giros seleccionados, un solo
+  // request lento/colgado ya no bloquea a los demás — antes, un giro atorado
+  // a mitad de la lista dejaba la búsqueda entera esperando su timeout de 20s
+  // antes de siquiera intentar los giros restantes.
+  const porGiro = await Promise.allSettled(giros.map(async (giro) => {
     const keyword = KEYWORD_POR_GIRO[giro] || normalize(giro);
     const alcance = `${ubicacion.lat},${ubicacion.lng}/${ubicacion.radioMetros || 1500}`;
+    return { giro, raw: await buscarDenue(keyword, alcance, token) };
+  }));
 
-    const raw = await buscarDenue(keyword, alcance, token);
-
+  const errores: string[] = [];
+  for (const resultado of porGiro) {
+    if (resultado.status === 'rejected') {
+      errores.push(resultado.reason?.message || String(resultado.reason));
+      continue;
+    }
+    const { giro, raw } = resultado.value;
     for (const r of raw) {
       if (seen.has(r.Id)) continue;
 
@@ -270,6 +281,13 @@ export async function consultarDenue(opts: {
         lat, lng, distanciaKm,
       });
     }
+  }
+
+  // Si TODOS los giros fallaron no hay nada que mostrar — ahí sí conviene
+  // fallar con el motivo real. Si al menos uno funcionó, mejor mostrar lo que
+  // se encontró que descartar una búsqueda parcialmente exitosa.
+  if (merged.length === 0 && errores.length > 0 && errores.length === giros.length) {
+    throw new Error(errores[0]);
   }
 
   merged.sort((a, b) => (a.distanciaKm ?? Infinity) - (b.distanciaKm ?? Infinity));
