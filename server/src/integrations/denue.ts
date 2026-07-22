@@ -77,17 +77,25 @@ export function isDenueConfigured(): boolean {
 async function buscarDenue(condicion: string, alcance: string, token: string): Promise<DenueRawResult[]> {
   const url = `${DENUE_BASE}/Buscar/${encodeURIComponent(condicion)}/${alcance}/${token}`;
 
+  // 20s: el DENUE de INEGI a veces tarda o se cuelga; sin timeout, un request
+  // colgado deja "Consultando el DENUE..." girando para siempre. Se usa
+  // AbortController manual en vez de AbortSignal.timeout(): esta última tiene
+  // bugs conocidos de "ERR_ASSERTION" en Node/undici cuando se crean varias
+  // seguidas (aquí se llama una vez por giro, en secuencia).
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
+
   let res: Response;
   try {
-    // 20s: el DENUE de INEGI a veces tarda o se cuelga; sin timeout, un
-    // request colgado deja "Consultando el DENUE..." girando para siempre.
-    res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+    res = await fetch(url, { signal: controller.signal });
   } catch (err: any) {
     // fetch() lanza "fetch failed" genérico para cualquier falla de red — el
     // motivo real (DNS, timeout, conexión rechazada/reseteada) viaja en
     // `.cause`, que el mensaje por sí solo no muestra.
     const causa = err?.cause?.code || err?.cause?.message || err?.name;
     throw new Error(`No se pudo conectar con el DENUE${causa ? ` (${causa})` : ''}: ${err?.message || err}`);
+  } finally {
+    clearTimeout(timeoutId);
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
