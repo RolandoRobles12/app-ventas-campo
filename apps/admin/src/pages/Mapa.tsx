@@ -6,12 +6,12 @@ import { GeoMap, type MapPin } from '../components/GeoMap';
 import { estadoProspectoBadgeStyle } from '../badges';
 
 export function Mapa() {
-  const { fProducto, fVendedor, fDesde, fHasta } = useFilters();
+  const { fProductos, fVendedores, fDesde, fHasta } = useFilters();
   const [data, setData] = useState<MapaLeadsResponse | null>(null);
 
   useEffect(() => {
-    api.mapaLeads(fProducto, fVendedor, fDesde ?? undefined, fHasta ?? undefined).then(setData).catch(() => {});
-  }, [fProducto, fVendedor, fDesde, fHasta]);
+    api.mapaLeads(fProductos, fVendedores, fDesde ?? undefined, fHasta ?? undefined).then(setData).catch(() => {});
+  }, [fProductos, fVendedores, fDesde, fHasta]);
 
   const leads = data?.leads ?? [];
   const pins = useMemo<MapPin[]>(

@@ -2,17 +2,15 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { api, type Producto, type Vendedor } from './api';
 import { calcularRango, type RangoPreset } from './lib/dateRanges';
 
-export const TODOS_PRODUCTOS = 'Todos los productos';
-export const TODOS_VENDEDORES = 'Todos los vendedores';
-
 interface FiltersState {
   productos: Producto[];
   vendedores: Vendedor[];
   vendedoresFiltrados: Vendedor[];
-  fProducto: string;
-  fVendedor: string;
-  setFProducto: (p: string) => void;
-  setFVendedor: (v: string) => void;
+  // Ids de producto/vendedor elegidos (selección múltiple); [] = "todos".
+  fProductos: string[];
+  fVendedores: string[];
+  setFProductos: (ids: string[]) => void;
+  setFVendedores: (ids: string[]) => void;
   fRango: RangoPreset;
   setFRango: (r: RangoPreset) => void;
   fDesdePersonalizado: string | null;
@@ -31,8 +29,8 @@ const FiltersContext = createContext<FiltersState | null>(null);
 export function FiltersProvider({ children }: { children: ReactNode }) {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [vendedores, setVendedores] = useState<Vendedor[]>([]);
-  const [fProducto, setFProducto] = useState(TODOS_PRODUCTOS);
-  const [fVendedor, setFVendedor] = useState(TODOS_VENDEDORES);
+  const [fProductos, setFProductosState] = useState<string[]>([]);
+  const [fVendedores, setFVendedoresState] = useState<string[]>([]);
   const [fRango, setFRango] = useState<RangoPreset>('todo');
   const [fDesdePersonalizado, setFDesdePersonalizado] = useState<string | null>(null);
   const [fHastaPersonalizado, setFHastaPersonalizado] = useState<string | null>(null);
@@ -44,14 +42,26 @@ export function FiltersProvider({ children }: { children: ReactNode }) {
 
   useEffect(reload, []);
 
-  const vendedoresFiltrados = fProducto === TODOS_PRODUCTOS ? vendedores : vendedores.filter((v) => v.producto === fProducto);
+  const vendedoresFiltrados = fProductos.length ? vendedores.filter((v) => fProductos.includes(v.productoId)) : vendedores;
   const rango = calcularRango(fRango, fDesdePersonalizado, fHastaPersonalizado);
+
+  // Al cambiar los productos elegidos, se quitan de la selección de
+  // vendedores los que ya no pertenezcan a ninguno de esos productos.
+  const setFProductos = (ids: string[]) => {
+    setFProductosState(ids);
+    if (ids.length) {
+      setFVendedoresState((prev) => prev.filter((vid) => {
+        const v = vendedores.find((x) => x.id === vid);
+        return v && ids.includes(v.productoId);
+      }));
+    }
+  };
 
   return (
     <FiltersContext.Provider value={{
-      productos, vendedores, vendedoresFiltrados, fProducto, fVendedor,
-      setFProducto: (p) => { setFProducto(p); setFVendedor(TODOS_VENDEDORES); },
-      setFVendedor,
+      productos, vendedores, vendedoresFiltrados, fProductos, fVendedores,
+      setFProductos,
+      setFVendedores: setFVendedoresState,
       fRango, setFRango,
       fDesdePersonalizado, fHastaPersonalizado, setFDesdePersonalizado, setFHastaPersonalizado,
       fDesde: rango?.desde ?? null, fHasta: rango?.hasta ?? null,

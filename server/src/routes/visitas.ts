@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { db, Timestamp, FieldPath } from '../db.js';
-import { toIso, haversineMetros, chunkArray, parseDateRangeQuery, isEmptyRestriction } from '../firestore-helpers.js';
+import { toIso, haversineMetros, chunkArray, parseDateRangeQuery, parseCsvParam, isEmptyRestriction } from '../firestore-helpers.js';
 import { saveUpload } from '../storage.js';
 import { productosPorId } from './vendedores.js';
+import { resolveVendedorIds } from './_filters.js';
 
 export const visitasRouter = Router();
 
@@ -94,10 +95,6 @@ async function vendedoresPorId(ids: string[]): Promise<Map<string, { nombre: str
   return map;
 }
 
-function parseCsv(raw: string | undefined): string[] {
-  return raw ? raw.split(',').map((s) => s.trim()).filter(Boolean) : [];
-}
-
 // Lista de visitas individuales con filtros combinables: uno o varios
 // vendedores, uno o varios productos (si no se dan vendedores directamente,
 // se resuelve a los vendedores de esos productos), uno o varios resultados,
@@ -109,23 +106,14 @@ visitasRouter.get('/', async (req, res) => {
     desde?: string; hasta?: string; cursor?: string; limit?: string;
   };
 
-  const vendedorIdList = parseCsv(vendedorIds);
-  const productoIdList = parseCsv(productoIds);
-  const resultadoList = parseCsv(resultados);
+  const vendedorIdList = parseCsvParam(vendedorIds);
+  const productoIdList = parseCsvParam(productoIds);
+  const resultadoList = parseCsvParam(resultados);
   const pageSize = Math.max(1, Math.min(100, parseInt(limit || '', 10) || 20));
   const rango = parseDateRangeQuery(desde, hasta);
   const cur = cursor ? decodeCursor(cursor) : null;
 
-  let ids: string[] | null = null;
-  if (vendedorIdList.length) {
-    ids = vendedorIdList;
-  } else if (productoIdList.length) {
-    const snaps = await Promise.all(
-      chunkArray(productoIdList).map((c) => db.collection('vendedores').where('productoId', 'in', c).get()),
-    );
-    ids = snaps.flatMap((s) => s.docs.map((d) => d.id));
-  }
-
+  const ids = await resolveVendedorIds(vendedorIdList, productoIdList);
   if (isEmptyRestriction(ids)) return res.json({ items: [], nextCursor: null });
 
   const idChunks = ids ? chunkArray(ids) : [null];

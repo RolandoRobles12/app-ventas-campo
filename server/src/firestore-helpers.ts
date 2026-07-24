@@ -53,6 +53,12 @@ export function chunkArray<T>(arr: T[], size = 30): T[][] {
   return out;
 }
 
+// Los filtros de selección múltiple del admin (producto/vendedor/resultado)
+// se mandan como query params separados por coma.
+export function parseCsvParam(raw?: string): string[] {
+  return raw ? raw.split(',').map((s) => s.trim()).filter(Boolean) : [];
+}
+
 export function haversineMetros(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371000;
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;

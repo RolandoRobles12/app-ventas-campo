@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
-import { toIso, parseDateRangeQuery } from '../firestore-helpers.js';
+import { toIso, parseDateRangeQuery, parseCsvParam } from '../firestore-helpers.js';
 import {
   fetchHubspotDeals, updateHubspotDeal, hubspotDealUrl, isHubspotConfigured,
   DEAL_STAGE_LABELS, listHubspotOwners, listDealPipelines,
@@ -71,24 +71,15 @@ crmRouter.get('/status', (_req, res) => {
 });
 
 crmRouter.get('/deals', async (req, res) => {
-  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
+  const { productoIds, vendedorIds, desde, hasta } = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
   const rango = parseDateRangeQuery(desde, hasta);
-
-  let productoId: string | undefined;
-  if (producto && producto !== 'Todos los productos') {
-    const snap = await db.collection('productos').where('nombre', '==', producto).limit(1).get();
-    productoId = snap.empty ? '__none__' : snap.docs[0].id;
-  }
-  let dealOwnerId: string | undefined;
-  if (vendedor && vendedor !== 'Todos los vendedores') {
-    const snap = await db.collection('vendedores').where('nombre', '==', vendedor).limit(1).get();
-    dealOwnerId = snap.empty ? '__none__' : snap.docs[0].id;
-  }
+  const productoIdList = parseCsvParam(productoIds);
+  const vendedorIdList = parseCsvParam(vendedorIds);
 
   const snap = await db.collection('crmDeals').orderBy('createdAt', 'desc').get();
   let deals = snap.docs.map((d) => ({ id: d.id, data: d.data() as CrmDealDoc }));
-  if (productoId) deals = deals.filter((d) => d.data.productoId === productoId);
-  if (dealOwnerId) deals = deals.filter((d) => d.data.dealOwnerId === dealOwnerId);
+  if (productoIdList.length) deals = deals.filter((d) => !!d.data.productoId && productoIdList.includes(d.data.productoId));
+  if (vendedorIdList.length) deals = deals.filter((d) => !!d.data.dealOwnerId && vendedorIdList.includes(d.data.dealOwnerId));
   if (rango) deals = deals.filter((d) => {
     const created = d.data.createdAt?.toDate();
     return created && created >= rango.start && created < rango.end;

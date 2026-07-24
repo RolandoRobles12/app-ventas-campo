@@ -5,18 +5,18 @@ import { FilterBar } from '../components/FilterBar';
 import { estadoBadgeStyle } from '../badges';
 
 export function Seguimiento() {
-  const { fProducto, fVendedor } = useFilters();
+  const { fProductos, fVendedores } = useFilters();
   const [items, setItems] = useState<SeguimientoItem[]>([]);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    api.seguimiento(fProducto, fVendedor).then(setItems).catch(() => {});
+    api.seguimiento(fProductos, fVendedores).then(setItems).catch(() => {});
     const interval = setInterval(() => {
       setTick((t) => t + 1);
-      api.seguimiento(fProducto, fVendedor).then(setItems).catch(() => {});
+      api.seguimiento(fProductos, fVendedores).then(setItems).catch(() => {});
     }, 15000);
     return () => clearInterval(interval);
-  }, [fProducto, fVendedor]);
+  }, [fProductos, fVendedores]);
 
   return (
     <div className="screen">

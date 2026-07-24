@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, Timestamp, FieldPath } from '../db.js';
 import { resolveVendedorIds } from './_filters.js';
-import { isEmptyRestriction, parseDateRangeQuery } from '../firestore-helpers.js';
+import { isEmptyRestriction, parseDateRangeQuery, parseCsvParam } from '../firestore-helpers.js';
 
 export const dashboardRouter = Router();
 
@@ -52,8 +52,8 @@ async function countVendedores(ids: string[] | null, extra: (q: FirebaseFirestor
 }
 
 dashboardRouter.get('/summary', async (req, res) => {
-  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
-  const ids = await resolveVendedorIds(producto, vendedor);
+  const { productoIds, vendedorIds, desde, hasta } = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
+  const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
   const rango = parseDateRangeQuery(desde, hasta);
 
   const start = new Date(); start.setHours(0, 0, 0, 0);
@@ -89,8 +89,8 @@ dashboardRouter.get('/summary', async (req, res) => {
 });
 
 dashboardRouter.get('/semana', async (req, res) => {
-  const { producto, vendedor } = req.query as { producto?: string; vendedor?: string };
-  const ids = await resolveVendedorIds(producto, vendedor);
+  const { productoIds, vendedorIds } = req.query as { productoIds?: string; vendedorIds?: string };
+  const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
 
   const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   const out: { day: string; val: number }[] = [];
@@ -104,8 +104,8 @@ dashboardRouter.get('/semana', async (req, res) => {
 });
 
 dashboardRouter.get('/resultados', async (req, res) => {
-  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
-  const ids = await resolveVendedorIds(producto, vendedor);
+  const { productoIds, vendedorIds, desde, hasta } = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
+  const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
   const rango = parseDateRangeQuery(desde, hasta);
 
   const counts = await Promise.all(RESULTADOS.map((r) => countVisitas(ids, (q) => {
@@ -121,8 +121,8 @@ dashboardRouter.get('/resultados', async (req, res) => {
 });
 
 dashboardRouter.get('/actividad', async (req, res) => {
-  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
-  const ids = await resolveVendedorIds(producto, vendedor);
+  const { productoIds, vendedorIds, desde, hasta } = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
+  const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
   if (isEmptyRestriction(ids)) return res.json([]);
   const rango = parseDateRangeQuery(desde, hasta);
 

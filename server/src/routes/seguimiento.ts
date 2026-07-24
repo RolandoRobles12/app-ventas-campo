@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { AggregateField } from 'firebase-admin/firestore';
 import { db, Timestamp, FieldPath } from '../db.js';
 import { resolveVendedorIds } from './_filters.js';
-import { isEmptyRestriction } from '../firestore-helpers.js';
+import { isEmptyRestriction, parseCsvParam } from '../firestore-helpers.js';
 
 export const seguimientoRouter = Router();
 
@@ -24,8 +24,8 @@ interface VisitaDoc {
 }
 
 seguimientoRouter.get('/', async (req, res) => {
-  const { producto, vendedor } = req.query as { producto?: string; vendedor?: string };
-  const ids = await resolveVendedorIds(producto, vendedor);
+  const { productoIds, vendedorIds } = req.query as { productoIds?: string; vendedorIds?: string };
+  const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
   if (isEmptyRestriction(ids)) return res.json([]);
   const fecha = new Date().toISOString().slice(0, 10);
 

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { AggregateField } from 'firebase-admin/firestore';
 import { db, FieldPath, Timestamp } from '../db.js';
 import { resolveVendedorIds } from './_filters.js';
-import { isEmptyRestriction, toIso, parseDateRangeQuery } from '../firestore-helpers.js';
+import { isEmptyRestriction, toIso, parseDateRangeQuery, parseCsvParam } from '../firestore-helpers.js';
 
 export const reportesRouter = Router();
 
@@ -38,8 +38,8 @@ function conRango(q: FirebaseFirestore.Query, rango: { start: Date; end: Date } 
 }
 
 reportesRouter.get('/summary', async (req, res) => {
-  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
-  const ids = await resolveVendedorIds(producto, vendedor);
+  const { productoIds, vendedorIds, desde, hasta } = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
+  const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
   const rango = parseDateRangeQuery(desde, hasta);
 
   const [visitasTotales, solicitudes, km] = await Promise.all([
@@ -53,8 +53,8 @@ reportesRouter.get('/summary', async (req, res) => {
 });
 
 reportesRouter.get('/vendedores', async (req, res) => {
-  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
-  const ids = await resolveVendedorIds(producto, vendedor);
+  const { productoIds, vendedorIds, desde, hasta } = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
+  const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
   if (isEmptyRestriction(ids)) return res.json([]);
   const rango = parseDateRangeQuery(desde, hasta);
 
@@ -76,8 +76,8 @@ reportesRouter.get('/vendedores', async (req, res) => {
 });
 
 reportesRouter.get('/evidencias', async (req, res) => {
-  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
-  const ids = await resolveVendedorIds(producto, vendedor);
+  const { productoIds, vendedorIds, desde, hasta } = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
+  const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
   if (isEmptyRestriction(ids)) return res.json([]);
   const rango = parseDateRangeQuery(desde, hasta);
 
