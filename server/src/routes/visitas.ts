@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { db, Timestamp } from '../db.js';
-import { toIso, haversineMetros } from '../firestore-helpers.js';
+import { db, Timestamp, FieldPath } from '../db.js';
+import { toIso, haversineMetros, chunkArray, parseDateRangeQuery, isEmptyRestriction } from '../firestore-helpers.js';
 import { saveUpload } from '../storage.js';
+import { productosPorId } from './vendedores.js';
 
 export const visitasRouter = Router();
 
@@ -63,6 +64,132 @@ function shape(id: string, v: VisitaDoc) {
     createdAt: toIso(v.createdAt),
   };
 }
+
+function encodeCursor(createdAt: Timestamp, id: string): string {
+  return Buffer.from(`${createdAt.toMillis()}_${id}`, 'utf-8').toString('base64url');
+}
+
+function decodeCursor(cursor: string): { millis: number; id: string } | null {
+  try {
+    const raw = Buffer.from(cursor, 'base64url').toString('utf-8');
+    const sep = raw.lastIndexOf('_');
+    if (sep < 0) return null;
+    const millis = Number(raw.slice(0, sep));
+    const id = raw.slice(sep + 1);
+    return Number.isFinite(millis) && id ? { millis, id } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function vendedoresPorId(ids: string[]): Promise<Map<string, { nombre: string; productoId: string }>> {
+  const unique = [...new Set(ids)];
+  const map = new Map<string, { nombre: string; productoId: string }>();
+  await Promise.all(unique.map(async (id) => {
+    const doc = await db.collection('vendedores').doc(id).get();
+    if (!doc.exists) return;
+    const d = doc.data() as { nombre: string; productoId: string };
+    map.set(id, { nombre: d.nombre, productoId: d.productoId });
+  }));
+  return map;
+}
+
+function parseCsv(raw: string | undefined): string[] {
+  return raw ? raw.split(',').map((s) => s.trim()).filter(Boolean) : [];
+}
+
+// Lista de visitas individuales con filtros combinables: uno o varios
+// vendedores, uno o varios productos (si no se dan vendedores directamente,
+// se resuelve a los vendedores de esos productos), uno o varios resultados,
+// y rango de fechas. Paginado con cursor (no offset), porque la colección
+// crece sin límite.
+visitasRouter.get('/', async (req, res) => {
+  const { vendedorIds, productoIds, resultados, desde, hasta, cursor, limit } = req.query as {
+    vendedorIds?: string; productoIds?: string; resultados?: string;
+    desde?: string; hasta?: string; cursor?: string; limit?: string;
+  };
+
+  const vendedorIdList = parseCsv(vendedorIds);
+  const productoIdList = parseCsv(productoIds);
+  const resultadoList = parseCsv(resultados);
+  const pageSize = Math.max(1, Math.min(100, parseInt(limit || '', 10) || 20));
+  const rango = parseDateRangeQuery(desde, hasta);
+  const cur = cursor ? decodeCursor(cursor) : null;
+
+  let ids: string[] | null = null;
+  if (vendedorIdList.length) {
+    ids = vendedorIdList;
+  } else if (productoIdList.length) {
+    const snaps = await Promise.all(
+      chunkArray(productoIdList).map((c) => db.collection('vendedores').where('productoId', 'in', c).get()),
+    );
+    ids = snaps.flatMap((s) => s.docs.map((d) => d.id));
+  }
+
+  if (isEmptyRestriction(ids)) return res.json({ items: [], nextCursor: null });
+
+  const idChunks = ids ? chunkArray(ids) : [null];
+  // Se pide de más cuando hay filtro de resultado porque Firestore no permite
+  // combinar el 'in' de vendedorId con otro filtro de igualdad en la misma
+  // consulta sin un índice dedicado; en vez de eso, resultado se filtra en
+  // memoria después de traer los datos (mismo patrón que ya usa /evidencias).
+  const overfetch = resultadoList.length ? pageSize * 3 : pageSize;
+
+  const chunkResults = await Promise.all(idChunks.map(async (chunkIds) => {
+    let query: FirebaseFirestore.Query = db.collection('visitas');
+    if (chunkIds) query = query.where('vendedorId', 'in', chunkIds);
+    if (rango) query = query.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end));
+    query = query.orderBy('createdAt', 'desc').orderBy(FieldPath.documentId(), 'desc');
+    if (cur) query = query.startAfter(Timestamp.fromMillis(cur.millis), cur.id);
+    const snap = await query.limit(overfetch).get();
+    return snap.docs;
+  }));
+
+  // Top-K merge: cada bloque ya viene ordenado desc por (createdAt, id), así
+  // que cualquier fila que pertenezca al top global también está entre las
+  // primeras de su propio bloque — basta con juntarlos todos y reordenar.
+  const merged = chunkResults.flat().sort((a, b) => {
+    const ta = (a.data().createdAt as Timestamp).toMillis();
+    const tb = (b.data().createdAt as Timestamp).toMillis();
+    if (tb !== ta) return tb - ta;
+    return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+  });
+
+  let visitas = merged.map((d) => ({ id: d.id, ...(d.data() as VisitaDoc) }));
+  if (resultadoList.length) visitas = visitas.filter((v) => resultadoList.includes(v.resultado));
+
+  const hasMore = visitas.length > pageSize;
+  const pagina = visitas.slice(0, pageSize);
+  const ultimo = pagina[pagina.length - 1];
+  const nextCursor = hasMore && ultimo ? encodeCursor(ultimo.createdAt, ultimo.id) : null;
+
+  const vendedorMap = await vendedoresPorId(pagina.map((v) => v.vendedorId));
+  const productoNombres = await productosPorId([...vendedorMap.values()].map((v) => v.productoId));
+
+  res.json({
+    items: pagina.map((v) => {
+      const vd = vendedorMap.get(v.vendedorId);
+      return {
+        id: v.id,
+        vendedorId: v.vendedorId,
+        vendedorNombre: vd?.nombre ?? '—',
+        producto: vd ? productoNombres.get(vd.productoId) ?? '—' : '—',
+        esNegocioNuevo: v.esNegocioNuevo,
+        nombreNegocio: v.nombreNegocio,
+        direccion: v.direccion,
+        resultado: v.resultado,
+        notas: v.notas,
+        fotoUrl: v.fotoUrl,
+        lat: v.lat ?? null,
+        lng: v.lng ?? null,
+        ubicacionValida: v.ubicacionValida ?? null,
+        distanciaValidacionMetros: v.distanciaValidacionMetros ?? null,
+        createdAt: toIso(v.createdAt),
+      };
+    }),
+    nextCursor,
+  });
+});
 
 visitasRouter.get('/vendedor/:vendedorId', async (req, res) => {
   const snap = await db.collection('visitas')
