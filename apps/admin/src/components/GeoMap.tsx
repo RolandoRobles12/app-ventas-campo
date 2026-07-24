@@ -205,6 +205,17 @@ export function GeoMap({ heatPoints, pins, height }: { heatPoints?: HeatPoint[];
         if (cancelled || !containerRef.current || mapRef.current) return;
         mapRef.current = new g.maps.Map(containerRef.current, {
           center: DEFAULT_CENTER, zoom: 12, streetViewControl: false, mapTypeControl: false,
+          // Sin esto, Google cambia solo a vista oblicua "45°" en zooms muy
+          // altos (ciudades con esa imagería disponible) — el heatmap
+          // (nuestro overlay de canvas) asume un mapa plano/sin inclinar, y
+          // con el mapa inclinado el cálculo de posición por NE/SO deja de
+          // corresponder al viewport real: el heatmap "desaparece" aunque sí
+          // haya datos. tilt: 0 mantiene siempre la vista aérea plana.
+          tilt: 0,
+          // El botón de rotar/inclinar (que Google muestra solo donde hay
+          // imagería oblicua) dejaría al usuario volver a inclinar el mapa a
+          // mano; se quita para que tilt:0 no se pueda deshacer con un clic.
+          rotateControl: false,
         });
         infoWindowRef.current = new g.maps.InfoWindow();
         setReady(true);
