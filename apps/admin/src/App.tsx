@@ -8,6 +8,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Mapa } from './pages/Mapa';
 import { Seguimiento } from './pages/Seguimiento';
 import { Reportes } from './pages/Reportes';
+import { Visitas } from './pages/Visitas';
 import { Crm } from './pages/Crm';
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/mapa" element={<Mapa />} />
                 <Route path="/seguimiento" element={<Seguimiento />} />
+                <Route path="/visitas" element={<Visitas />} />
                 <Route path="/reportes" element={<Reportes />} />
                 <Route path="/crm" element={<Crm />} />
               </Routes>

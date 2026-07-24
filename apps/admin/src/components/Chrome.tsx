@@ -38,6 +38,7 @@ export function Sidebar() {
       <NavItem to="/dashboard" label="Dashboard" />
       <NavItem to="/mapa" label="Mapa de Leads" />
       <NavItem to="/seguimiento" label="Seguimiento" />
+      <NavItem to="/visitas" label="Visitas" />
       <NavItem to="/reportes" label="Reportes" />
       <NavItem to="/crm" label="CRM · Prospectos" />
     </div>

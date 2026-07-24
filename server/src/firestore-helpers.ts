@@ -44,6 +44,15 @@ export function parseDateRangeQuery(desde?: string, hasta?: string): { start: Da
   return { start, end };
 }
 
+// Firestore's `in` operator acepta como máximo 30 valores; esto parte un
+// arreglo más grande en bloques que se consultan por separado (en paralelo)
+// y se combinan después en memoria.
+export function chunkArray<T>(arr: T[], size = 30): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 export function haversineMetros(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371000;
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;

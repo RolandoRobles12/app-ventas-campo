@@ -13,10 +13,24 @@ const HEAT_GRADIENT = [
   'rgba(255,255,178,0)', '#ffffb2', '#fecc5c', '#fd8d3c', '#f03b20', '#bd0026',
 ];
 
-const HEAT_RADIUS = 22;
-const HEAT_BLUR = 18;
+// Radio de influencia de cada visita en METROS reales, no en pixeles fijos:
+// si fuera un radio fijo en pixeles, al alejar el mapa el mismo círculo
+// representa cada vez más terreno real y una sola visita parece cubrir una
+// zona enorme; al acercar, representa poco terreno y se ve "del tamaño
+// correcto". Calculando el radio en pixeles a partir de esta distancia real
+// (ver metersPerPixel en draw()), el círculo encoge/crece con el zoom igual
+// que lo haría cualquier otro elemento geográfico del mapa.
+const HEAT_RADIUS_METERS = 120;
+const HEAT_MIN_RADIUS_PX = 4;
+const HEAT_MAX_RADIUS_PX = 70;
+const HEAT_BLUR_RATIO = 0.85; // el difuminado es proporcional al radio, no un valor fijo
 const HEAT_OPACITY = 0.75;
-const HEAT_MIN_ALPHA = 0.05; // piso de opacidad: hasta un solo punto se nota
+// Referencia ABSOLUTA de "cuántas visitas en el mismo punto = máxima
+// densidad", no relativa al máximo del conjunto de datos que se esté viendo:
+// si se normalizara contra el máximo local (como hacía la versión anterior),
+// una sola visita siempre se pintaría como "alta densidad" por ser el
+// máximo de un conjunto de 1 — se vea como se vea el resto del mapa.
+const HEAT_MAX_PESO_REFERENCIA = 10;
 
 // google.maps.visualization.HeatmapLayer ya no existe: Google la quitó del
 // runtime de la Maps JavaScript API a partir de v3.65 (antes solo estaba
@@ -31,7 +45,7 @@ const HEAT_MIN_ALPHA = 0.05; // piso de opacidad: hasta un solo punto se nota
 interface HeatmapOverlay extends google.maps.OverlayView {
   setData(points: HeatPoint[]): void;
 }
-type HeatmapOverlayCtor = new (opts: { radius: number; blur: number; opacity: number; gradient: string[] }) => HeatmapOverlay;
+type HeatmapOverlayCtor = new (opts: { opacity: number; gradient: string[] }) => HeatmapOverlay;
 
 let heatmapOverlayClass: HeatmapOverlayCtor | null = null;
 
@@ -56,39 +70,38 @@ function getHeatmapOverlayClass(): HeatmapOverlayCtor {
   class Overlay extends google.maps.OverlayView implements HeatmapOverlay {
     private canvas = document.createElement('canvas');
     private ctx = this.canvas.getContext('2d')!;
-    private dot: HTMLCanvasElement | null = null;
+    private dotTemplates = new Map<number, HTMLCanvasElement>();
     private points: HeatPoint[] = [];
-    private readonly radius: number;
-    private readonly blur: number;
     private readonly gradientLut: Uint8ClampedArray;
 
-    constructor(opts: { radius: number; blur: number; opacity: number; gradient: string[] }) {
+    constructor(opts: { opacity: number; gradient: string[] }) {
       super();
-      this.radius = opts.radius;
-      this.blur = opts.blur;
       this.gradientLut = buildGradientLut(opts.gradient);
       this.canvas.style.position = 'absolute';
       this.canvas.style.pointerEvents = 'none';
       this.canvas.style.opacity = String(opts.opacity);
     }
 
-    // Plantilla reutilizable: un círculo negro difuminado (vía shadowBlur)
-    // — se pinta una vez por overlay y se reusa para cada punto, solo
-    // variando la opacidad con la que se dibuja.
-    private dotTemplate(): HTMLCanvasElement {
-      if (this.dot) return this.dot;
-      const r = this.radius + this.blur;
-      const tpl = document.createElement('canvas');
-      tpl.width = tpl.height = r * 2;
+    // Plantilla de un círculo negro difuminado (vía shadowBlur), cacheada por
+    // radio en pixeles redondeado: el radio real varía con el zoom y la
+    // latitud de cada punto (ver draw()), así que no puede precalcularse una
+    // sola vez para todo el overlay como antes.
+    private dotTemplate(radiusPx: number, blurPx: number): HTMLCanvasElement {
+      const key = Math.round(radiusPx);
+      let tpl = this.dotTemplates.get(key);
+      if (tpl) return tpl;
+      const r = radiusPx + blurPx;
+      tpl = document.createElement('canvas');
+      tpl.width = tpl.height = Math.ceil(r * 2);
       const ctx = tpl.getContext('2d')!;
       ctx.shadowOffsetX = ctx.shadowOffsetY = r * 2;
-      ctx.shadowBlur = this.blur;
+      ctx.shadowBlur = blurPx;
       ctx.shadowColor = 'black';
       ctx.beginPath();
-      ctx.arc(-r, -r, this.radius, 0, Math.PI * 2, true);
+      ctx.arc(-r, -r, radiusPx, 0, Math.PI * 2, true);
       ctx.closePath();
       ctx.fill();
-      this.dot = tpl;
+      this.dotTemplates.set(key, tpl);
       return tpl;
     }
 
@@ -128,18 +141,28 @@ function getHeatmapOverlayClass(): HeatmapOverlayCtor {
 
       if (!this.points.length) return;
 
-      const r = this.radius + this.blur;
-      const template = this.dotTemplate();
-      const maxPeso = Math.max(1e-6, ...this.points.map((p) => p.peso));
+      // Metros por pixel en la proyección Web Mercator, a este zoom y esta
+      // latitud (varía con la latitud: el mismo zoom muestra más terreno por
+      // pixel cerca del ecuador que cerca de los polos). Con esto el radio
+      // en pixeles de cada punto representa siempre los mismos ~120m reales,
+      // sin importar qué tanto zoom tenga el mapa.
+      const zoom = map.getZoom() ?? 12;
+      const scale = 2 ** zoom;
 
       for (const p of this.points) {
         const pixel = projection.fromLatLngToDivPixel(new google.maps.LatLng(p.lat, p.lng));
         if (!pixel) continue;
         const x = pixel.x - sw.x;
         const y = pixel.y - ne.y;
+
+        const metersPerPixel = (156543.03392 * Math.cos((p.lat * Math.PI) / 180)) / scale;
+        const radiusPx = Math.min(HEAT_MAX_RADIUS_PX, Math.max(HEAT_MIN_RADIUS_PX, HEAT_RADIUS_METERS / metersPerPixel));
+        const blurPx = radiusPx * HEAT_BLUR_RATIO;
+        const r = radiusPx + blurPx;
         if (x < -r || y < -r || x > width + r || y > height + r) continue;
-        this.ctx.globalAlpha = Math.min(1, Math.max(p.peso / maxPeso, HEAT_MIN_ALPHA));
-        this.ctx.drawImage(template, x - r, y - r);
+
+        this.ctx.globalAlpha = Math.min(1, p.peso / HEAT_MAX_PESO_REFERENCIA);
+        this.ctx.drawImage(this.dotTemplate(radiusPx, blurPx), x - r, y - r);
       }
       this.ctx.globalAlpha = 1;
 
@@ -195,7 +218,7 @@ export function GeoMap({ heatPoints, pins, height }: { heatPoints?: HeatPoint[];
     if (!map || !ready) return;
     if (!heatRef.current) {
       const Overlay = getHeatmapOverlayClass();
-      heatRef.current = new Overlay({ radius: HEAT_RADIUS, blur: HEAT_BLUR, opacity: HEAT_OPACITY, gradient: HEAT_GRADIENT });
+      heatRef.current = new Overlay({ opacity: HEAT_OPACITY, gradient: HEAT_GRADIENT });
       heatRef.current.setMap(map);
     }
     heatRef.current.setData(heatPoints ?? []);

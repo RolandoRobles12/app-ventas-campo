@@ -24,6 +24,17 @@ export function estadoBadgeStyle(estado: string): CSSProperties {
   return { ...b, color: '#2a6fdb', background: '#e2ecfb' };
 }
 
+// Mismos colores que RESULTADO_COLOR en server/src/routes/dashboard.ts —
+// duplicado a propósito, es un valor puramente de presentación en el cliente.
+export function resultadoBadgeStyle(resultado: string): CSSProperties {
+  if (resultado === 'Se realizó solicitud') return { ...base, color: '#0f5132', background: '#dcf1e5' };
+  if (resultado === 'Se dejó información') return { ...base, color: '#c96a1e', background: '#fdecdb' };
+  if (resultado === 'Cliente no interesado') return { ...base, color: '#c0392b', background: '#fbe3e0' };
+  if (resultado === 'No es un negocio válido o existente') return { ...base, color: '#5a665f', background: '#eef2ee' };
+  if (resultado === 'Se reagenda visita') return { ...base, color: '#2a6fdb', background: '#e2ecfb' };
+  return { ...base, color: '#3a4a41', background: '#eef2ee' };
+}
+
 export function estadoProspectoBadgeStyle(estado: string): CSSProperties {
   const b: CSSProperties = { fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20 };
   if (estado === 'visitado') return { ...b, color: '#1c7a4f', background: '#dcf1e5' };

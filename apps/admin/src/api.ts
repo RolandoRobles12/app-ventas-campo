@@ -40,6 +40,13 @@ export interface Evidencia {
   id: string; nombre: string; resultado: string; fotoUrl: string; createdAt: string;
   ubicacionValida: boolean | null; distanciaValidacionMetros: number | null;
 }
+export interface VisitaListItem {
+  id: string; vendedorId: string; vendedorNombre: string; producto: string;
+  esNegocioNuevo: boolean; nombreNegocio: string; direccion: string; resultado: string;
+  notas: string | null; fotoUrl: string | null; lat: number | null; lng: number | null;
+  ubicacionValida: boolean | null; distanciaValidacionMetros: number | null; createdAt: string;
+}
+export interface VisitasResponse { items: VisitaListItem[]; nextCursor: string | null }
 export interface CrmDeal {
   id: string; hubspotDealId: string | null; cliente: string; negocio: string; producto?: string;
   etapa: string; amount: number | null; dealOwner: string | null; dealOwnerId: string | null;
@@ -84,6 +91,22 @@ export const api = {
   bulkProspectos: (vendedorId: string, items: Partial<Prospecto>[]) =>
     req<{ creados: number; prospectos: Prospecto[] }>('/prospectos/bulk', { method: 'POST', body: JSON.stringify({ vendedorId, items }) }),
   eliminarProspecto: (id: string) => req<void>(`/prospectos/${id}`, { method: 'DELETE' }),
+
+  visitas: (params: {
+    vendedorIds?: string[]; productoIds?: string[]; resultados?: string[];
+    desde?: string; hasta?: string; cursor?: string; limit?: number;
+  }) => {
+    const sp = new URLSearchParams();
+    if (params.vendedorIds?.length) sp.set('vendedorIds', params.vendedorIds.join(','));
+    if (params.productoIds?.length) sp.set('productoIds', params.productoIds.join(','));
+    if (params.resultados?.length) sp.set('resultados', params.resultados.join(','));
+    if (params.desde) sp.set('desde', params.desde);
+    if (params.hasta) sp.set('hasta', params.hasta);
+    if (params.cursor) sp.set('cursor', params.cursor);
+    if (params.limit) sp.set('limit', String(params.limit));
+    const qsStr = sp.toString();
+    return req<VisitasResponse>(`/visitas${qsStr ? `?${qsStr}` : ''}`);
+  },
 
   denueStatus: () => req<{ configured: boolean; googleMapsConfigured: boolean }>('/denue/status'),
   consultarDenue: (data: {
