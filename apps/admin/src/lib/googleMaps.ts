@@ -11,12 +11,13 @@ export function loadGoogleMaps(): Promise<typeof google> {
   loaderPromise = new Promise((resolve, reject) => {
     if (window.google?.maps) return resolve(window.google);
     if (!GOOGLE_MAPS_API_KEY) return reject(new Error('Falta VITE_GOOGLE_MAPS_API_KEY'));
-    // No se pide "drawing": DrawingManager está deprecado y removido de la API
-    // en v3.65+ (ver LocationPickerMap.tsx), así que el path del polígono se
-    // arma a mano con clics — pedir esa librería inexistente puede romper la
-    // carga del script para todo lo demás.
+    // No se piden "drawing" ni "visualization": DrawingManager y HeatmapLayer
+    // están deprecados y removidos de la API en v3.65+ (ver LocationPickerMap.tsx
+    // y GeoMap.tsx), así que el path del polígono y el heatmap se arman a mano
+    // — pedir librerías inexistentes puede romper la carga del script para
+    // todo lo demás.
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=visualization,places&v=weekly`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places&v=weekly`;
     script.async = true;
     script.onload = () => resolve(window.google);
     script.onerror = () => reject(new Error('No se pudo cargar Google Maps'));
