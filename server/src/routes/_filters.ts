@@ -1,16 +1,18 @@
 import { db } from '../db.js';
+import { chunkArray } from '../firestore-helpers.js';
 
-export async function resolveVendedorIds(producto?: string, vendedor?: string): Promise<string[] | null> {
-  // returns null = no restriction (todos); otherwise a list of vendedor ids to filter by
-  if (vendedor && vendedor !== 'Todos los vendedores') {
-    const snap = await db.collection('vendedores').where('nombre', '==', vendedor).limit(1).get();
-    return snap.empty ? [] : [snap.docs[0].id];
-  }
-  if (producto && producto !== 'Todos los productos') {
-    const productoSnap = await db.collection('productos').where('nombre', '==', producto).limit(1).get();
-    if (productoSnap.empty) return [];
-    const vs = await db.collection('vendedores').where('productoId', '==', productoSnap.docs[0].id).get();
-    return vs.docs.map((d) => d.id);
+// Resuelve el filtro combinado de producto(s)/vendedor(es) del admin a una
+// lista de vendedorId para usar en `where('vendedorId', 'in', ids)`.
+// null = sin restricción (todos); [] = el filtro no matchea a nadie.
+// Si se dan vendedorIds explícitos, mandan sobre productoIds (ya vienen
+// acotados a esos productos desde el selector del cliente).
+export async function resolveVendedorIds(vendedorIds?: string[], productoIds?: string[]): Promise<string[] | null> {
+  if (vendedorIds && vendedorIds.length) return vendedorIds;
+  if (productoIds && productoIds.length) {
+    const snaps = await Promise.all(
+      chunkArray(productoIds).map((c) => db.collection('vendedores').where('productoId', 'in', c).get()),
+    );
+    return snaps.flatMap((s) => s.docs.map((d) => d.id));
   }
   return null;
 }

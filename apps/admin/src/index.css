@@ -22,6 +22,7 @@ button { cursor: pointer; }
 .kcard { transition: transform .14s ease, box-shadow .14s ease; }
 .rowh:hover { background: #f4f9f5; }
 .fsel { -webkit-appearance: none; appearance: none; border: 1px solid #e0e8e2; background: #fff; border-radius: 9px; padding: 9px 32px 9px 13px; font-family: inherit; font-size: 13px; color: #3a4a41; cursor: pointer; }
+.msel-opt:hover { background: #f4f9f5; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .screen { animation: fadeUp .28s cubic-bezier(.22,1,.36,1); }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }

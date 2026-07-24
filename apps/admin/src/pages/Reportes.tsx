@@ -7,7 +7,7 @@ import { GeoMap } from '../components/GeoMap';
 const VENDEDORES_POR_PAGINA = 8;
 
 export function Reportes() {
-  const { fProducto, fVendedor, fDesde, fHasta } = useFilters();
+  const { fProductos, fVendedores, fDesde, fHasta } = useFilters();
   const [summary, setSummary] = useState<ReportesSummary | null>(null);
   const [vendedores, setVendedores] = useState<ReporteVendedor[]>([]);
   const [resultados, setResultados] = useState<ResultadosDonut | null>(null);
@@ -18,12 +18,12 @@ export function Reportes() {
   useEffect(() => {
     const desde = fDesde ?? undefined;
     const hasta = fHasta ?? undefined;
-    api.reportesSummary(fProducto, fVendedor, desde, hasta).then(setSummary).catch(() => {});
-    api.reportesVendedores(fProducto, fVendedor, desde, hasta).then((v) => { setVendedores(v); setPagina(0); }).catch(() => {});
-    api.dashboardResultados(fProducto, fVendedor, desde, hasta).then(setResultados).catch(() => {});
-    api.reportesEvidencias(fProducto, fVendedor, desde, hasta).then(setEvidencias).catch(() => {});
-    api.mapaCalor(fProducto, fVendedor, desde, hasta).then(setCalor).catch(() => {});
-  }, [fProducto, fVendedor, fDesde, fHasta]);
+    api.reportesSummary(fProductos, fVendedores, desde, hasta).then(setSummary).catch(() => {});
+    api.reportesVendedores(fProductos, fVendedores, desde, hasta).then((v) => { setVendedores(v); setPagina(0); }).catch(() => {});
+    api.dashboardResultados(fProductos, fVendedores, desde, hasta).then(setResultados).catch(() => {});
+    api.reportesEvidencias(fProductos, fVendedores, desde, hasta).then(setEvidencias).catch(() => {});
+    api.mapaCalor(fProductos, fVendedores, desde, hasta).then(setCalor).catch(() => {});
+  }, [fProductos, fVendedores, fDesde, fHasta]);
 
   const totalPaginas = Math.max(1, Math.ceil(vendedores.length / VENDEDORES_POR_PAGINA));
   const vendedoresPagina = vendedores.slice(pagina * VENDEDORES_POR_PAGINA, (pagina + 1) * VENDEDORES_POR_PAGINA);

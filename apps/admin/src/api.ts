@@ -77,6 +77,18 @@ function qs(params: Record<string, string | undefined>): string {
   return '?' + new URLSearchParams(filtered as [string, string][]).toString();
 }
 
+// Como qs(), pero además admite arreglos (selección múltiple de
+// producto/vendedor/resultado): se mandan separados por coma.
+function qsMulti(params: Record<string, string | string[] | undefined>): string {
+  const sp = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) { if (value.length) sp.set(key, value.join(',')); }
+    else if (value) sp.set(key, value);
+  }
+  const str = sp.toString();
+  return str ? `?${str}` : '';
+}
+
 export const api = {
   productos: () => req<Producto[]>('/productos/de-campo'),
   vendedores: (producto?: string) => req<Vendedor[]>(`/vendedores${qs({ producto })}`),
@@ -95,18 +107,10 @@ export const api = {
   visitas: (params: {
     vendedorIds?: string[]; productoIds?: string[]; resultados?: string[];
     desde?: string; hasta?: string; cursor?: string; limit?: number;
-  }) => {
-    const sp = new URLSearchParams();
-    if (params.vendedorIds?.length) sp.set('vendedorIds', params.vendedorIds.join(','));
-    if (params.productoIds?.length) sp.set('productoIds', params.productoIds.join(','));
-    if (params.resultados?.length) sp.set('resultados', params.resultados.join(','));
-    if (params.desde) sp.set('desde', params.desde);
-    if (params.hasta) sp.set('hasta', params.hasta);
-    if (params.cursor) sp.set('cursor', params.cursor);
-    if (params.limit) sp.set('limit', String(params.limit));
-    const qsStr = sp.toString();
-    return req<VisitasResponse>(`/visitas${qsStr ? `?${qsStr}` : ''}`);
-  },
+  }) => req<VisitasResponse>(`/visitas${qsMulti({
+    vendedorIds: params.vendedorIds, productoIds: params.productoIds, resultados: params.resultados,
+    desde: params.desde, hasta: params.hasta, cursor: params.cursor, limit: params.limit ? String(params.limit) : undefined,
+  })}`),
 
   denueStatus: () => req<{ configured: boolean; googleMapsConfigured: boolean }>('/denue/status'),
   consultarDenue: (data: {
@@ -116,30 +120,32 @@ export const api = {
     poligono?: ZonaPunto[];
   }) => req<{ resultados: any[] }>('/denue/consulta', { method: 'POST', body: JSON.stringify(data) }),
 
-  dashboardSummary: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
-    req<DashboardSummary>(`/dashboard/summary${qs({ producto, vendedor, desde, hasta })}`),
-  dashboardSemana: (producto?: string, vendedor?: string) => req<WeekBar[]>(`/dashboard/semana${qs({ producto, vendedor })}`),
-  dashboardResultados: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
-    req<ResultadosDonut>(`/dashboard/resultados${qs({ producto, vendedor, desde, hasta })}`),
-  dashboardActividad: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
-    req<ActividadVendedor[]>(`/dashboard/actividad${qs({ producto, vendedor, desde, hasta })}`),
+  dashboardSummary: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
+    req<DashboardSummary>(`/dashboard/summary${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
+  dashboardSemana: (productoIds?: string[], vendedorIds?: string[]) =>
+    req<WeekBar[]>(`/dashboard/semana${qsMulti({ productoIds, vendedorIds })}`),
+  dashboardResultados: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
+    req<ResultadosDonut>(`/dashboard/resultados${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
+  dashboardActividad: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
+    req<ActividadVendedor[]>(`/dashboard/actividad${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
 
-  mapaLeads: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
-    req<MapaLeadsResponse>(`/mapa/leads${qs({ producto, vendedor, desde, hasta })}`),
-  mapaCalor: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
-    req<MapaCalorResponse>(`/mapa/calor${qs({ producto, vendedor, desde, hasta })}`),
-  seguimiento: (producto?: string, vendedor?: string) => req<SeguimientoItem[]>(`/seguimiento${qs({ producto, vendedor })}`),
+  mapaLeads: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
+    req<MapaLeadsResponse>(`/mapa/leads${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
+  mapaCalor: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
+    req<MapaCalorResponse>(`/mapa/calor${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
+  seguimiento: (productoIds?: string[], vendedorIds?: string[]) =>
+    req<SeguimientoItem[]>(`/seguimiento${qsMulti({ productoIds, vendedorIds })}`),
 
-  reportesSummary: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
-    req<ReportesSummary>(`/reportes/summary${qs({ producto, vendedor, desde, hasta })}`),
-  reportesVendedores: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
-    req<ReporteVendedor[]>(`/reportes/vendedores${qs({ producto, vendedor, desde, hasta })}`),
-  reportesEvidencias: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
-    req<Evidencia[]>(`/reportes/evidencias${qs({ producto, vendedor, desde, hasta })}`),
+  reportesSummary: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
+    req<ReportesSummary>(`/reportes/summary${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
+  reportesVendedores: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
+    req<ReporteVendedor[]>(`/reportes/vendedores${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
+  reportesEvidencias: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
+    req<Evidencia[]>(`/reportes/evidencias${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
 
   crmStatus: () => req<{ configured: boolean; stages: string[] }>('/crm/status'),
-  crmDeals: (producto?: string, vendedor?: string, desde?: string, hasta?: string) =>
-    req<CrmDeal[]>(`/crm/deals${qs({ producto, vendedor, desde, hasta })}`),
+  crmDeals: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
+    req<CrmDeal[]>(`/crm/deals${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
   crmSync: () => req<{ ok: boolean; created: number; updated: number; total: number }>('/crm/sync', { method: 'POST' }),
   crmUpdate: (id: string, data: Partial<{ cliente: string; negocio: string; etapa: string; amount: number; dealOwnerId: string; serviceOwner: string }>) =>
     req<CrmDeal & { hubspotWarning?: string }>(`/crm/deals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),

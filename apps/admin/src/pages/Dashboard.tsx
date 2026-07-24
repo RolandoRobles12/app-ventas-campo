@@ -19,7 +19,7 @@ function conicGradient(items: ResultadosDonut['items']): string {
 const ACTIVIDAD_POR_PAGINA = 10;
 
 export function Dashboard() {
-  const { fProducto, fVendedor, fRango, fDesde, fHasta } = useFilters();
+  const { fProductos, fVendedores, fRango, fDesde, fHasta } = useFilters();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [semana, setSemana] = useState<WeekBar[]>([]);
   const [resultados, setResultados] = useState<ResultadosDonut | null>(null);
@@ -27,11 +27,11 @@ export function Dashboard() {
   const [pagina, setPagina] = useState(0);
 
   useEffect(() => {
-    api.dashboardSummary(fProducto, fVendedor, fDesde ?? undefined, fHasta ?? undefined).then(setSummary).catch(() => {});
-    api.dashboardSemana(fProducto, fVendedor).then(setSemana).catch(() => {});
-    api.dashboardResultados(fProducto, fVendedor, fDesde ?? undefined, fHasta ?? undefined).then(setResultados).catch(() => {});
-    api.dashboardActividad(fProducto, fVendedor, fDesde ?? undefined, fHasta ?? undefined).then((a) => { setActividad(a); setPagina(0); }).catch(() => {});
-  }, [fProducto, fVendedor, fDesde, fHasta]);
+    api.dashboardSummary(fProductos, fVendedores, fDesde ?? undefined, fHasta ?? undefined).then(setSummary).catch(() => {});
+    api.dashboardSemana(fProductos, fVendedores).then(setSemana).catch(() => {});
+    api.dashboardResultados(fProductos, fVendedores, fDesde ?? undefined, fHasta ?? undefined).then(setResultados).catch(() => {});
+    api.dashboardActividad(fProductos, fVendedores, fDesde ?? undefined, fHasta ?? undefined).then((a) => { setActividad(a); setPagina(0); }).catch(() => {});
+  }, [fProductos, fVendedores, fDesde, fHasta]);
 
   const rangoActivo = fRango !== 'todo';
   const visitasLabel = rangoActivo ? `Visitas · ${RANGO_LABELS[fRango]}` : 'Visitas hoy';

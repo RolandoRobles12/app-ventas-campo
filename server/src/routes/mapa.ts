@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
 import { resolveVendedorIds } from './_filters.js';
-import { isEmptyRestriction, parseDateRangeQuery } from '../firestore-helpers.js';
+import { isEmptyRestriction, parseDateRangeQuery, parseCsvParam } from '../firestore-helpers.js';
 
 export const mapaRouter = Router();
 
@@ -30,8 +30,8 @@ async function countProspectos(ids: string[] | null, extra: (q: FirebaseFirestor
 }
 
 mapaRouter.get('/leads', async (req, res) => {
-  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
-  const ids = await resolveVendedorIds(producto, vendedor);
+  const { productoIds, vendedorIds, desde, hasta } = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
+  const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
   const rango = parseDateRangeQuery(desde, hasta);
 
   let leads: { id: string; data: ProspectoDoc }[] = [];
@@ -48,9 +48,9 @@ mapaRouter.get('/leads', async (req, res) => {
       .slice(0, 300);
   }
 
-  const vendedorIds = [...new Set(leads.map((l) => l.data.vendedorId))];
+  const leadVendedorIds = [...new Set(leads.map((l) => l.data.vendedorId))];
   const vendedores = new Map<string, string>();
-  await Promise.all(vendedorIds.map(async (id) => {
+  await Promise.all(leadVendedorIds.map(async (id) => {
     const doc = await db.collection('vendedores').doc(id).get();
     if (doc.exists) vendedores.set(id, (doc.data() as { nombre: string }).nombre);
   }));
@@ -77,8 +77,8 @@ mapaRouter.get('/leads', async (req, res) => {
 // Puntos para el mapa de calor: la ubicación GPS de cada visita registrada.
 // Las visitas antiguas (sin GPS propio) heredan las coordenadas de su prospecto.
 mapaRouter.get('/calor', async (req, res) => {
-  const { producto, vendedor, desde, hasta } = req.query as { producto?: string; vendedor?: string; desde?: string; hasta?: string };
-  const ids = await resolveVendedorIds(producto, vendedor);
+  const { productoIds, vendedorIds, desde, hasta } = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
+  const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
   if (isEmptyRestriction(ids)) return res.json({ puntos: [], visitasTotales: 0, visitasConUbicacion: 0 });
   const rango = parseDateRangeQuery(desde, hasta);
 

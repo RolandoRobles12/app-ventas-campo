@@ -1,5 +1,6 @@
-import { useFilters, TODOS_PRODUCTOS, TODOS_VENDEDORES } from '../filters';
+import { useFilters } from '../filters';
 import { RANGO_LABELS, type RangoPreset } from '../lib/dateRanges';
+import { MultiSelectDropdown } from './MultiSelectDropdown';
 
 function SelectChevron() {
   return (
@@ -13,7 +14,7 @@ const dateInputStyle: React.CSSProperties = {
 
 export function FilterBar({ extra }: { extra?: React.ReactNode }) {
   const {
-    productos, vendedoresFiltrados, fProducto, fVendedor, setFProducto, setFVendedor,
+    productos, vendedoresFiltrados, fProductos, fVendedores, setFProductos, setFVendedores,
     fRango, setFRango, fDesdePersonalizado, fHastaPersonalizado, setFDesdePersonalizado, setFHastaPersonalizado,
   } = useFilters();
 
@@ -23,20 +24,20 @@ export function FilterBar({ extra }: { extra?: React.ReactNode }) {
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8a978f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
         Filtros
       </span>
-      <div style={{ position: 'relative' }}>
-        <select className="fsel" value={fProducto} onChange={(e) => setFProducto(e.target.value)}>
-          <option>{TODOS_PRODUCTOS}</option>
-          {productos.map((p) => <option key={p.id}>{p.nombre}</option>)}
-        </select>
-        <SelectChevron />
-      </div>
-      <div style={{ position: 'relative' }}>
-        <select className="fsel" value={fVendedor} onChange={(e) => setFVendedor(e.target.value)}>
-          <option>{TODOS_VENDEDORES}</option>
-          {vendedoresFiltrados.map((v) => <option key={v.id}>{v.nombre}</option>)}
-        </select>
-        <SelectChevron />
-      </div>
+      <MultiSelectDropdown
+        label="Producto"
+        options={productos.map((p) => ({ value: p.id, label: p.nombre }))}
+        selected={fProductos}
+        onChange={setFProductos}
+        placeholder="Todos los productos"
+      />
+      <MultiSelectDropdown
+        label="Vendedor"
+        options={vendedoresFiltrados.map((v) => ({ value: v.id, label: v.nombre }))}
+        selected={fVendedores}
+        onChange={setFVendedores}
+        placeholder="Todos los vendedores"
+      />
       <div style={{ position: 'relative' }}>
         <select className="fsel" value={fRango} onChange={(e) => setFRango(e.target.value as RangoPreset)}>
           {(Object.keys(RANGO_LABELS) as RangoPreset[]).map((r) => <option key={r} value={r}>{RANGO_LABELS[r]}</option>)}
