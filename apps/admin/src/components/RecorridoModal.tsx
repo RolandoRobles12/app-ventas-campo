@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
-import { api, type RecorridoPunto } from '../api';
-import { GeoMap } from './GeoMap';
+import { api } from '../api';
+import { GeoMap, type Recorrido } from './GeoMap';
 
 export function RecorridoModal({ vendedorId, nombre, onClose }: { vendedorId: string; nombre: string; onClose: () => void }) {
-  const [puntos, setPuntos] = useState<RecorridoPunto[] | null>(null);
+  const [ruta, setRuta] = useState<Recorrido | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api.recorrido(vendedorId).then(setPuntos).catch(() => setError('No se pudo cargar el recorrido'));
-  }, [vendedorId]);
+    api.recorridos({ vendedorIds: [vendedorId] })
+      .then((r) => setRuta(r[0] ?? { vendedorId, nombre, color: '#2a6fdb', puntos: [] }))
+      .catch((err) => setError(err.message || 'No se pudo cargar el recorrido'));
+  }, [vendedorId, nombre]);
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,40,30,.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
@@ -17,7 +19,7 @@ export function RecorridoModal({ vendedorId, nombre, onClose }: { vendedorId: st
           <div>
             <div style={{ fontSize: 16.5, fontWeight: 600, color: '#263238' }}>Recorrido de hoy · {nombre}</div>
             <div style={{ fontSize: 12.5, color: '#8a978f', marginTop: 2 }}>
-              {puntos == null ? 'Cargando…' : `${puntos.length} puntos GPS registrados`}
+              {ruta == null ? 'Cargando…' : `${ruta.puntos.length} puntos GPS registrados`}
             </div>
           </div>
           <button onClick={onClose} style={{ width: 30, height: 30, border: 'none', background: '#f4f6f2', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -25,8 +27,8 @@ export function RecorridoModal({ vendedorId, nombre, onClose }: { vendedorId: st
           </button>
         </div>
         <div style={{ position: 'relative', height: 420, background: '#e7ece4' }}>
-          <GeoMap recorrido={puntos ?? []} height={420} />
-          {puntos && puntos.length === 0 && (
+          <GeoMap recorridos={ruta ? [ruta] : []} height={420} />
+          {ruta && ruta.puntos.length === 0 && (
             <div style={{ position: 'absolute', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.72)', color: '#5a665f', fontSize: 12.5, fontWeight: 600, textAlign: 'center', padding: '0 30px' }}>
               {error || 'Aún no hay puntos GPS de hoy. Se registran cada ~5 minutos mientras el vendedor tiene la jornada activa.'}
             </div>

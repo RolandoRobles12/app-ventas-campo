@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type VisitaListItem } from '../api';
+import { api, type VisitaListItem, type MapaCalorResponse, type RecorridoVendedor } from '../api';
 import { useFilters } from '../filters';
 import { FilterBar, PageHeader } from '../components/FilterBar';
 import { MultiSelectDropdown } from '../components/MultiSelectDropdown';
+import { GeoMap } from '../components/GeoMap';
 import { prodBadgeStyle, resultadoBadgeStyle } from '../badges';
 
 const PAGE_SIZE = 20;
@@ -22,6 +23,34 @@ export function Visitas() {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+
+  const [showCalor, setShowCalor] = useState(true);
+  const [showRutas, setShowRutas] = useState(false);
+  const [calor, setCalor] = useState<MapaCalorResponse | null>(null);
+  const [rutas, setRutas] = useState<RecorridoVendedor[]>([]);
+  const [rutasError, setRutasError] = useState('');
+
+  useEffect(() => {
+    if (!showCalor) return;
+    api.mapaCalor(fProductos, fVendedores, fDesde ?? undefined, fHasta ?? undefined).then(setCalor).catch(() => {});
+  }, [showCalor, fProductos, fVendedores, fDesde, fHasta]);
+
+  useEffect(() => {
+    if (!showRutas) return;
+    if (fVendedores.length === 0 && fProductos.length === 0) {
+      setRutas([]);
+      setRutasError('Elige uno o varios vendedores (o un producto) en los filtros de arriba para ver sus rutas.');
+      return;
+    }
+    api.recorridos({
+      vendedorIds: fVendedores.length ? fVendedores : undefined,
+      productoIds: fVendedores.length ? undefined : fProductos,
+      desde: fDesde ?? undefined, hasta: fHasta ?? undefined,
+    }).then((r) => { setRutas(r); setRutasError(''); }).catch((err) => {
+      setRutas([]);
+      setRutasError(err.message || 'No se pudieron cargar las rutas.');
+    });
+  }, [showRutas, fProductos, fVendedores, fDesde, fHasta]);
 
   const cargar = useCallback((cursor?: string) => {
     const primeraPagina = !cursor;
@@ -59,6 +88,56 @@ export function Visitas() {
           placeholder="Todos los resultados"
         />
       } />
+
+      <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, padding: '20px 22px', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 500, color: '#263238' }}>Cobertura del equipo</div>
+            <div style={{ fontSize: 12.5, color: '#8a978f', marginTop: 2 }}>Mapa de calor de visitas y rutas GPS, según los filtros de arriba</div>
+          </div>
+          <div style={{ display: 'flex', gap: 16 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: '#3a4a41', cursor: 'pointer' }}>
+              <input type="checkbox" checked={showCalor} onChange={(e) => setShowCalor(e.target.checked)} style={{ accentColor: '#157347', width: 14, height: 14 }} />
+              Mapa de calor
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: '#3a4a41', cursor: 'pointer' }}>
+              <input type="checkbox" checked={showRutas} onChange={(e) => setShowRutas(e.target.checked)} style={{ accentColor: '#157347', width: 14, height: 14 }} />
+              Rutas GPS
+            </label>
+          </div>
+        </div>
+        <div style={{ position: 'relative', height: 440, borderRadius: 10, overflow: 'hidden', background: '#e7ece4' }}>
+          <GeoMap heatPoints={showCalor ? (calor?.puntos ?? []) : []} recorridos={showRutas ? rutas : []} height={440} />
+          {showRutas && rutasError && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.85)', color: '#5a665f', fontSize: 12.5, fontWeight: 600, textAlign: 'center', padding: '0 40px' }}>
+              {rutasError}
+            </div>
+          )}
+          {showCalor && !showRutas && calor && calor.puntos.length === 0 && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.72)', color: '#5a665f', fontSize: 12.5, fontWeight: 600, textAlign: 'center', padding: '0 30px' }}>
+              Aún no hay visitas con ubicación GPS en este filtro.
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, marginTop: 12 }}>
+          {showCalor && (
+            <div style={{ display: 'flex', gap: 16, fontSize: 11.5, color: '#8a978f' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#f03b20' }} />Alta densidad</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fd8d3c' }} />Media</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fecc5c' }} />Baja</span>
+            </div>
+          )}
+          {showRutas && rutas.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 11.5 }}>
+              {rutas.map((r) => (
+                <span key={r.vendedorId} style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#3a4a41' }}>
+                  <span style={{ width: 14, height: 3, borderRadius: 2, background: r.color }} />{r.nombre} · {r.puntos.length} pts
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: gridCols, padding: '12px 20px', fontSize: 12, fontWeight: 600, color: '#5a665f', borderBottom: '1px solid #eef2ee' }}>

@@ -4,6 +4,7 @@ import { loadGoogleMaps } from '../lib/googleMaps';
 export interface HeatPoint { lat: number; lng: number; peso: number }
 export interface MapPin { id: string; lat: number; lng: number; color: string; title: string; subtitle?: string }
 export interface RecorridoPoint { lat: number; lng: number }
+export interface Recorrido { vendedorId: string; nombre: string; color: string; puntos: RecorridoPoint[] }
 
 // Centro de la zona metropolitana de Guadalajara mientras no hay puntos que encuadrar.
 const DEFAULT_CENTER = { lat: 20.6597, lng: -103.3496 };
@@ -190,14 +191,14 @@ function pinIconUrl(color: string): string {
   return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
 
-export function GeoMap({ heatPoints, pins, recorrido, height }: { heatPoints?: HeatPoint[]; pins?: MapPin[]; recorrido?: RecorridoPoint[]; height: number | string }) {
+export function GeoMap({ heatPoints, pins, recorridos, height }: { heatPoints?: HeatPoint[]; pins?: MapPin[]; recorridos?: Recorrido[]; height: number | string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const heatRef = useRef<HeatmapOverlay | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
-  const polylineRef = useRef<google.maps.Polyline | null>(null);
-  const ultimoPuntoMarkerRef = useRef<google.maps.Marker | null>(null);
+  const polylinesRef = useRef<google.maps.Polyline[]>([]);
+  const ultimosPuntosMarkersRef = useRef<google.maps.Marker[]>([]);
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
 
@@ -255,40 +256,39 @@ export function GeoMap({ heatPoints, pins, recorrido, height }: { heatPoints?: H
     });
   }, [pins, ready]);
 
+  // Una polilínea por vendedor (color propio, el mismo que su avatar en el
+  // resto del admin) más un punto marcando su última posición conocida.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    if (!polylineRef.current) {
-      polylineRef.current = new google.maps.Polyline({
-        strokeColor: '#2a6fdb', strokeOpacity: 0.85, strokeWeight: 4,
-      });
-      polylineRef.current.setMap(map);
-    }
-    const path = recorrido ?? [];
-    polylineRef.current.setPath(path);
+    polylinesRef.current.forEach((p) => p.setMap(null));
+    ultimosPuntosMarkersRef.current.forEach((m) => m.setMap(null));
 
-    ultimoPuntoMarkerRef.current?.setMap(null);
-    ultimoPuntoMarkerRef.current = null;
-    const ultimo = path[path.length - 1];
-    if (ultimo) {
-      ultimoPuntoMarkerRef.current = new google.maps.Marker({
+    const rutas = recorridos ?? [];
+    polylinesRef.current = rutas.map((r) => new google.maps.Polyline({
+      map, path: r.puntos, strokeColor: r.color, strokeOpacity: 0.85, strokeWeight: 4,
+    }));
+    ultimosPuntosMarkersRef.current = rutas.flatMap((r) => {
+      const ultimo = r.puntos[r.puntos.length - 1];
+      if (!ultimo) return [];
+      return [new google.maps.Marker({
         position: ultimo, map,
-        icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#2a6fdb', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
-        title: 'Última posición registrada',
-      });
-    }
-  }, [recorrido, ready]);
+        icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: r.color, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
+        title: `Última posición · ${r.nombre}`,
+      })];
+    });
+  }, [recorridos, ready]);
 
   // Encuadra todos los puntos cada vez que cambian los datos.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    const coords = [...(heatPoints ?? []), ...(pins ?? []), ...(recorrido ?? [])];
+    const coords = [...(heatPoints ?? []), ...(pins ?? []), ...(recorridos ?? []).flatMap((r) => r.puntos)];
     if (!coords.length) return;
     const bounds = new google.maps.LatLngBounds();
     coords.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
     map.fitBounds(bounds, 40);
-  }, [heatPoints, pins, recorrido, ready]);
+  }, [heatPoints, pins, recorridos, ready]);
 
   if (error) {
     return (

@@ -34,7 +34,10 @@ export interface SeguimientoItem {
   id: string; nombre: string; iniciales: string; color: string; producto: string; ciudad: string;
   inicio: string | null; estado: string; realizadas: number; pendientes: number; pct: number; km: number; ubicacionActual: string;
 }
-export interface RecorridoPunto { lat: number; lng: number; accuracy: number | null; createdAt: string }
+export interface RecorridoVendedor {
+  vendedorId: string; nombre: string; color: string;
+  puntos: { lat: number; lng: number; createdAt: string }[];
+}
 export interface ReportesSummary { visitasTotales: number; solicitudes: number; conversion: number; kmRecorridos: number; }
 export interface ReporteVendedor { id: string; nombre: string; total: number; solicitudes: number; km: number; w1: string; w2: string; }
 export interface Evidencia {
@@ -136,8 +139,8 @@ export const api = {
     req<MapaCalorResponse>(`/mapa/calor${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
   seguimiento: (productoIds?: string[], vendedorIds?: string[]) =>
     req<SeguimientoItem[]>(`/seguimiento${qsMulti({ productoIds, vendedorIds })}`),
-  recorrido: (vendedorId: string, fecha?: string) =>
-    req<RecorridoPunto[]>(`/ubicaciones/${vendedorId}/recorrido${qs({ fecha })}`),
+  recorridos: (params: { vendedorIds?: string[]; productoIds?: string[]; desde?: string; hasta?: string }) =>
+    req<RecorridoVendedor[]>(`/ubicaciones/recorrido${qsMulti(params)}`),
 
   reportesSummary: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
     req<ReportesSummary>(`/reportes/summary${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
