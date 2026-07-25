@@ -18,7 +18,7 @@ async function getBucket() {
       const { initializeApp, getApps } = await import('firebase-admin/app');
       const { getStorage } = await import('firebase-admin/storage');
       if (!getApps().length) initializeApp();
-      return getStorage().bucket(process.env.FIREBASE_STORAGE_BUCKET);
+      return getStorage().bucket(process.env.STORAGE_BUCKET);
     })();
   }
   return bucketPromise;
