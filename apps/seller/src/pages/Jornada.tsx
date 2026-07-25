@@ -1,31 +1,7 @@
-import { useEffect, useState } from 'react';
-import { api, type JornadaHoy } from '../api';
-import { useSession } from '../session';
+import { useJornada } from '../jornada';
 
 export function Jornada() {
-  const { vendedor } = useSession();
-  const [jornada, setJornada] = useState<JornadaHoy | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = () => {
-    if (!vendedor) return;
-    api.jornadaHoy(vendedor.id).then(setJornada).catch(() => {});
-  };
-
-  useEffect(load, [vendedor]);
-
-  if (!vendedor) return null;
-
-  const toggle = async () => {
-    setBusy(true);
-    try {
-      const updated = await api.toggleJornada(vendedor.id);
-      setJornada(updated);
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  const { jornada, busy, toggle } = useJornada();
   const activa = jornada?.activa ?? false;
 
   return (

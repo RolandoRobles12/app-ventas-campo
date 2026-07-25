@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { api, type SeguimientoItem } from '../api';
 import { useFilters } from '../filters';
 import { FilterBar } from '../components/FilterBar';
+import { RecorridoModal } from '../components/RecorridoModal';
 import { estadoBadgeStyle } from '../badges';
 
 export function Seguimiento() {
   const { fProductos, fVendedores } = useFilters();
   const [items, setItems] = useState<SeguimientoItem[]>([]);
   const [tick, setTick] = useState(0);
+  const [recorridoDe, setRecorridoDe] = useState<SeguimientoItem | null>(null);
 
   useEffect(() => {
     api.seguimiento(fProductos, fVendedores).then(setItems).catch(() => {});
@@ -67,11 +69,16 @@ export function Seguimiento() {
             </div>
             <div style={{ marginTop: 13, paddingTop: 13, borderTop: '1px solid #f2f5f2', display: 'flex', alignItems: 'center', gap: 9 }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef8b3e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg>
-              <span style={{ fontSize: 12.5, color: '#5a665f' }}>Última visita: <b style={{ color: '#263238' }}>{t.ubicacionActual}</b></span>
+              <span style={{ fontSize: 12.5, color: '#5a665f', flex: 1 }}>Última visita: <b style={{ color: '#263238' }}>{t.ubicacionActual}</b></span>
+              <button onClick={() => setRecorridoDe(t)} style={{ background: '#eef2ee', color: '#3a4a41', border: 'none', borderRadius: 7, padding: '6px 11px', fontSize: 11.5, fontWeight: 600 }}>
+                Ver recorrido
+              </button>
             </div>
           </div>
         ))}
       </div>
+
+      {recorridoDe && <RecorridoModal vendedorId={recorridoDe.id} nombre={recorridoDe.nombre} onClose={() => setRecorridoDe(null)} />}
     </div>
   );
 }

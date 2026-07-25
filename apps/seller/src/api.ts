@@ -67,4 +67,6 @@ export const api = {
   toggleJornada: (vendedorId: string) => req<JornadaHoy>(`/jornada/${vendedorId}/toggle`, { method: 'POST' }),
   registrarVisita: (formData: FormData) =>
     req<{ id: string }>('/visitas', { method: 'POST', body: formData }),
+  registrarUbicacion: (data: { vendedorId: string; lat: number; lng: number; accuracy?: number }) =>
+    req<{ ok: boolean }>('/ubicaciones', { method: 'POST', body: JSON.stringify(data) }),
 };

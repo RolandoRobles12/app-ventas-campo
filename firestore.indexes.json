@@ -18,6 +18,14 @@
       ]
     },
     {
+      "collectionGroup": "ubicaciones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "vendedorId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "jornadas",
       "queryScope": "COLLECTION",
       "fields": [

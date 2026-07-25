@@ -148,6 +148,43 @@ async function main() {
     }, { merge: true });
   }
 
+  // Recorrido de ejemplo (puntos GPS de hoy, cada ~5 min) para poder probar
+  // "Ver recorrido" en Seguimiento sin esperar a que la app real mande
+  // pings: traza una ruta interpolando entre las paradas conocidas de cada
+  // vendedor en VISITAS_DEMO.
+  const existingUbicaciones = await db.collection('ubicaciones').count().get();
+  if (existingUbicaciones.data().count === 0) {
+    const paradasPorVendedor = new Map<string, { lat: number; lng: number }[]>();
+    for (const v of VISITAS_DEMO) {
+      const lista = paradasPorVendedor.get(v.vendedor) ?? [];
+      lista.push({ lat: v.lat, lng: v.lng });
+      paradasPorVendedor.set(v.vendedor, lista);
+    }
+    const inicio = new Date();
+    inicio.setHours(9, 30, 0, 0);
+    const batch = db.batch();
+    for (const [nombre, paradas] of paradasPorVendedor) {
+      const id = vendedorRecords[nombre];
+      if (!id) continue;
+      let minuto = 0;
+      for (let i = 0; i < paradas.length; i++) {
+        const desde = paradas[i];
+        const hasta = paradas[Math.min(i + 1, paradas.length - 1)];
+        const pasos = i < paradas.length - 1 ? 3 : 1;
+        for (let s = 0; s < pasos; s++) {
+          const t = pasos > 1 ? s / pasos : 0;
+          const ref = db.collection('ubicaciones').doc();
+          batch.set(ref, {
+            vendedorId: id, lat: desde.lat + (hasta.lat - desde.lat) * t, lng: desde.lng + (hasta.lng - desde.lng) * t,
+            accuracy: 15, createdAt: Timestamp.fromDate(new Date(inicio.getTime() + minuto * 60000)),
+          });
+          minuto += 5;
+        }
+      }
+    }
+    await batch.commit();
+  }
+
   // CRM deals de ejemplo (local, no vinculados a HubSpot hasta que se sincronice)
   const crmSeed = [
     { cliente: 'Luis Hernández', negocio: 'Ferretería La Palma', producto: 'Aviva Tu Negocio', etapa: 'Contrato enviado', amount: 18000, owner: 'Jorge Díaz', service: 'Paola Ríos' },

@@ -3,6 +3,7 @@ import { loadGoogleMaps } from '../lib/googleMaps';
 
 export interface HeatPoint { lat: number; lng: number; peso: number }
 export interface MapPin { id: string; lat: number; lng: number; color: string; title: string; subtitle?: string }
+export interface RecorridoPoint { lat: number; lng: number }
 
 // Centro de la zona metropolitana de Guadalajara mientras no hay puntos que encuadrar.
 const DEFAULT_CENTER = { lat: 20.6597, lng: -103.3496 };
@@ -189,12 +190,14 @@ function pinIconUrl(color: string): string {
   return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
 
-export function GeoMap({ heatPoints, pins, height }: { heatPoints?: HeatPoint[]; pins?: MapPin[]; height: number | string }) {
+export function GeoMap({ heatPoints, pins, recorrido, height }: { heatPoints?: HeatPoint[]; pins?: MapPin[]; recorrido?: RecorridoPoint[]; height: number | string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const heatRef = useRef<HeatmapOverlay | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+  const polylineRef = useRef<google.maps.Polyline | null>(null);
+  const ultimoPuntoMarkerRef = useRef<google.maps.Marker | null>(null);
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
 
@@ -205,6 +208,17 @@ export function GeoMap({ heatPoints, pins, height }: { heatPoints?: HeatPoint[];
         if (cancelled || !containerRef.current || mapRef.current) return;
         mapRef.current = new g.maps.Map(containerRef.current, {
           center: DEFAULT_CENTER, zoom: 12, streetViewControl: false, mapTypeControl: false,
+          // Sin esto, Google cambia solo a vista oblicua "45°" en zooms muy
+          // altos (ciudades con esa imagería disponible) — el heatmap
+          // (nuestro overlay de canvas) asume un mapa plano/sin inclinar, y
+          // con el mapa inclinado el cálculo de posición por NE/SO deja de
+          // corresponder al viewport real: el heatmap "desaparece" aunque sí
+          // haya datos. tilt: 0 mantiene siempre la vista aérea plana.
+          tilt: 0,
+          // El botón de rotar/inclinar (que Google muestra solo donde hay
+          // imagería oblicua) dejaría al usuario volver a inclinar el mapa a
+          // mano; se quita para que tilt:0 no se pueda deshacer con un clic.
+          rotateControl: false,
         });
         infoWindowRef.current = new g.maps.InfoWindow();
         setReady(true);
@@ -241,16 +255,40 @@ export function GeoMap({ heatPoints, pins, height }: { heatPoints?: HeatPoint[];
     });
   }, [pins, ready]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (!polylineRef.current) {
+      polylineRef.current = new google.maps.Polyline({
+        strokeColor: '#2a6fdb', strokeOpacity: 0.85, strokeWeight: 4,
+      });
+      polylineRef.current.setMap(map);
+    }
+    const path = recorrido ?? [];
+    polylineRef.current.setPath(path);
+
+    ultimoPuntoMarkerRef.current?.setMap(null);
+    ultimoPuntoMarkerRef.current = null;
+    const ultimo = path[path.length - 1];
+    if (ultimo) {
+      ultimoPuntoMarkerRef.current = new google.maps.Marker({
+        position: ultimo, map,
+        icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#2a6fdb', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
+        title: 'Última posición registrada',
+      });
+    }
+  }, [recorrido, ready]);
+
   // Encuadra todos los puntos cada vez que cambian los datos.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    const coords = [...(heatPoints ?? []), ...(pins ?? [])];
+    const coords = [...(heatPoints ?? []), ...(pins ?? []), ...(recorrido ?? [])];
     if (!coords.length) return;
     const bounds = new google.maps.LatLngBounds();
     coords.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
     map.fitBounds(bounds, 40);
-  }, [heatPoints, pins, ready]);
+  }, [heatPoints, pins, recorrido, ready]);
 
   if (error) {
     return (
