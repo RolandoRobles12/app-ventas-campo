@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
-import { toIso } from '../firestore-helpers.js';
+import { toIso, parseDateRangeQuery, parseCsvParam } from '../firestore-helpers.js';
+import { resolveVendedorIds } from './_filters.js';
 
 export const ubicacionesRouter = Router();
 
@@ -11,6 +12,16 @@ interface UbicacionDoc {
   accuracy: number | null;
   createdAt: Timestamp;
 }
+
+interface VendedorLookupDoc {
+  nombre: string;
+  color: string;
+}
+
+// Tope de vendedores cuyas rutas se dibujan a la vez: más que esto y el mapa
+// se vuelve ilegible (y son N consultas en paralelo, una por vendedor).
+const MAX_VENDEDORES_RECORRIDO = 20;
+const MAX_PUNTOS_POR_VENDEDOR = 1000;
 
 function parseCoord(raw: unknown, min: number, max: number): number | null {
   const n = Number(raw);
@@ -36,25 +47,56 @@ ubicacionesRouter.post('/', async (req, res) => {
   res.status(201).json({ ok: true });
 });
 
-// Recorrido de un vendedor en un día (hoy por default): los puntos GPS que
-// mandó su app mientras tuvo la jornada activa, en orden cronológico —
-// listos para dibujar como polilínea en el admin.
-ubicacionesRouter.get('/:vendedorId/recorrido', async (req, res) => {
-  const { fecha } = req.query as { fecha?: string };
-  const dia = fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : new Date().toISOString().slice(0, 10);
-  const start = new Date(`${dia}T00:00:00`);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
+// Recorrido de uno o varios vendedores (por equipo/producto) en un rango de
+// fechas — hoy por default —, listo para dibujar como una polilínea por
+// vendedor en el admin (Visitas y Seguimiento). A diferencia de otros
+// endpoints filtrados, aquí SÍ hace falta elegir vendedor(es) o producto(s)
+// explícitamente: "todos" dibujaría decenas de rutas encimadas e ilegibles,
+// además de disparar una consulta por cada vendedor de la empresa.
+ubicacionesRouter.get('/recorrido', async (req, res) => {
+  const { vendedorIds, productoIds, desde, hasta } = req.query as {
+    vendedorIds?: string; productoIds?: string; desde?: string; hasta?: string;
+  };
+  const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
+  if (!ids || ids.length === 0) {
+    return res.status(400).json({ error: 'FALTA_VENDEDOR', message: 'Elige uno o varios vendedores (o un producto) para ver sus rutas.' });
+  }
+  if (ids.length > MAX_VENDEDORES_RECORRIDO) {
+    return res.status(400).json({ error: 'DEMASIADOS_VENDEDORES', message: `Elige como máximo ${MAX_VENDEDORES_RECORRIDO} vendedores a la vez para ver sus rutas.` });
+  }
 
-  const snap = await db.collection('ubicaciones')
-    .where('vendedorId', '==', req.params.vendedorId)
-    .where('createdAt', '>=', Timestamp.fromDate(start))
-    .where('createdAt', '<', Timestamp.fromDate(end))
-    .orderBy('createdAt', 'asc')
-    .get();
+  const dia = new Date().toISOString().slice(0, 10);
+  const rango = parseDateRangeQuery(desde, hasta) ?? (() => {
+    const start = new Date(`${dia}T00:00:00`);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return { start, end };
+  })();
 
-  res.json(snap.docs.map((d) => {
-    const v = d.data() as UbicacionDoc;
-    return { lat: v.lat, lng: v.lng, accuracy: v.accuracy, createdAt: toIso(v.createdAt) };
-  }));
+  const [vendedoresSnaps, puntosSnaps] = await Promise.all([
+    Promise.all(ids.map((id) => db.collection('vendedores').doc(id).get())),
+    Promise.all(ids.map((id) => db.collection('ubicaciones')
+      .where('vendedorId', '==', id)
+      .where('createdAt', '>=', Timestamp.fromDate(rango.start))
+      .where('createdAt', '<', Timestamp.fromDate(rango.end))
+      .orderBy('createdAt', 'asc')
+      .limit(MAX_PUNTOS_POR_VENDEDOR)
+      .get())),
+  ]);
+
+  const out = ids.map((id, i) => {
+    const vDoc = vendedoresSnaps[i];
+    const v = vDoc.exists ? (vDoc.data() as VendedorLookupDoc) : null;
+    return {
+      vendedorId: id,
+      nombre: v?.nombre ?? '—',
+      color: v?.color ?? '#2a6fdb',
+      puntos: puntosSnaps[i].docs.map((d) => {
+        const u = d.data() as UbicacionDoc;
+        return { lat: u.lat, lng: u.lng, createdAt: toIso(u.createdAt) };
+      }),
+    };
+  });
+
+  res.json(out);
 });
