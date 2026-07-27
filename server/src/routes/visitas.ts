@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { db, Timestamp, FieldPath } from '../db.js';
 import { toIso, haversineMetros, chunkArray, parseDateRangeQuery, parseCsvParam, isEmptyRestriction } from '../firestore-helpers.js';
@@ -9,7 +10,14 @@ import { resolveVendedorIds } from './_filters.js';
 
 export const visitasRouter = Router();
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) return cb(new Error('SOLO_IMAGENES'));
+    cb(null, true);
+  },
+});
 
 // Radio dentro del cual la ubicación GPS capturada en la visita se considera
 // que corresponde al negocio. Solo aplica a prospectos que vienen del DENUE
@@ -189,9 +197,28 @@ visitasRouter.get('/vendedor/:vendedorId', requireAdmin, async (req, res) => {
   res.json(snap.docs.map((d) => shape(d.id, d.data() as VisitaDoc)));
 });
 
-visitasRouter.post('/', upload.single('foto'), async (req, res) => {
+// upload.single() se envuelve a mano (en vez de pasarlo directo como
+// middleware del router) para poder responder 400 en vez de dejar que un
+// rechazo de fileFilter/límite de tamaño caiga al manejador de errores
+// genérico de app.ts, que respondería 500.
+function uploadFoto(req: Request, res: Response, next: NextFunction) {
+  upload.single('foto')(req, res, (err: unknown) => {
+    if (!err) return next();
+    const message = err instanceof Error && err.message === 'SOLO_IMAGENES'
+      ? 'La fotografía debe ser una imagen.'
+      : 'No se pudo procesar la fotografía.';
+    res.status(400).json({ error: 'foto_invalida', message });
+  });
+}
+
+visitasRouter.post('/', uploadFoto, async (req, res) => {
   const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy } = req.body as Record<string, string>;
   if (!vendedorId || !resultado) return res.status(400).json({ error: 'vendedorId y resultado son requeridos' });
+  // La app del vendedor solo permite capturar la foto en el momento (cámara
+  // en vivo vía getUserMedia, sin selector de archivos) — se exige aquí
+  // también para que nadie pueda saltarse ese requisito pegándole directo a
+  // la API.
+  if (!req.file) return res.status(400).json({ error: 'foto_requerida', message: 'La fotografía de evidencia es requerida.' });
 
   const gpsLat = parseCoord(lat, -90, 90);
   const gpsLng = parseCoord(lng, -180, 180);

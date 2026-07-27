@@ -1,3 +1,6 @@
+import { useEffect, useRef, useState } from 'react';
+import { loadGoogleMaps } from '@aviva/ui';
+
 interface MapPreviewProps {
   direccion: string;
   telefono?: string | null;
@@ -10,13 +13,38 @@ function comoLlegarUrl(p: MapPreviewProps): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${destino}`;
 }
 
+function MiniMap({ lat, lng }: { lat: number; lng: number }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    let marker: google.maps.Marker | null = null;
+    loadGoogleMaps()
+      .then((g) => {
+        if (cancelled || !containerRef.current) return;
+        const map = new g.maps.Map(containerRef.current, {
+          center: { lat, lng }, zoom: 16, disableDefaultUI: true, zoomControl: true,
+          streetViewControl: false, mapTypeControl: false, fullscreenControl: false, tilt: 0,
+        });
+        marker = new g.maps.Marker({ position: { lat, lng }, map });
+      })
+      .catch((err) => !cancelled && setError(err.message || 'No se pudo cargar el mapa'));
+    return () => { cancelled = true; marker?.setMap(null); };
+  }, [lat, lng]);
+
+  if (error) {
+    return (
+      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-300)', fontSize: 12.5, fontWeight: 600, padding: '0 16px', textAlign: 'center' }}>
+        No se pudo cargar el mapa · usa "Cómo llegar"
+      </div>
+    );
+  }
+  return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />;
+}
+
 export function MapPreview(p: MapPreviewProps) {
   const hasCoords = p.lat != null && p.lng != null;
-  const d = 0.006;
-  const bbox = hasCoords ? `${p.lng! - d}%2C${p.lat! - d}%2C${p.lng! + d}%2C${p.lat! + d}` : null;
-  const osmSrc = bbox
-    ? `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${p.lat}%2C${p.lng}`
-    : null;
 
   return (
     <>
@@ -35,8 +63,8 @@ export function MapPreview(p: MapPreviewProps) {
 
       <div style={{ margin: '12px 16px 0', borderRadius: 18, overflow: 'hidden', boxShadow: '0 8px 24px rgba(20,60,40,.09)' }}>
         <div style={{ position: 'relative', height: 150, overflow: 'hidden', background: '#dde9e0' }}>
-          {osmSrc ? (
-            <iframe title="Mapa del negocio" src={osmSrc} style={{ width: '100%', height: '100%', border: 0 }} loading="lazy" />
+          {hasCoords ? (
+            <MiniMap lat={p.lat!} lng={p.lng!} />
           ) : (
             <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-300)', fontSize: 12.5, fontWeight: 600, padding: '0 16px', textAlign: 'center' }}>
               Sin coordenadas GPS para este negocio · usa "Cómo llegar" con la dirección
