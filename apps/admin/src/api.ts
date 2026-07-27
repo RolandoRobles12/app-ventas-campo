@@ -47,7 +47,7 @@ export interface Evidencia {
 export interface VisitaListItem {
   id: string; vendedorId: string; vendedorNombre: string; producto: string;
   esNegocioNuevo: boolean; nombreNegocio: string; direccion: string; resultado: string;
-  notas: string | null; fotoUrl: string | null; lat: number | null; lng: number | null;
+  notas: string | null; fotos: string[]; lat: number | null; lng: number | null;
   ubicacionValida: boolean | null; distanciaValidacionMetros: number | null; createdAt: string;
 }
 export interface VisitasResponse { items: VisitaListItem[]; nextCursor: string | null }

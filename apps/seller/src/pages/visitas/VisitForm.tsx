@@ -7,6 +7,7 @@ import { CameraCapture } from '../../components/CameraCapture';
 import { RESULTADO_OPTIONS } from '@aviva/ui';
 
 const GIROS = ['Abarrotes', 'Ferretería', 'Papelería', 'Alimentos', 'Servicios', 'Otro'];
+const MAX_FOTOS = 5;
 
 type GpsFix = { lat: number; lng: number; accuracy: number };
 type GpsState =
@@ -54,7 +55,7 @@ export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
   const [customGiro, setCustomGiro] = useState('');
   const [resultado, setResultado] = useState('');
   const [notas, setNotas] = useState('');
-  const [photo, setPhoto] = useState<{ file: File; preview: string } | null>(null);
+  const [photos, setPhotos] = useState<{ file: File; preview: string }[]>([]);
   const [showCamera, setShowCamera] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -75,13 +76,17 @@ export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
   const kicker = mode === 'nuevo' ? 'NUEVO REGISTRO' : 'REGISTRO DE VISITA';
 
   const onCaptured = (file: File) => {
-    setPhoto({ file, preview: URL.createObjectURL(file) });
+    setPhotos((prev) => [...prev, { file, preview: URL.createObjectURL(file) }]);
     setShowCamera(false);
+  };
+
+  const quitarFoto = (index: number) => {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
   };
 
   const submit = async () => {
     if (!resultado) { setError('Selecciona el resultado de la visita'); return; }
-    if (!photo) { setError('Toma una foto de evidencia de la visita'); return; }
+    if (photos.length === 0) { setError('Toma al menos una foto de evidencia de la visita'); return; }
     setSubmitting(true);
     setError('');
     try {
@@ -89,7 +94,7 @@ export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
       fd.append('vendedorId', vendedor.id);
       fd.append('resultado', resultado);
       if (notas) fd.append('notas', notas);
-      fd.append('foto', photo.file);
+      photos.forEach((p) => fd.append('fotos', p.file));
       if (gps.status === 'ok') {
         fd.append('lat', String(gps.fix.lat));
         fd.append('lng', String(gps.fix.lng));
@@ -112,7 +117,7 @@ export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
         state: {
           nombre: mode === 'nuevo' ? (customName || 'Nuevo negocio') : prospecto!.nombre,
           resultado,
-          hasPhoto: !!photo,
+          hasPhoto: photos.length > 0,
         },
       });
     } catch (err) {
@@ -172,15 +177,10 @@ export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
         </Field>
 
         <div>
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--ink-600)', marginBottom: 7 }}>Fotografía de evidencia</label>
-          {photo ? (
-            <div onClick={() => setShowCamera(true)} style={{ position: 'relative', height: 180, borderRadius: 16, overflow: 'hidden', backgroundImage: `url(${photo.preview})`, backgroundSize: 'cover', backgroundPosition: 'center', cursor: 'pointer' }}>
-              <span style={{ position: 'absolute', right: 10, bottom: 10, display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,.6)', color: '#fff', fontSize: 12.5, fontWeight: 700, padding: '8px 12px', borderRadius: 20 }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                Volver a tomar
-              </span>
-            </div>
-          ) : (
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--ink-600)', marginBottom: 7 }}>
+            Fotografía de evidencia {photos.length > 0 && <span style={{ color: 'var(--ink-300)', fontWeight: 500 }}>({photos.length}/{MAX_FOTOS})</span>}
+          </label>
+          {photos.length === 0 ? (
             <button onClick={() => setShowCamera(true)} style={{ width: '100%', height: 180, borderRadius: 16, border: '1.5px dashed #b7cabf', background: '#f7f8f6', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
               <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--aviva-green-700)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 16px rgba(15,81,50,.28)' }}>
                 <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
@@ -188,6 +188,26 @@ export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
               <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink-800)' }}>Tomar foto con la cámara</span>
               <span style={{ fontSize: 12, fontWeight: 500, color: '#8a958c' }}>Solo cámara · no se permiten archivos</span>
             </button>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+              {photos.map((p, i) => (
+                <div key={p.preview} style={{ position: 'relative', height: 90, borderRadius: 12, overflow: 'hidden', backgroundImage: `url(${p.preview})`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+                  <button
+                    onClick={() => quitarFoto(i)}
+                    aria-label="Quitar foto"
+                    style={{ position: 'absolute', top: 5, right: 5, width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                  </button>
+                </div>
+              ))}
+              {photos.length < MAX_FOTOS && (
+                <button onClick={() => setShowCamera(true)} style={{ height: 90, borderRadius: 12, border: '1.5px dashed #b7cabf', background: '#f7f8f6', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--aviva-green-700)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-400)' }}>Añadir foto</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -196,12 +216,12 @@ export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
 
       <div style={{ padding: '16px 16px 0' }}>
         <button
-          onClick={submit} disabled={submitting || !resultado || !photo}
+          onClick={submit} disabled={submitting || !resultado || photos.length === 0}
           style={{
             width: '100%', border: 'none', background: 'var(--aviva-orange-500)', color: 'var(--aviva-orange-900)',
             fontSize: 16, fontWeight: 800, padding: 16, borderRadius: 18, boxShadow: '0 10px 24px rgba(239,139,62,.4)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
-            opacity: submitting || !resultado || !photo ? 0.5 : 1,
+            opacity: submitting || !resultado || photos.length === 0 ? 0.5 : 1,
           }}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--aviva-orange-900)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7"/></svg>

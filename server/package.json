@@ -12,7 +12,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "db:seed": "tsx src/seed.ts"
+    "db:seed": "tsx src/seed.ts",
+    "db:cleanup-seed": "tsx src/cleanup-seed.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

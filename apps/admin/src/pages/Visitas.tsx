@@ -22,7 +22,7 @@ export function Visitas() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ fotos: string[]; index: number } | null>(null);
 
   const [showCalor, setShowCalor] = useState(true);
   const [showRutas, setShowRutas] = useState(false);
@@ -151,11 +151,17 @@ export function Visitas() {
           items.map((v) => (
             <div key={v.id} style={{ display: 'grid', gridTemplateColumns: gridCols, alignItems: 'center', padding: '10px 20px', borderBottom: '1px solid #f2f5f2', fontSize: 12.5 }}>
               <div>
-                {v.fotoUrl ? (
+                {v.fotos.length > 0 ? (
                   <div
-                    onClick={() => setLightbox(v.fotoUrl)}
-                    style={{ width: 42, height: 42, borderRadius: 8, backgroundImage: `url(${v.fotoUrl})`, backgroundSize: 'cover', backgroundPosition: 'center', cursor: 'zoom-in', border: '1px solid #eef2ee' }}
-                  />
+                    onClick={() => setLightbox({ fotos: v.fotos, index: 0 })}
+                    style={{ position: 'relative', width: 42, height: 42, borderRadius: 8, backgroundImage: `url(${v.fotos[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', cursor: 'zoom-in', border: '1px solid #eef2ee' }}
+                  >
+                    {v.fotos.length > 1 && (
+                      <span style={{ position: 'absolute', right: -5, bottom: -5, background: '#157347', color: '#fff', fontSize: 10, fontWeight: 700, borderRadius: 9, padding: '1px 5px', boxShadow: '0 1px 3px rgba(0,0,0,.3)' }}>
+                        +{v.fotos.length - 1}
+                      </span>
+                    )}
+                  </div>
                 ) : (
                   <div style={{ width: 42, height: 42, borderRadius: 8, background: '#f2f5f2' }} />
                 )}
@@ -198,7 +204,26 @@ export function Visitas() {
 
       {lightbox && (
         <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,40,30,.78)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, cursor: 'zoom-out' }}>
-          <img src={lightbox} style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 10, boxShadow: '0 24px 60px rgba(0,0,0,.4)' }} />
+          <img src={lightbox.fotos[lightbox.index]} style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 10, boxShadow: '0 24px 60px rgba(0,0,0,.4)' }} />
+          {lightbox.fotos.length > 1 && (
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); setLightbox({ ...lightbox, index: (lightbox.index - 1 + lightbox.fotos.length) % lightbox.fotos.length }); }}
+                style={{ position: 'absolute', left: 24, top: '50%', transform: 'translateY(-50%)', width: 44, height: 44, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.9)', cursor: 'pointer' }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#263238" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto' }}><polyline points="15 18 9 12 15 6" /></svg>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setLightbox({ ...lightbox, index: (lightbox.index + 1) % lightbox.fotos.length }); }}
+                style={{ position: 'absolute', right: 24, top: '50%', transform: 'translateY(-50%)', width: 44, height: 44, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.9)', cursor: 'pointer' }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#263238" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto' }}><polyline points="9 18 15 12 9 6" /></svg>
+              </button>
+              <span style={{ position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: 'rgba(255,255,255,.9)', color: '#263238', fontSize: 12.5, fontWeight: 700, borderRadius: 20, padding: '5px 12px' }}>
+                {lightbox.index + 1} / {lightbox.fotos.length}
+              </span>
+            </>
+          )}
         </div>
       )}
     </div>

@@ -10,6 +10,8 @@ import { resolveVendedorIds } from './_filters.js';
 
 export const visitasRouter = Router();
 
+const MAX_FOTOS_POR_VISITA = 5;
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 },
@@ -33,7 +35,10 @@ interface VisitaDoc {
   direccion: string;
   resultado: string;
   notas: string | null;
-  fotoUrl: string | null;
+  fotos: string[];
+  // Ya no se escribe: solo se lee por compatibilidad con visitas guardadas
+  // antes de soportar varias fotos por visita.
+  fotoUrl?: string | null;
   lat: number | null;
   lng: number | null;
   gpsAccuracy: number | null;
@@ -66,7 +71,7 @@ function shape(id: string, v: VisitaDoc) {
     direccion: v.direccion,
     resultado: v.resultado,
     notas: v.notas,
-    fotoUrl: v.fotoUrl,
+    fotos: v.fotos && v.fotos.length ? v.fotos : v.fotoUrl ? [v.fotoUrl] : [],
     lat: v.lat ?? null,
     lng: v.lng ?? null,
     ubicacionValida: v.ubicacionValida ?? null,
@@ -197,28 +202,29 @@ visitasRouter.get('/vendedor/:vendedorId', requireAdmin, async (req, res) => {
   res.json(snap.docs.map((d) => shape(d.id, d.data() as VisitaDoc)));
 });
 
-// upload.single() se envuelve a mano (en vez de pasarlo directo como
+// upload.array() se envuelve a mano (en vez de pasarlo directo como
 // middleware del router) para poder responder 400 en vez de dejar que un
-// rechazo de fileFilter/límite de tamaño caiga al manejador de errores
-// genérico de app.ts, que respondería 500.
-function uploadFoto(req: Request, res: Response, next: NextFunction) {
-  upload.single('foto')(req, res, (err: unknown) => {
+// rechazo de fileFilter/límite de tamaño/cantidad caiga al manejador de
+// errores genérico de app.ts, que respondería 500.
+function uploadFotos(req: Request, res: Response, next: NextFunction) {
+  upload.array('fotos', MAX_FOTOS_POR_VISITA)(req, res, (err: unknown) => {
     if (!err) return next();
     const message = err instanceof Error && err.message === 'SOLO_IMAGENES'
-      ? 'La fotografía debe ser una imagen.'
-      : 'No se pudo procesar la fotografía.';
-    res.status(400).json({ error: 'foto_invalida', message });
+      ? 'Las fotografías deben ser imágenes.'
+      : `No se pudieron procesar las fotografías (máximo ${MAX_FOTOS_POR_VISITA}).`;
+    res.status(400).json({ error: 'fotos_invalidas', message });
   });
 }
 
-visitasRouter.post('/', uploadFoto, async (req, res) => {
+visitasRouter.post('/', uploadFotos, async (req, res) => {
   const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy } = req.body as Record<string, string>;
   if (!vendedorId || !resultado) return res.status(400).json({ error: 'vendedorId y resultado son requeridos' });
-  // La app del vendedor solo permite capturar la foto en el momento (cámara
-  // en vivo vía getUserMedia, sin selector de archivos) — se exige aquí
-  // también para que nadie pueda saltarse ese requisito pegándole directo a
-  // la API.
-  if (!req.file) return res.status(400).json({ error: 'foto_requerida', message: 'La fotografía de evidencia es requerida.' });
+  const files = (req.files as Express.Multer.File[] | undefined) || [];
+  // La app del vendedor solo permite capturar fotos en el momento (cámara en
+  // vivo vía getUserMedia, sin selector de archivos) — se exige al menos una
+  // aquí también para que nadie pueda saltarse ese requisito pegándole
+  // directo a la API.
+  if (files.length === 0) return res.status(400).json({ error: 'foto_requerida', message: 'Al menos una fotografía de evidencia es requerida.' });
 
   const gpsLat = parseCoord(lat, -90, 90);
   const gpsLng = parseCoord(lng, -180, 180);
@@ -241,7 +247,7 @@ visitasRouter.post('/', uploadFoto, async (req, res) => {
     await prospectoRef.update({ estado: 'visitado' });
   }
 
-  const fotoUrl = req.file ? await saveUpload(req.file) : null;
+  const fotos = await Promise.all(files.map((f) => saveUpload(f)));
 
   // Valida la ubicación solo cuando el teléfono entregó GPS real (no la
   // coordenada de respaldo del prospecto, que trivialmente daría distancia 0)
@@ -266,7 +272,7 @@ visitasRouter.post('/', uploadFoto, async (req, res) => {
     direccion: direccion || prospecto?.direccion || '',
     resultado,
     notas: notas || null,
-    fotoUrl,
+    fotos,
     lat: hasGps ? gpsLat : prospecto?.lat ?? null,
     lng: hasGps ? gpsLng : prospecto?.lng ?? null,
     gpsAccuracy: hasGps ? parseCoord(gpsAccuracy, 0, 100000) : null,
