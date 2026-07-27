@@ -9,6 +9,9 @@ export const reportesRouter = Router();
 interface VisitaDoc {
   nombreNegocio: string;
   resultado: string;
+  fotos?: string[];
+  // Ya no se escribe: solo se lee por compatibilidad con visitas guardadas
+  // antes de soportar varias fotos por visita.
   fotoUrl?: string | null;
   ubicacionValida?: boolean | null;
   distanciaValidacionMetros?: number | null;
@@ -84,17 +87,28 @@ reportesRouter.get('/evidencias', async (req, res) => {
   let query: FirebaseFirestore.Query = db.collection('visitas');
   if (ids) query = query.where('vendedorId', 'in', ids);
   query = conRango(query, rango);
-  // fotoUrl != null no se puede combinar con orderBy(createdAt) en Firestore;
-  // se pide de más y se filtra/recorta en memoria.
+  // fotos != [] no se puede combinar con orderBy(createdAt) en Firestore; se
+  // pide de más y se filtra/recorta en memoria.
   const snap = await query.orderBy('createdAt', 'desc').limit(50).get();
-  const visitas = snap.docs
-    .map((d) => ({ id: d.id, ...(d.data() as VisitaDoc) }))
-    .filter((v) => v.fotoUrl)
-    .slice(0, 12);
+  const visitas = snap.docs.map((d) => ({ id: d.id, ...(d.data() as VisitaDoc) }));
 
-  res.json(visitas.map((v) => ({
-    id: v.id, nombre: v.nombreNegocio, resultado: v.resultado, fotoUrl: v.fotoUrl,
-    ubicacionValida: v.ubicacionValida ?? null, distanciaValidacionMetros: v.distanciaValidacionMetros ?? null,
-    createdAt: toIso(v.createdAt),
-  })));
+  // Una visita puede traer varias fotos: se aplana a una tarjeta de evidencia
+  // por foto (con un id propio, ver más abajo) en vez de mostrar solo la
+  // primera y perder el resto.
+  const MAX_EVIDENCIAS = 12;
+  const evidencias: { id: string; nombre: string; resultado: string; fotoUrl: string; ubicacionValida: boolean | null; distanciaValidacionMetros: number | null; createdAt: string | null }[] = [];
+  for (const v of visitas) {
+    const fotos = v.fotos && v.fotos.length ? v.fotos : v.fotoUrl ? [v.fotoUrl] : [];
+    for (const [i, fotoUrl] of fotos.entries()) {
+      evidencias.push({
+        id: `${v.id}_${i}`, nombre: v.nombreNegocio, resultado: v.resultado, fotoUrl,
+        ubicacionValida: v.ubicacionValida ?? null, distanciaValidacionMetros: v.distanciaValidacionMetros ?? null,
+        createdAt: toIso(v.createdAt),
+      });
+      if (evidencias.length >= MAX_EVIDENCIAS) break;
+    }
+    if (evidencias.length >= MAX_EVIDENCIAS) break;
+  }
+
+  res.json(evidencias);
 });

@@ -8,7 +8,7 @@ import { VisitasList } from './pages/visitas/VisitasList';
 import { VisitForm } from './pages/visitas/VisitForm';
 import { VisitSuccess } from './pages/visitas/VisitSuccess';
 import { Jornada } from './pages/Jornada';
-import { PhoneShell, StatusBar } from './components/PhoneShell';
+import { PhoneShell } from './components/PhoneShell';
 import { BottomNav } from './components/BottomNav';
 import { LocationTracker } from './components/LocationTracker';
 
@@ -16,11 +16,7 @@ function AppShell() {
   const { vendedor, loading } = useSession();
 
   if (loading) {
-    return (
-      <PhoneShell>
-        <StatusBar />
-      </PhoneShell>
-    );
+    return <PhoneShell />;
   }
 
   if (!vendedor) {
@@ -31,7 +27,6 @@ function AppShell() {
     <JornadaProvider vendedorId={vendedor.id}>
       <LocationTracker />
       <PhoneShell>
-        <StatusBar />
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <Routes>
             <Route path="/" element={<Home />} />
