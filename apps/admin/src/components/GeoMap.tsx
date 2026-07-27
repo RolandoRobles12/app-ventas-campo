@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { loadGoogleMaps } from '../lib/googleMaps';
+import { loadGoogleMaps } from '@aviva/ui';
 
 export interface HeatPoint { lat: number; lng: number; peso: number }
 export interface MapPin { id: string; lat: number; lng: number; color: string; title: string; subtitle?: string }

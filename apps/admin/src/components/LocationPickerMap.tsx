@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { loadGoogleMaps } from '../lib/googleMaps';
+import { loadGoogleMaps } from '@aviva/ui';
 
 const DEFAULT_CENTER = { lat: 20.6597, lng: -103.3496 };
 

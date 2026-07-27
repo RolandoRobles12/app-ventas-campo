@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { loadGoogleMaps } from '../lib/googleMaps';
+import { loadGoogleMaps } from '@aviva/ui';
 
 export interface PlaceResult { description: string; lat: number; lng: number }
 
