@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
+import { requireAdmin } from '../auth.js';
 import type { VendedorDoc } from './vendedores.js';
 
 export const metasRouter = Router();
@@ -67,7 +68,7 @@ metasRouter.get('/:vendedorId/hoy', async (req, res) => {
 // Admin: define (o actualiza) las metas de solicitudes/día y venta/mes de un
 // vendedor. Se guardan directo en su documento en vez de en un doc por
 // periodo, para no tener que re-capturarlas cada día/mes.
-metasRouter.put('/:vendedorId', async (req, res) => {
+metasRouter.put('/:vendedorId', requireAdmin, async (req, res) => {
   const { metaSolicitudesDia, metaVentaMes } = req.body as { metaSolicitudesDia?: number; metaVentaMes?: number };
 
   const data: Record<string, unknown> = {};

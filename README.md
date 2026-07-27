@@ -77,11 +77,26 @@ cada request con el Admin SDK (`server/src/auth.ts`) y rechaza cualquier token
 inválido o de otro dominio — la restricción del cliente (`hd` en el selector
 de cuentas de Google) es solo UX, la que cuenta es la del servidor.
 
-En la app del vendedor no hay un rol "admin" separado: cualquier cuenta
-`@avivacredito.com` puede entrar al admin web. Para la app del vendedor, el
-correo de la cuenta de Google se busca contra el campo `email` de los
-documentos de `vendedores` en Firestore (`GET /api/auth/me`) — si no hay un
-vendedor con ese correo, la app lo indica en vez de dejar pasar a nadie.
+Dentro de ese dominio, cada app resuelve el rol por separado, buscando el
+correo de la cuenta de Google contra Firestore vía `GET /api/auth/me`:
+
+- **App del vendedor**: se busca contra el campo `email` de los documentos de
+  `vendedores` — si no hay un vendedor con ese correo, la app lo indica en vez
+  de dejar pasar a nadie.
+- **Panel de admin**: se busca contra la colección `usuarios` (doc id = email
+  en minúsculas, `rol: 'admin'`). Sin un doc ahí, la cuenta entra a la app
+  (pasa el login de Google) pero ve "Sin acceso al panel" en vez del panel —
+  y el servidor (`requireAdmin` en `server/src/auth.ts`) rechaza con 403
+  cualquier request a las rutas de admin aunque alguien le pegue directo a la
+  API sin pasar por la UI. Los administradores se gestionan desde
+  **Usuarios** dentro del propio admin (agregar/quitar por correo; no se
+  puede quitar al último administrador).
+  - Primer alta: como hace falta ser admin para entrar a "Usuarios", el
+    primer administrador se siembra por variable de entorno
+    `INITIAL_ADMIN_EMAILS` (lista separada por comas) — el servidor la
+    aplica una vez al arrancar (`bootstrapInitialAdmins` en
+    `server/src/auth.ts`) y, si alguien borra por error a esos correos desde
+    la UI, se restauran en el siguiente arranque/deploy.
 
 ## Integraciones reales (no simuladas)
 

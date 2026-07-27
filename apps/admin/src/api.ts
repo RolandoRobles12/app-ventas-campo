@@ -60,6 +60,7 @@ export interface AvivaHrImportResult {
   ok: boolean; creados: number; actualizados: number; total: number;
   omitidos: { email: string; nombre: string; motivo: string }[];
 }
+export interface Usuario { email: string; nombre: string | null; createdAt: string }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await getIdToken();
@@ -94,6 +95,13 @@ function qsMulti(params: Record<string, string | string[] | undefined>): string 
 }
 
 export const api = {
+  me: () => req<{ email: string; vendedor: Vendedor | null; isAdmin: boolean }>('/auth/me'),
+
+  usuarios: () => req<Usuario[]>('/usuarios'),
+  agregarUsuario: (data: { email: string; nombre?: string }) =>
+    req<Usuario>('/usuarios', { method: 'POST', body: JSON.stringify(data) }),
+  eliminarUsuario: (email: string) => req<void>(`/usuarios/${encodeURIComponent(email)}`, { method: 'DELETE' }),
+
   productos: () => req<Producto[]>('/productos/de-campo'),
   vendedores: (producto?: string) => req<Vendedor[]>(`/vendedores${qs({ producto })}`),
   actualizarRuta: (id: string, data: { productoId?: string; ciudad?: string; colonia?: string; giros?: string[]; drawZone?: boolean; zonaPoligono?: ZonaPunto[] | null }) =>

@@ -100,6 +100,13 @@ async function main() {
     vendedorRecords[v.nombre] = await upsertVendedor(v, productoRecords[v.producto]);
   }
 
+  // Demo: Rolando Robles también tiene acceso de admin al panel, para poder
+  // probar "Usuarios" localmente sin tener que configurar INITIAL_ADMIN_EMAILS.
+  await db.collection('usuarios').doc('rolando.robles@avivacredito.com').set(
+    { email: 'rolando.robles@avivacredito.com', nombre: 'Rolando Robles', rol: 'admin', createdAt: Timestamp.now() },
+    { merge: true },
+  );
+
   // Prospectos + una visita ya hecha para Jorge Díaz (para poblar la lista de la app del vendedor)
   const jorgeId = vendedorRecords['Jorge Díaz'];
   const existingProspectos = await db.collection('prospectos').where('vendedorId', '==', jorgeId).count().get();
