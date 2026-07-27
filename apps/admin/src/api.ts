@@ -149,7 +149,7 @@ export const api = {
   reportesEvidencias: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
     req<Evidencia[]>(`/reportes/evidencias${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
 
-  crmStatus: () => req<{ configured: boolean; stages: string[] }>('/crm/status'),
+  crmStatus: () => req<{ configured: boolean; stages: string[]; funnelStages: string[] }>('/crm/status'),
   crmDeals: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
     req<CrmDeal[]>(`/crm/deals${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
   crmSync: () => req<{ ok: boolean; created: number; updated: number; total: number }>('/crm/sync', { method: 'POST' }),

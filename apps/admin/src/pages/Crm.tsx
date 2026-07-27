@@ -7,15 +7,14 @@ import { etapaBadgeStyle } from '../badges';
 import { DealDrawer } from '../components/DealDrawer';
 
 const STAGE_ACCENTS: Record<string, string> = {
-  'Documentos subidos': '#2a6fdb', 'Documentos verificados': '#0e8a8a', 'Aprobado': '#22a36c',
-  'Contrato enviado': '#c96a1e', 'Desembolso': '#0f5132', 'Rechazado': '#c0392b',
+  'Aprobado': '#22a36c', 'Contrato enviado': '#c96a1e', 'Desembolso': '#0f5132', 'Rechazado': '#c0392b',
 };
 
 export function Crm() {
   const { fProductos, fVendedores, fDesde, fHasta } = useFilters();
   const { showToast } = useToast();
   const [deals, setDeals] = useState<CrmDeal[]>([]);
-  const [status, setStatus] = useState<{ configured: boolean } | null>(null);
+  const [status, setStatus] = useState<{ configured: boolean; funnelStages: string[] } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<CrmDeal | null>(null);
@@ -40,8 +39,8 @@ export function Crm() {
     }
   };
 
-  const stageCounts = STAGE_ACCENTS && Object.keys(STAGE_ACCENTS).map((stage) => ({
-    stage, count: deals.filter((d) => d.etapa === stage).length, accent: STAGE_ACCENTS[stage],
+  const stageCounts = (status?.funnelStages || Object.keys(STAGE_ACCENTS)).map((stage) => ({
+    stage, count: deals.filter((d) => d.etapa === stage).length, accent: STAGE_ACCENTS[stage] || '#3a4a41',
   }));
 
   const visibles = deals.filter((d) => d.cliente.toLowerCase().includes(search.toLowerCase()) || d.negocio.toLowerCase().includes(search.toLowerCase()));
@@ -50,7 +49,7 @@ export function Crm() {
     <div className="screen">
       <PageHeader
         icon={<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#157347" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>}
-        title="CRM · Prospectos" subtitle="Deals sincronizados desde HubSpot"
+        title="CRM · Prospectos" subtitle="Nuevas visitas sincronizadas desde HubSpot"
       />
       <FilterBar />
 
@@ -84,7 +83,7 @@ export function Crm() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 12, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
         {stageCounts.map((s) => (
           <div key={s.stage} style={{ background: '#fff', border: '1px solid #e6ece7', borderTop: `3px solid ${s.accent}`, borderRadius: 10, padding: '13px 15px' }}>
             <div style={{ fontSize: 12, color: '#6f7d75' }}>{s.stage}</div>

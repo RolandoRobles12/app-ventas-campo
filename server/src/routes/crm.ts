@@ -3,7 +3,7 @@ import { db, Timestamp } from '../db.js';
 import { toIso, parseDateRangeQuery, parseCsvParam } from '../firestore-helpers.js';
 import {
   fetchHubspotDeals, updateHubspotDeal, hubspotDealUrl, isHubspotConfigured,
-  DEAL_STAGE_LABELS, listHubspotOwners, listDealPipelines,
+  DEAL_STAGE_LABELS, FUNNEL_STAGE_LABELS, listHubspotOwners, listDealPipelines,
 } from '../integrations/hubspot.js';
 
 export const crmRouter = Router();
@@ -67,7 +67,7 @@ async function lookupNames(deals: { id: string; data: CrmDealDoc }[]) {
 }
 
 crmRouter.get('/status', (_req, res) => {
-  res.json({ configured: isHubspotConfigured(), stages: DEAL_STAGE_LABELS });
+  res.json({ configured: isHubspotConfigured(), stages: DEAL_STAGE_LABELS, funnelStages: FUNNEL_STAGE_LABELS });
 });
 
 crmRouter.get('/deals', async (req, res) => {
