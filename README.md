@@ -77,11 +77,26 @@ cada request con el Admin SDK (`server/src/auth.ts`) y rechaza cualquier token
 inválido o de otro dominio — la restricción del cliente (`hd` en el selector
 de cuentas de Google) es solo UX, la que cuenta es la del servidor.
 
-En la app del vendedor no hay un rol "admin" separado: cualquier cuenta
-`@avivacredito.com` puede entrar al admin web. Para la app del vendedor, el
-correo de la cuenta de Google se busca contra el campo `email` de los
-documentos de `vendedores` en Firestore (`GET /api/auth/me`) — si no hay un
-vendedor con ese correo, la app lo indica en vez de dejar pasar a nadie.
+Dentro de ese dominio, cada app resuelve el rol por separado, buscando el
+correo de la cuenta de Google contra Firestore vía `GET /api/auth/me`:
+
+- **App del vendedor**: se busca contra el campo `email` de los documentos de
+  `vendedores` — si no hay un vendedor con ese correo, la app lo indica en vez
+  de dejar pasar a nadie.
+- **Panel de admin**: se busca contra la colección `usuarios` (doc id = email
+  en minúsculas, `rol: 'admin'`). Sin un doc ahí, la cuenta entra a la app
+  (pasa el login de Google) pero ve "Sin acceso al panel" en vez del panel —
+  y el servidor (`requireAdmin` en `server/src/auth.ts`) rechaza con 403
+  cualquier request a las rutas de admin aunque alguien le pegue directo a la
+  API sin pasar por la UI. Los administradores se gestionan desde
+  **Usuarios** dentro del propio admin (agregar/quitar por correo; no se
+  puede quitar al último administrador).
+  - Primer alta: como hace falta ser admin para entrar a "Usuarios", el
+    primer administrador se siembra por variable de entorno
+    `INITIAL_ADMIN_EMAILS` (lista separada por comas) — el servidor la
+    aplica una vez al arrancar (`bootstrapInitialAdmins` en
+    `server/src/auth.ts`) y, si alguien borra por error a esos correos desde
+    la UI, se restauran en el siguiente arranque/deploy.
 
 ## Integraciones reales (no simuladas)
 
@@ -93,9 +108,9 @@ Copia `.env.example` a `server/.env` y completa:
   - El Mapa de Leads y el mapa de calor de Reportes (`GeoMap.tsx`) — mapas reales de Google en vez del lienzo de OpenStreetMap/Leaflet que traía el prototipo.
   - "Configurar ruta" → "Ciudad/Municipio" y "Colonia o C.P." son autocomplete real de Google Places (`PlaceAutocompleteInput.tsx`): hay que elegir una sugerencia de la lista, no solo escribir texto libre, así se manda la ubicación exacta en vez de volver a adivinarla en el servidor.
   - "Configurar ruta" → "Por ubicación (GPS)" y "Dibujar zona en el mapa" (`LocationPickerMap.tsx`) son mapas reales donde se hace clic para colocar el punto o dibujar el contorno — antes el modo GPS pedía lat/lng a mano y "dibujar zona" era una cuadrícula ilustrativa que ni siquiera se guardaba. La zona dibujada ahora sí se guarda (`zonaPoligono` en el vendedor), aunque por ahora es informativa: la búsqueda del DENUE sigue usando el punto+radio, no recorta por el polígono — avísame si quieres que también filtre por ahí.
-- **HubSpot** — `HUBSPOT_TOKEN` (Private App con scopes `crm.objects.deals.read/write`, `crm.objects.companies.read`, `crm.objects.owners.read`, y **`crm.schemas.deals.read/write`** — estos dos últimos son indispensables para el campo "Service owner": sin ellos la propiedad personalizada `aviva_service_owner` no se puede crear en HubSpot y el campo nunca se guarda allá, aunque el token funcione para todo lo demás) y `HUBSPOT_PORTAL_ID`. Sin configurar, el CRM funciona con los deals locales y lo indica con un banner; con ellos, "Sincronizar" trae deals reales de HubSpot (paginando todos los que haya, no solo los primeros 100) y los cambios en el drawer se escriben de vuelta a HubSpot.
-  - Si tu cuenta de HubSpot tiene **más de un pipeline de deals**, fija `HUBSPOT_PIPELINE_ID` (`GET /api/crm/pipelines` lista los disponibles con su ID); si no lo defines, se usa el primero que devuelva la API, lo cual solo es correcto si hay un único pipeline.
-  - Ese pipeline debe tener etapas (`stages`) llamadas exactamente (sin distinguir mayúsculas): `Documentos subidos`, `Documentos verificados`, `Aprobado`, `Contrato enviado`, `Desembolso`, `Rechazado`. Si no existen con esos nombres, los cambios de etapa hechos en el admin se guardan localmente pero **no se reflejan en HubSpot**.
+- **HubSpot** — `HUBSPOT_TOKEN` (Private App con scopes `crm.objects.deals.read/write`, `crm.objects.companies.read`, `crm.objects.owners.read`, y **`crm.schemas.deals.read/write`** — estos dos últimos son indispensables para el campo "Service owner": sin ellos la propiedad personalizada `aviva_service_owner` no se puede crear en HubSpot y el campo nunca se guarda allá, aunque el token funcione para todo lo demás) y `HUBSPOT_PORTAL_ID`. Sin configurar, el CRM funciona con los deals locales y lo indica con un banner; con ellos, "Sincronizar" trae solo los deals reales del pipeline de "Nuevas visitas" (paginando todos los que haya, no solo los primeros 100) y los cambios en el drawer se escriben de vuelta a HubSpot.
+  - El pipeline a sincronizar ya no se elige con una env var: `loadDealPipeline()` en `server/src/integrations/hubspot.ts` detecta automáticamente cuál pipeline de la cuenta tiene el stage "Aprobado" con el id fijado en `FUNNEL_STAGE_IDS`, y solo trae deals de ese pipeline (`GET /api/crm/pipelines` sigue existiendo para consultar ids si la pipeline se recrea en HubSpot y hay que actualizar esos ids).
+  - Ese pipeline debe tener etapas (`stages`) llamadas exactamente (sin distinguir mayúsculas): `Documentos subidos`, `Documentos verificados`, `Aprobado`, `Contrato enviado`, `Desembolso`, `Rechazado`. Si no existen con esos nombres, los cambios de etapa hechos en el admin se guardan localmente pero **no se reflejan en HubSpot**. El resumen del funnel en la UI solo muestra 4 de esas 6 etapas (`Aprobado`, `Contrato enviado`, `Desembolso`, `Rechazado` — ver `FUNNEL_STAGE_LABELS`); las otras 2 siguen existiendo como pasos intermedios del deal.
 - **aviva-hr** (directorio real de empleados) — `AVIVA_HR_PROJECT_ID`. Es otro proyecto de Firebase (no de este equipo), así que el servidor no tiene cuenta de servicio para él: lee su colección `users` vía la REST API pública de Firestore (`firestore.googleapis.com`), igual que hace [Ro-Bot-Web](https://github.com/RolandoRobles12/Ro-Bot-Web) contra el mismo proyecto — esto requiere que las reglas de Firestore de aviva-hr permitan lectura no autenticada de esa colección. Sin el project id, "Rutas por vendedor" muestra "No configurado" en vez de intentar sincronizar.
   - El botón **"Sincronizar desde aviva-hr"** en Rutas por vendedor trae usuarios con `status` `active` o `invited`, los empareja por email contra `vendedores` (crea los que falten con los giros por defecto de su producto; a los que ya existen les actualiza nombre/estado/producto sin tocar ciudad/colonia/giros, que siguen siendo manuales vía "Configurar ruta") y asigna el producto según su posición (`role`): `Promotor Aviva Tu Negocio` → Aviva Tu Negocio, `Promotor Aviva Tu Casa` → Aviva Construrama, cualquier posición que contenga "Marchand" → Aviva Casa Marchand. No requiere haber corrido `db:seed` antes: si el producto correspondiente no existe todavía en `productos`, la sincronización lo crea (mismo nombre/giros que usa el seed). Una posición que no matchee ninguna de esas reglas se omite (se reporta en la respuesta) en vez de crear un vendedor sin producto.
 

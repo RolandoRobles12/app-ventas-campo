@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
 import { toIso, parseDateRangeQuery, parseCsvParam } from '../firestore-helpers.js';
+import { requireAdmin } from '../auth.js';
 import { resolveVendedorIds } from './_filters.js';
 
 export const ubicacionesRouter = Router();
@@ -53,7 +54,7 @@ ubicacionesRouter.post('/', async (req, res) => {
 // endpoints filtrados, aquí SÍ hace falta elegir vendedor(es) o producto(s)
 // explícitamente: "todos" dibujaría decenas de rutas encimadas e ilegibles,
 // además de disparar una consulta por cada vendedor de la empresa.
-ubicacionesRouter.get('/recorrido', async (req, res) => {
+ubicacionesRouter.get('/recorrido', requireAdmin, async (req, res) => {
   const { vendedorIds, productoIds, desde, hasta } = req.query as {
     vendedorIds?: string; productoIds?: string; desde?: string; hasta?: string;
   };

@@ -3,6 +3,7 @@ import multer from 'multer';
 import { db, Timestamp, FieldPath } from '../db.js';
 import { toIso, haversineMetros, chunkArray, parseDateRangeQuery, parseCsvParam, isEmptyRestriction } from '../firestore-helpers.js';
 import { saveUpload } from '../storage.js';
+import { requireAdmin } from '../auth.js';
 import { productosPorId } from './vendedores.js';
 import { resolveVendedorIds } from './_filters.js';
 
@@ -100,7 +101,7 @@ async function vendedoresPorId(ids: string[]): Promise<Map<string, { nombre: str
 // se resuelve a los vendedores de esos productos), uno o varios resultados,
 // y rango de fechas. Paginado con cursor (no offset), porque la colección
 // crece sin límite.
-visitasRouter.get('/', async (req, res) => {
+visitasRouter.get('/', requireAdmin, async (req, res) => {
   const { vendedorIds, productoIds, resultados, desde, hasta, cursor, limit } = req.query as {
     vendedorIds?: string; productoIds?: string; resultados?: string;
     desde?: string; hasta?: string; cursor?: string; limit?: string;
@@ -179,7 +180,7 @@ visitasRouter.get('/', async (req, res) => {
   });
 });
 
-visitasRouter.get('/vendedor/:vendedorId', async (req, res) => {
+visitasRouter.get('/vendedor/:vendedorId', requireAdmin, async (req, res) => {
   const snap = await db.collection('visitas')
     .where('vendedorId', '==', req.params.vendedorId)
     .orderBy('createdAt', 'desc')

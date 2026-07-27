@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
 import { toIso } from '../firestore-helpers.js';
+import { requireAdmin } from '../auth.js';
 
 export const prospectosRouter = Router();
 
@@ -66,8 +67,8 @@ prospectosRouter.post('/', async (req, res) => {
   res.status(201).json(shape(ref.id, data));
 });
 
-// Alta masiva (resultado del wizard: consulta DENUE + manuales agregados en esa sesión)
-prospectosRouter.post('/bulk', async (req, res) => {
+// Alta masiva (resultado del wizard: consulta DENUE + manuales agregados en esa sesión) — solo admin
+prospectosRouter.post('/bulk', requireAdmin, async (req, res) => {
   const { vendedorId, items } = req.body as {
     vendedorId: string;
     items: { nombre: string; direccion: string; giro?: string; telefono?: string; distanciaKm?: number; lat?: number; lng?: number; origen?: string }[];
@@ -100,7 +101,8 @@ prospectosRouter.post('/bulk', async (req, res) => {
   res.status(201).json({ creados: nuevos.length, prospectos });
 });
 
-prospectosRouter.delete('/:id', async (req, res) => {
+// Solo admin (el wizard de rutas quita prospectos que ya no aplican a la ruta generada)
+prospectosRouter.delete('/:id', requireAdmin, async (req, res) => {
   await db.collection('prospectos').doc(req.params.id).delete().catch(() => null);
   res.status(204).end();
 });
