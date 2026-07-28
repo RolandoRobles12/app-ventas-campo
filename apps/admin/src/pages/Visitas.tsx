@@ -110,7 +110,11 @@ export function Visitas() {
             </label>
           </div>
         </div>
-        <div style={{ position: 'relative', height: 440, borderRadius: 10, overflow: 'hidden', background: '#e7ece4' }}>
+        {/* zIndex:0 (no solo position:relative) aísla el overlay zIndex:500 de
+            abajo en su propio contexto de apilamiento — si no, ese 500
+            compite en el nivel raíz de la página y puede quedar encima de
+            dropdowns/menús que se abren más arriba, bloqueando sus clics. */}
+        <div style={{ position: 'relative', zIndex: 0, height: 440, borderRadius: 10, overflow: 'hidden', background: '#e7ece4' }}>
           <GeoMap heatPoints={showCalor ? (calor?.puntos ?? []) : []} recorridos={showRutas ? rutas : []} height={440} />
           {showRutas && rutasError && (
             <div style={{ position: 'absolute', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.85)', color: '#5a665f', fontSize: 12.5, fontWeight: 600, textAlign: 'center', padding: '0 40px' }}>

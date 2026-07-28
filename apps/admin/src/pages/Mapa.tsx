@@ -29,7 +29,10 @@ export function Mapa() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, alignItems: 'start' }}>
         <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, overflow: 'hidden' }}>
-          <div style={{ position: 'relative', height: 540, background: '#e7ece4', overflow: 'hidden' }}>
+          {/* zIndex:0 aísla el overlay zIndex:500 de abajo en su propio
+              contexto de apilamiento — si no, compite en el nivel raíz de la
+              página y puede quedar encima de dropdowns abiertos más arriba. */}
+          <div style={{ position: 'relative', zIndex: 0, height: 540, background: '#e7ece4', overflow: 'hidden' }}>
             <GeoMap pins={pins} height={540} />
             {data && leads.length === 0 && (
               <div style={{ position: 'absolute', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.72)', color: '#5a665f', fontSize: 13, fontWeight: 600, textAlign: 'center', padding: '0 40px' }}>
