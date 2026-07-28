@@ -61,6 +61,10 @@ function parseCoord(raw: string | undefined, min: number, max: number): number |
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
 }
 
+function fotosDeVisita(v: VisitaDoc): string[] {
+  return v.fotos && v.fotos.length ? v.fotos : v.fotoUrl ? [v.fotoUrl] : [];
+}
+
 function shape(id: string, v: VisitaDoc) {
   return {
     id,
@@ -71,7 +75,7 @@ function shape(id: string, v: VisitaDoc) {
     direccion: v.direccion,
     resultado: v.resultado,
     notas: v.notas,
-    fotos: v.fotos && v.fotos.length ? v.fotos : v.fotoUrl ? [v.fotoUrl] : [],
+    fotos: fotosDeVisita(v),
     lat: v.lat ?? null,
     lng: v.lng ?? null,
     ubicacionValida: v.ubicacionValida ?? null,
@@ -181,7 +185,7 @@ visitasRouter.get('/', requireAdmin, async (req, res) => {
         direccion: v.direccion,
         resultado: v.resultado,
         notas: v.notas,
-        fotoUrl: v.fotoUrl,
+        fotos: fotosDeVisita(v),
         lat: v.lat ?? null,
         lng: v.lng ?? null,
         ubicacionValida: v.ubicacionValida ?? null,
