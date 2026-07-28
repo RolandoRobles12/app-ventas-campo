@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
-import { requireAdmin } from '../auth.js';
+import { requireAdmin, puedeActuarComoVendedor, vendedorAjeno } from '../auth.js';
 import type { VendedorDoc } from './vendedores.js';
 
 export const metasRouter = Router();
@@ -60,6 +60,7 @@ async function calcularRacha(vendedorId: string): Promise<number> {
 // es el mismo día tras día hasta que alguien lo cambie.
 metasRouter.get('/:vendedorId/hoy', async (req, res) => {
   const vendedorId = req.params.vendedorId;
+  if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
   const { start: dayStart, end: dayEnd } = dayRange();
   const { start: monthStart, end: monthEnd } = monthRange();
 
