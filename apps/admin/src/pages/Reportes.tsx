@@ -100,7 +100,10 @@ export function Reportes() {
             Mapa de calor de visitas
             {calor && calor.visitasConUbicacion > 0 && ` · ${calor.visitasConUbicacion.toLocaleString('es-MX')} visitas con ubicación`}
           </div>
-          <div style={{ position: 'relative', height: 480, borderRadius: 10, overflow: 'hidden', background: '#e7ece4' }}>
+          {/* zIndex:0 aísla el overlay zIndex:500 de abajo en su propio
+              contexto de apilamiento — si no, compite en el nivel raíz de la
+              página y puede quedar encima de dropdowns abiertos más arriba. */}
+          <div style={{ position: 'relative', zIndex: 0, height: 480, borderRadius: 10, overflow: 'hidden', background: '#e7ece4' }}>
             <GeoMap heatPoints={calor?.puntos ?? []} height={480} />
             {calor && calor.puntos.length === 0 && (
               <div style={{ position: 'absolute', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.72)', color: '#5a665f', fontSize: 12.5, fontWeight: 600, textAlign: 'center', padding: '0 30px' }}>

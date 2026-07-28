@@ -26,7 +26,7 @@ export function RecorridoModal({ vendedorId, nombre, onClose }: { vendedorId: st
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3a4a41" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
         </div>
-        <div style={{ position: 'relative', height: 420, background: '#e7ece4' }}>
+        <div style={{ position: 'relative', zIndex: 0, height: 420, background: '#e7ece4' }}>
           <GeoMap recorridos={ruta ? [ruta] : []} height={420} />
           {ruta && ruta.puntos.length === 0 && (
             <div style={{ position: 'absolute', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.72)', color: '#5a665f', fontSize: 12.5, fontWeight: 600, textAlign: 'center', padding: '0 30px' }}>
