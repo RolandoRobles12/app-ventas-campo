@@ -8,7 +8,7 @@
   },
   "main": "dist/index.js",
   "scripts": {
-    "build": "npm run build --prefix ../server && tsc -p tsconfig.json",
+    "build": "npm run build --prefix ../server && tsc -p tsconfig.json && node scripts/bundle-local-deps.mjs",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "npm run build && firebase deploy --only functions"
   },
