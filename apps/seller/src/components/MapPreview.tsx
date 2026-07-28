@@ -54,10 +54,11 @@ export function MapPreview(p: MapPreviewProps) {
           <span style={{ fontSize: 13, fontWeight: 600 }}>{p.direccion}</span>
         </div>
         {p.telefono && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, color: '#eafff3' }}>
+          <a href={`tel:${p.telefono.replace(/[^+\d]/g, '')}`} style={{ display: 'flex', alignItems: 'center', gap: 9, color: '#eafff3', textDecoration: 'none' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8fcfae" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.6a2 2 0 0 1-.5 2.1L8.1 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.6 2.6.7a2 2 0 0 1 1.9 2Z"/></svg>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>{p.telefono}</span>
-          </div>
+            <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{p.telefono}</span>
+            <span style={{ fontSize: 11.5, fontWeight: 700, background: 'rgba(255,255,255,.14)', borderRadius: 20, padding: '4px 11px' }}>Llamar</span>
+          </a>
         )}
       </div>
 

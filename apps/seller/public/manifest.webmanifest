@@ -1,0 +1,20 @@
+{
+  "name": "Aviva · Visitas de Campo",
+  "short_name": "Visitas Aviva",
+  "description": "Registra tus visitas de campo y da seguimiento a tus metas del día.",
+  "lang": "es-MX",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#e9f4ee",
+  "theme_color": "#0f5132",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

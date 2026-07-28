@@ -29,6 +29,17 @@ export interface Metas {
   racha: number;
 }
 
+// El servidor SÍ respondió pero rechazó la petición. Cualquier otro error de
+// req() (fetch que truena, token que no se pudo refrescar) se trata como
+// "sin red" — es la señal que usa offline.ts para encolar en vez de perder datos.
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await getIdToken();
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
@@ -40,7 +51,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.message || body.error || `Error ${res.status}`);
+    throw new ApiError(res.status, body.message || body.error || `Error ${res.status}`);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -54,6 +65,6 @@ export const api = {
   metasHoy: (vendedorId: string) => req<Metas>(`/metas/${vendedorId}/hoy`),
   registrarVisita: (formData: FormData) =>
     req<{ id: string }>('/visitas', { method: 'POST', body: formData }),
-  registrarUbicacion: (data: { vendedorId: string; lat: number; lng: number; accuracy?: number }) =>
+  registrarUbicacion: (data: { vendedorId: string; lat: number; lng: number; accuracy?: number; capturadoEn?: number }) =>
     req<{ ok: boolean }>('/ubicaciones', { method: 'POST', body: JSON.stringify(data) }),
 };

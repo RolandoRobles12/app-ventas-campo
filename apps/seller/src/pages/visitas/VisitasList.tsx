@@ -1,29 +1,43 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, type Prospecto } from '../../api';
+import { type Prospecto } from '../../api';
 import { useSession } from '../../session';
+import { prospectosConCache, sincronizarPendientes, useVisitasPendientes } from '../../offline';
 
 const pinIcon = (color: string) => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
 );
+
+const MIN_LEADS_PARA_BUSCADOR = 7;
+
+// Sin acentos ni mayúsculas, para que "papeleria" encuentre "Papelería".
+const normalizar = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 export function VisitasList() {
   const { vendedor } = useSession();
   const navigate = useNavigate();
   const [prospectos, setProspectos] = useState<Prospecto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [busqueda, setBusqueda] = useState('');
+  const pendientes = useVisitasPendientes();
 
   const reload = () => {
     if (!vendedor) return;
-    api.prospectos(vendedor.id).then(setProspectos).catch(() => {}).finally(() => setLoading(false));
+    prospectosConCache(vendedor.id).then(setProspectos).catch(() => {}).finally(() => setLoading(false));
   };
 
-  useEffect(reload, [vendedor]);
+  // También se recarga cuando la cola offline logra enviar una visita: el
+  // estado del lead cambió en el servidor (por_visitar → visitado).
+  useEffect(reload, [vendedor, pendientes]);
 
   if (!vendedor) return null;
 
   const porVisitar = prospectos.filter((p) => p.estado === 'por_visitar');
   const visitados = prospectos.filter((p) => p.estado === 'visitado');
+  const filtro = normalizar(busqueda.trim());
+  const visibles = filtro
+    ? prospectos.filter((p) => normalizar(`${p.nombre} ${p.direccion}`).includes(filtro))
+    : prospectos;
 
   return (
     <div style={{ padding: '0 0 20px' }}>
@@ -40,13 +54,28 @@ export function VisitasList() {
       <div style={{ display: 'flex', gap: 10, padding: '16px 16px 0' }}>
         <div style={{ flex: 1, background: 'var(--aviva-green-700)', borderRadius: 20, padding: '15px 16px', boxShadow: '0 8px 20px rgba(15,81,50,.22)' }}>
           <div style={{ fontSize: 32, fontWeight: 800, color: '#fff', lineHeight: 1 }}>{porVisitar.length}</div>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: '#9fceb4', marginTop: 5 }}>Por visitar hoy</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: '#9fceb4', marginTop: 5 }}>Por visitar</div>
         </div>
         <div style={{ flex: 1, background: '#fff', borderRadius: 20, padding: '15px 16px', boxShadow: '0 8px 20px rgba(20,60,40,.07)' }}>
           <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--ink-900)', lineHeight: 1 }}>{visitados.length}</div>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-300)', marginTop: 5 }}>Visitados</div>
         </div>
       </div>
+
+      {pendientes > 0 && (
+        <div style={{ margin: '14px 16px 0', display: 'flex', alignItems: 'center', gap: 10, background: '#fdf4e7', borderRadius: 16, padding: '12px 14px' }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e07a26" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flex: 'none' }}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: '#8a5a1e', lineHeight: 1.45 }}>
+            {pendientes === 1 ? '1 visita guardada sin señal' : `${pendientes} visitas guardadas sin señal`} · se enviarán solas al volver la conexión
+          </span>
+          <button
+            onClick={() => { sincronizarPendientes(); }}
+            style={{ flex: 'none', border: 'none', background: 'var(--aviva-orange-500)', color: 'var(--aviva-orange-900)', borderRadius: 10, padding: '8px 12px', fontSize: 12, fontWeight: 800 }}
+          >
+            Enviar ahora
+          </button>
+        </div>
+      )}
 
       <button
         onClick={() => navigate('/visitas/nuevo')}
@@ -67,18 +96,38 @@ export function VisitasList() {
 
       <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '1px', color: '#8b938b', margin: '20px 20px 10px' }}>LEADS ASIGNADOS</div>
 
+      {prospectos.length >= MIN_LEADS_PARA_BUSCADOR && (
+        <div style={{ margin: '0 16px 12px', position: 'relative' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9aa39c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar negocio o dirección"
+            style={{
+              width: '100%', border: '1.5px solid #e4e6e2', background: '#fff', borderRadius: 14,
+              padding: '12px 14px 12px 38px', fontSize: 14, fontWeight: 600, color: 'var(--ink-800)',
+            }}
+          />
+        </div>
+      )}
+
       {loading && <div style={{ padding: '0 20px', color: 'var(--ink-300)', fontSize: 13 }}>Cargando…</div>}
       {!loading && prospectos.length === 0 && (
         <div style={{ padding: '0 20px', color: 'var(--ink-300)', fontSize: 13 }}>No tienes leads asignados todavía.</div>
       )}
+      {!loading && prospectos.length > 0 && visibles.length === 0 && (
+        <div style={{ padding: '0 20px', color: 'var(--ink-300)', fontSize: 13 }}>Ningún lead coincide con "{busqueda.trim()}".</div>
+      )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 11, padding: '0 16px' }}>
-        {prospectos.map((p) => {
+        {visibles.map((p) => {
           const isDone = p.estado === 'visitado';
           return (
             <div
               key={p.id}
-              onClick={() => navigate(`/visitas/${p.id}`)}
+              // El prospecto viaja en el estado de navegación para que el
+              // formulario abra al instante y funcione aunque no haya señal.
+              onClick={() => navigate(`/visitas/${p.id}`, { state: { prospecto: p } })}
               style={{
                 background: '#fff', borderRadius: 20, padding: '15px 16px', boxShadow: '0 6px 18px rgba(20,60,40,.07)',
                 display: 'flex', alignItems: 'center', gap: 13, cursor: 'pointer',

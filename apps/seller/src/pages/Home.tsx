@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, type Metas, type Prospecto } from '../api';
 import { useSession } from '../session';
 import { GoalCard } from '../components/GoalCard';
+import { prospectosConCache } from '../offline';
 
 const fmtMXN = (n: number) => `$${Math.round(n).toLocaleString('es-MX')}`;
 
@@ -18,11 +19,12 @@ export function Home() {
   const navigate = useNavigate();
   const [metas, setMetas] = useState<Metas | null>(null);
   const [prospectos, setProspectos] = useState<Prospecto[]>([]);
+  const [confirmandoSalir, setConfirmandoSalir] = useState(false);
 
   useEffect(() => {
     if (!vendedor) return;
     api.metasHoy(vendedor.id).then(setMetas).catch(() => {});
-    api.prospectos(vendedor.id).then(setProspectos).catch(() => {});
+    prospectosConCache(vendedor.id).then(setProspectos).catch(() => {});
   }, [vendedor]);
 
   if (!vendedor) return null;
@@ -38,8 +40,10 @@ export function Home() {
   return (
     <div style={{ paddingBottom: 30 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px 4px' }}>
+        {/* Confirmación antes de salir: es el elemento más grande de la
+            cabecera y un toque accidental no debe tirar la sesión. */}
         <button
-          onClick={salir}
+          onClick={() => setConfirmandoSalir(true)}
           title="Cerrar sesión"
           style={{
             width: 62, height: 62, borderRadius: '50%', background: vendedor.color, display: 'flex',
@@ -106,6 +110,34 @@ export function Home() {
           </span>
         </div>
       </div>
+
+      {confirmandoSalir && (
+        <div
+          onClick={() => setConfirmandoSalir(false)}
+          style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(10,25,17,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28 }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 320, background: '#fff', borderRadius: 22, padding: '22px 20px', boxShadow: '0 18px 44px rgba(10,25,17,.3)', textAlign: 'center' }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--ink-900)' }}>¿Cerrar sesión?</div>
+            <p style={{ margin: '8px 0 0', fontSize: 13.5, fontWeight: 500, color: 'var(--ink-300)', lineHeight: 1.5 }}>
+              Tendrás que volver a iniciar sesión para registrar visitas.
+            </p>
+            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+              <button
+                onClick={() => setConfirmandoSalir(false)}
+                style={{ flex: 1, border: '1.5px solid #e4e6e2', background: '#f7f8f6', color: 'var(--ink-600)', borderRadius: 14, padding: 13, fontSize: 14, fontWeight: 700 }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={salir}
+                style={{ flex: 1, border: 'none', background: '#c0392b', color: '#fff', borderRadius: 14, padding: 13, fontSize: 14, fontWeight: 700 }}
+              >
+                Cerrar sesión
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
