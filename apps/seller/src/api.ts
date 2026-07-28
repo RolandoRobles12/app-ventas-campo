@@ -26,17 +26,6 @@ export interface Prospecto {
 export interface Metas {
   solicitudesHoy: { actual: number; meta: number };
   colocacionMes: { actual: number; meta: number };
-}
-
-export interface JornadaHoy {
-  id: string;
-  fecha: string;
-  horaEntrada: string | null;
-  horaSalidaComer: string | null;
-  horaRegreso: string | null;
-  horaSalida: string | null;
-  activa: boolean;
-  visitasHoy: number;
   racha: number;
 }
 
@@ -63,8 +52,6 @@ export const api = {
   crearProspectoManual: (data: { vendedorId: string; nombre: string; direccion: string; giro?: string }) =>
     req<Prospecto>('/prospectos', { method: 'POST', body: JSON.stringify(data) }),
   metasHoy: (vendedorId: string) => req<Metas>(`/metas/${vendedorId}/hoy`),
-  jornadaHoy: (vendedorId: string) => req<JornadaHoy>(`/jornada/${vendedorId}/hoy`),
-  toggleJornada: (vendedorId: string) => req<JornadaHoy>(`/jornada/${vendedorId}/toggle`, { method: 'POST' }),
   registrarVisita: (formData: FormData) =>
     req<{ id: string }>('/visitas', { method: 'POST', body: formData }),
   registrarUbicacion: (data: { vendedorId: string; lat: number; lng: number; accuracy?: number }) =>

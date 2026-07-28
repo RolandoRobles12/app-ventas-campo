@@ -23,9 +23,14 @@ interface VendedorDoc {
   productoId: string;
 }
 
-interface JornadaDoc {
-  activa: boolean;
+interface UbicacionDoc {
+  createdAt: Timestamp;
 }
+
+// Mismo criterio que server/src/routes/seguimiento.ts: sin una jornada que
+// "iniciar" a mano, "en ruta" se infiere de un ping de ubicación reciente
+// (LocationTracker manda uno cada 5 min mientras la app está abierta).
+const VENTANA_EN_RUTA_MIN = 20;
 
 async function countVisitas(ids: string[] | null, extra: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query): Promise<number> {
   if (isEmptyRestriction(ids)) return 0;
@@ -141,19 +146,20 @@ dashboardRouter.get('/actividad', async (req, res) => {
 
   const start = new Date(); start.setHours(0, 0, 0, 0);
   const end = new Date(start); end.setDate(end.getDate() + 1);
-  const fecha = start.toISOString().slice(0, 10);
   const periodo = rango ?? { start, end };
+  const umbralActivo = new Date(Date.now() - VENTANA_EN_RUTA_MIN * 60 * 1000);
 
   const out = await Promise.all(vendedores.map(async (v) => {
-    const [hoySnap, jornadaDoc] = await Promise.all([
+    const [hoySnap, ultimaUbicacionSnap] = await Promise.all([
       db.collection('visitas').where('vendedorId', '==', v.id)
         .where('createdAt', '>=', Timestamp.fromDate(periodo.start)).where('createdAt', '<', Timestamp.fromDate(periodo.end)).count().get(),
-      db.collection('jornadas').doc(`${v.id}_${fecha}`).get(),
+      db.collection('ubicaciones').where('vendedorId', '==', v.id).orderBy('createdAt', 'desc').limit(1).get(),
     ]);
-    const jornada = jornadaDoc.data() as JornadaDoc | undefined;
+    const ultimaUbicacion = ultimaUbicacionSnap.docs[0]?.data() as UbicacionDoc | undefined;
+    const activo = !!ultimaUbicacion && ultimaUbicacion.createdAt.toDate() >= umbralActivo;
     return {
       id: v.id, nombre: v.nombre, iniciales: v.iniciales, color: v.color, producto: productos.get(v.productoId), ciudad: v.ciudad,
-      hoy: hoySnap.data().count, estado: jornada?.activa ? 'En ruta' : v.estado === 'Pausado' ? 'Pausado' : 'Sin iniciar',
+      hoy: hoySnap.data().count, estado: activo ? 'En ruta' : v.estado === 'Pausado' ? 'Pausado' : 'Sin iniciar',
     };
   }));
   res.json(out);

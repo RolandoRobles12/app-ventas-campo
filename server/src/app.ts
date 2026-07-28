@@ -16,7 +16,6 @@ import { productosRouter } from './routes/productos.js';
 import { vendedoresRouter } from './routes/vendedores.js';
 import { prospectosRouter } from './routes/prospectos.js';
 import { visitasRouter } from './routes/visitas.js';
-import { jornadaRouter } from './routes/jornada.js';
 import { ubicacionesRouter } from './routes/ubicaciones.js';
 import { metasRouter } from './routes/metas.js';
 import { denueRouter } from './routes/denue.js';
@@ -48,7 +47,6 @@ app.use('/api/vendedores', requireAdmin, vendedoresRouter);
 // ruta por ruta, no a nivel router.
 app.use('/api/prospectos', prospectosRouter);
 app.use('/api/visitas', visitasRouter);
-app.use('/api/jornada', jornadaRouter);
 app.use('/api/ubicaciones', ubicacionesRouter);
 app.use('/api/metas', metasRouter);
 app.use('/api/denue', requireAdmin, denueRouter);

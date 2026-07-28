@@ -30,7 +30,7 @@ export function RecorridoModal({ vendedorId, nombre, onClose }: { vendedorId: st
           <GeoMap recorridos={ruta ? [ruta] : []} height={420} />
           {ruta && ruta.puntos.length === 0 && (
             <div style={{ position: 'absolute', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.72)', color: '#5a665f', fontSize: 12.5, fontWeight: 600, textAlign: 'center', padding: '0 30px' }}>
-              {error || 'Aún no hay puntos GPS de hoy. Se registran cada ~5 minutos mientras el vendedor tiene la jornada activa.'}
+              {error || 'Aún no hay puntos GPS de hoy. Se registran cada ~5 minutos mientras el vendedor tiene la app abierta.'}
             </div>
           )}
         </div>

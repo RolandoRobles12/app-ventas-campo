@@ -27,6 +27,31 @@ function dayRange() {
   return { start, end };
 }
 
+// Días consecutivos (terminando hoy o ayer) en los que el vendedor registró
+// al menos una visita — antes se calculaba de `jornadas.horaEntrada`, pero
+// esa colección se quitó junto con la pantalla de Jornada.
+async function calcularRacha(vendedorId: string): Promise<number> {
+  const desde = new Date();
+  desde.setDate(desde.getDate() - 60);
+  desde.setHours(0, 0, 0, 0);
+  const snap = await db.collection('visitas')
+    .where('vendedorId', '==', vendedorId)
+    .where('createdAt', '>=', Timestamp.fromDate(desde))
+    .get();
+  const dias = new Set(snap.docs.map((d) => (d.data().createdAt as Timestamp).toDate().toISOString().slice(0, 10)));
+
+  let racha = 0;
+  const cursor = new Date();
+  cursor.setHours(0, 0, 0, 0);
+  // si hoy aún no hay visita, la racha se cuenta desde ayer
+  if (!dias.has(cursor.toISOString().slice(0, 10))) cursor.setDate(cursor.getDate() - 1);
+  while (dias.has(cursor.toISOString().slice(0, 10))) {
+    racha++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return racha;
+}
+
 // Avance real: solicitudes de hoy se cuentan de las visitas capturadas por el
 // vendedor con resultado "Se realizó solicitud"; colocación del mes se suma de
 // los deals de CRM del vendedor que llegaron a la etapa "Desembolso" este mes.
@@ -38,7 +63,7 @@ metasRouter.get('/:vendedorId/hoy', async (req, res) => {
   const { start: dayStart, end: dayEnd } = dayRange();
   const { start: monthStart, end: monthEnd } = monthRange();
 
-  const [solicitudesHoySnap, vendedorDoc, colocacionesSnap] = await Promise.all([
+  const [solicitudesHoySnap, vendedorDoc, colocacionesSnap, racha] = await Promise.all([
     db.collection('visitas')
       .where('vendedorId', '==', vendedorId)
       .where('resultado', '==', 'Se realizó solicitud')
@@ -53,6 +78,7 @@ metasRouter.get('/:vendedorId/hoy', async (req, res) => {
       .where('createdAt', '>=', Timestamp.fromDate(monthStart))
       .where('createdAt', '<', Timestamp.fromDate(monthEnd))
       .get(),
+    calcularRacha(vendedorId),
   ]);
 
   const solicitudesHoy = solicitudesHoySnap.data().count;
@@ -62,6 +88,7 @@ metasRouter.get('/:vendedorId/hoy', async (req, res) => {
   res.json({
     solicitudesHoy: { actual: solicitudesHoy, meta: vendedor?.metaSolicitudesDia ?? 5 },
     colocacionMes: { actual: colocacionMes, meta: vendedor?.metaVentaMes ?? 120000 },
+    racha,
   });
 });
 

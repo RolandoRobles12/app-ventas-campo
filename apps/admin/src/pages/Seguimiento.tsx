@@ -41,7 +41,7 @@ export function Seguimiento() {
 
       {items.length === 0 && (
         <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, padding: 24, textAlign: 'center', color: '#8a978f', fontSize: 13 }}>
-          Ningún vendedor ha iniciado su jornada todavía en este filtro.
+          Ningún vendedor ha registrado actividad todavía hoy en este filtro.
         </div>
       )}
 

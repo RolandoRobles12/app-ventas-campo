@@ -20,7 +20,7 @@ export function etapaBadgeStyle(e: string): CSSProperties {
 export function estadoBadgeStyle(estado: string): CSSProperties {
   const b = { ...base, fontWeight: 600 as const };
   if (estado === 'Activo' || estado === 'Finalizó' || estado === 'Aprobado') return { ...b, color: '#1c7a4f', background: '#dcf1e5' };
-  if (estado === 'Pausado' || estado === 'Sin iniciar') return { ...b, color: '#c96a1e', background: '#fdecdb' };
+  if (estado === 'Pausado' || estado === 'Sin iniciar' || estado === 'Inactivo') return { ...b, color: '#c96a1e', background: '#fdecdb' };
   return { ...b, color: '#2a6fdb', background: '#e2ecfb' };
 }
 

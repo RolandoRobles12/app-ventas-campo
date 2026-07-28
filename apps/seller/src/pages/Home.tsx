@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, type Metas, type JornadaHoy } from '../api';
+import { api, type Metas, type Prospecto } from '../api';
 import { useSession } from '../session';
 import { GoalCard } from '../components/GoalCard';
 
@@ -13,23 +13,16 @@ const iconColocacion = (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#b3a9ee" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 6v2m0 8v2"/></svg>
 );
 
-const REGISTRO = [
-  { key: 'entrada', label: 'Entrada', activeBg: '#dfeee5', stroke: '#3f6b54', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3f6b54" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> },
-  { key: 'comer', label: 'Salida a comer', activeBg: '#fdecdb', stroke: '#e07a26', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e07a26" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4Z"/></svg> },
-  { key: 'regreso', label: 'Regreso', activeBg: '#f1f3f0', stroke: '#8a958c', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8a958c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h0a2 2 0 0 0 2-2V2"/><path d="M5 2v20"/><path d="M16 2v20"/><path d="M16 8c0-3 1-6 3-6v20"/></svg> },
-  { key: 'salida', label: 'Salida', activeBg: '#f1f3f0', stroke: '#8a958c', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8a958c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> },
-] as const;
-
 export function Home() {
   const { vendedor, salir } = useSession();
   const navigate = useNavigate();
   const [metas, setMetas] = useState<Metas | null>(null);
-  const [jornada, setJornada] = useState<JornadaHoy | null>(null);
+  const [prospectos, setProspectos] = useState<Prospecto[]>([]);
 
   useEffect(() => {
     if (!vendedor) return;
     api.metasHoy(vendedor.id).then(setMetas).catch(() => {});
-    api.jornadaHoy(vendedor.id).then(setJornada).catch(() => {});
+    api.prospectos(vendedor.id).then(setProspectos).catch(() => {});
   }, [vendedor]);
 
   if (!vendedor) return null;
@@ -39,6 +32,8 @@ export function Home() {
   const solPct = sol && sol.meta > 0 ? Math.round((sol.actual / sol.meta) * 100) : 0;
   const colPct = col && col.meta > 0 ? Math.round((col.actual / col.meta) * 100) : 0;
   const solFaltan = sol ? Math.max(0, sol.meta - sol.actual) : 0;
+  const porVisitar = prospectos.filter((p) => p.estado === 'por_visitar').length;
+  const primerNombre = vendedor.nombre.split(' ')[0];
 
   return (
     <div style={{ paddingBottom: 30 }}>
@@ -58,16 +53,34 @@ export function Home() {
       </div>
 
       <div style={{ padding: '6px 20px 0' }}>
-        <h1 style={{ margin: 0, fontSize: 32, fontWeight: 800, color: 'var(--ink-900)', letterSpacing: '-.5px' }}>Administrar jornada</h1>
-        <p style={{ margin: '6px 0 0', fontSize: 15, color: 'var(--ink-300)', fontWeight: 500, lineHeight: 1.4 }}>Controla tus horas de trabajo y tiempos de descanso.</p>
+        <h1 style={{ margin: 0, fontSize: 32, fontWeight: 800, color: 'var(--ink-900)', letterSpacing: '-.5px' }}>Hola, {primerNombre}</h1>
+        <p style={{ margin: '6px 0 0', fontSize: 15, color: 'var(--ink-300)', fontWeight: 500, lineHeight: 1.4 }}>Este es tu avance de hoy.</p>
       </div>
 
-      <div style={{ margin: '20px 16px 0', background: '#fff', borderRadius: 26, padding: '18px 16px 16px', boxShadow: '0 8px 28px rgba(20,60,40,.07)' }}>
+      <button
+        onClick={() => navigate('/visitas')}
+        style={{
+          margin: '18px 16px 0', width: 'calc(100% - 32px)', display: 'flex', alignItems: 'center', gap: 14,
+          background: 'var(--aviva-green-700)', borderRadius: 22, padding: '18px 18px', border: 'none',
+          boxShadow: '0 10px 26px rgba(15,81,50,.28)', textAlign: 'left',
+        }}
+      >
+        <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(255,255,255,.16)', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>{porVisitar} {porVisitar === 1 ? 'negocio' : 'negocios'} por visitar</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#bfe6cf', marginTop: 3 }}>Toca para ver tu lista y registrar una visita</div>
+        </div>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+
+      <div style={{ margin: '16px 16px 0', background: '#fff', borderRadius: 26, padding: '18px 16px 16px', boxShadow: '0 8px 28px rgba(20,60,40,.07)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 4px 14px' }}>
           <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '1px', color: '#8b938b' }}>MI AVANCE HOY</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'var(--aviva-orange-100)', padding: '5px 10px', borderRadius: 20 }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="var(--aviva-orange-500)" stroke="none"><path d="M12 2c1 3-1 4-1 6a3 3 0 0 0 6 0c0-1 0-2-.5-3 2 2 3.5 4.5 3.5 8a8 8 0 0 1-16 0c0-3 1.5-5.5 4-8 0 2 1 3 2 3.5C12.5 8 11 5 12 2Z"/></svg>
-            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--aviva-orange-600)' }}>{jornada?.racha ?? 0} {jornada?.racha === 1 ? 'día' : 'días'} en racha</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--aviva-orange-600)' }}>{metas?.racha ?? 0} {metas?.racha === 1 ? 'día' : 'días'} en racha</span>
           </span>
         </div>
 
@@ -93,42 +106,6 @@ export function Home() {
           </span>
         </div>
       </div>
-
-      <div style={{ margin: '16px 16px 0', background: '#fff', borderRadius: 26, padding: 18, boxShadow: '0 8px 28px rgba(20,60,40,.07)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1a1f1c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
-            <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--ink-800)' }}>Registro de actividad</span>
-          </div>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#5a6b61', background: '#f1f3f0', padding: '6px 10px', borderRadius: 14 }}>
-            {new Date().toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' })}
-          </span>
-        </div>
-        <div style={{ display: 'flex' }}>
-          {REGISTRO.map((r, i) => {
-            const value = r.key === 'entrada' ? jornada?.horaEntrada : r.key === 'comer' ? jornada?.horaSalidaComer : r.key === 'regreso' ? jornada?.horaRegreso : jornada?.horaSalida;
-            return (
-              <div key={r.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, borderRight: i < REGISTRO.length - 1 ? '1px solid #eef0ec' : 'none', padding: '0 4px' }}>
-                <div style={{ width: 42, height: 42, borderRadius: '50%', background: r.activeBg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{r.icon}</div>
-                <span style={{ fontSize: 11, fontWeight: 600, color: '#3a443d' }}>{r.label}</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: value ? 'var(--ink-800)' : '#b9c1ba' }}>{value || '--:--'}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <button
-        onClick={() => navigate('/jornada')}
-        style={{
-          position: 'fixed', bottom: 86, right: 18, display: 'flex', alignItems: 'center', gap: 10,
-          background: 'var(--aviva-orange-500)', padding: '14px 22px', borderRadius: 30, border: 'none',
-          boxShadow: '0 10px 24px rgba(239,139,62,.4)',
-        }}
-      >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--aviva-orange-900)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
-        <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--aviva-orange-900)' }}>Jornada</span>
-      </button>
     </div>
   );
 }
