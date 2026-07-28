@@ -148,17 +148,21 @@ export function Visitas() {
         ) : items.length === 0 ? (
           <div style={{ padding: 30, textAlign: 'center', color: '#9aa39c', fontSize: 12.5 }}>No hay visitas con estos filtros.</div>
         ) : (
-          items.map((v) => (
+          items.map((v) => {
+            // Un servidor desactualizado puede mandar filas sin `fotos`; sin
+            // este respaldo, una sola fila así tumba la página completa.
+            const fotos = v.fotos ?? [];
+            return (
             <div key={v.id} style={{ display: 'grid', gridTemplateColumns: gridCols, alignItems: 'center', padding: '10px 20px', borderBottom: '1px solid #f2f5f2', fontSize: 12.5 }}>
               <div>
-                {v.fotos.length > 0 ? (
+                {fotos.length > 0 ? (
                   <div
-                    onClick={() => setLightbox({ fotos: v.fotos, index: 0 })}
-                    style={{ position: 'relative', width: 42, height: 42, borderRadius: 8, backgroundImage: `url(${v.fotos[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', cursor: 'zoom-in', border: '1px solid #eef2ee' }}
+                    onClick={() => setLightbox({ fotos, index: 0 })}
+                    style={{ position: 'relative', width: 42, height: 42, borderRadius: 8, backgroundImage: `url(${fotos[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', cursor: 'zoom-in', border: '1px solid #eef2ee' }}
                   >
-                    {v.fotos.length > 1 && (
+                    {fotos.length > 1 && (
                       <span style={{ position: 'absolute', right: -5, bottom: -5, background: '#157347', color: '#fff', fontSize: 10, fontWeight: 700, borderRadius: 9, padding: '1px 5px', boxShadow: '0 1px 3px rgba(0,0,0,.3)' }}>
-                        +{v.fotos.length - 1}
+                        +{fotos.length - 1}
                       </span>
                     )}
                   </div>
@@ -187,7 +191,8 @@ export function Visitas() {
                 {new Date(v.createdAt).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
               </div>
             </div>
-          ))
+            );
+          })
         )}
         {nextCursor && (
           <div style={{ padding: 16, textAlign: 'center' }}>
