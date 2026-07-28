@@ -21,6 +21,10 @@ export interface Prospecto {
   estado: 'por_visitar' | 'visitado';
   lat?: number | null;
   lng?: number | null;
+  // Ventana de visita planeada por el admin (ruta semanal/quincenal/mensual):
+  // YYYY-MM-DD, ambos inclusive. null = sin programar (se puede visitar ya).
+  semanaInicio?: string | null;
+  semanaHasta?: string | null;
 }
 
 export interface Metas {

@@ -13,6 +13,9 @@ export interface Prospecto {
   id: string; vendedorId: string; nombre: string; direccion: string; giro?: string | null;
   distanciaKm?: number | null; telefono?: string | null; origen: string; estado: string;
   lat?: number | null; lng?: number | null;
+  // Ventana de visita planeada (ruta semanal/quincenal/mensual): YYYY-MM-DD,
+  // ambos inclusive. null = sin programar (se puede visitar en cualquier momento).
+  semanaInicio?: string | null; semanaHasta?: string | null;
 }
 export interface DashboardSummary {
   visitasHoy: number; visitasAyerPct: number | null; porVisitar: number; conversion: number;

@@ -141,16 +141,27 @@ export async function sincronizarPendientes(): Promise<void> {
 // La lista de leads, con copia local: sin señal se muestra la última lista
 // conocida en vez de un "no tienes leads" falso, y el vendedor puede seguir
 // abriendo sus leads y registrando visitas (que se van a la cola offline).
+// Una ruta planeada por el admin (semanal/quincenal/mensual) puede traer
+// prospectos de varias semanas a la vez; el vendedor solo debe ver los que
+// ya le tocan — los de una semana futura se ocultan hasta que empiece esa
+// ventana, para no tirarle de golpe todo el plan del mes. Los ya visitados
+// siempre se muestran (son historial, no pendientes).
+function disponibleHoy(p: Prospecto): boolean {
+  if (p.estado !== 'por_visitar' || !p.semanaInicio) return true;
+  const hoy = new Date().toISOString().slice(0, 10);
+  return p.semanaInicio <= hoy;
+}
+
 export async function prospectosConCache(vendedorId: string): Promise<Prospecto[]> {
   const key = `aviva.prospectos.${vendedorId}`;
   try {
     const list = await api.prospectos(vendedorId);
     try { localStorage.setItem(key, JSON.stringify(list)); } catch { /* sin espacio: solo se pierde el caché */ }
-    return list;
+    return list.filter(disponibleHoy);
   } catch (err) {
     const cacheado = localStorage.getItem(key);
     if (cacheado) {
-      try { return JSON.parse(cacheado) as Prospecto[]; } catch { /* caché corrupto: cae al throw */ }
+      try { return (JSON.parse(cacheado) as Prospecto[]).filter(disponibleHoy); } catch { /* caché corrupto: cae al throw */ }
     }
     throw err;
   }

@@ -16,6 +16,12 @@ interface ProspectoDoc {
   estado: string;
   lat?: number | null;
   lng?: number | null;
+  // Ventana de visita planeada por el admin (ruta semanal/quincenal/mensual
+  // con varias zonas): YYYY-MM-DD, ambos inclusive. null = sin programar,
+  // que es como se comportaban todos los prospectos antes de esta función —
+  // se puede visitar en cualquier momento.
+  semanaInicio?: string | null;
+  semanaHasta?: string | null;
   createdAt: Timestamp;
 }
 
@@ -32,12 +38,24 @@ function shape(id: string, p: ProspectoDoc) {
     estado: p.estado,
     lat: p.lat ?? null,
     lng: p.lng ?? null,
+    semanaInicio: p.semanaInicio ?? null,
+    semanaHasta: p.semanaHasta ?? null,
     createdAt: toIso(p.createdAt),
   };
 }
 
-function porEstadoYDistancia(a: { estado: string; distanciaKm: number | null }, b: { estado: string; distanciaKm: number | null }) {
+// Sin programar (null) primero — se puede visitar en cualquier momento — y
+// luego por fecha de inicio programada; dentro de cada grupo, por cercanía.
+function porEstadoYSemanaYDistancia(
+  a: { estado: string; semanaInicio: string | null; distanciaKm: number | null },
+  b: { estado: string; semanaInicio: string | null; distanciaKm: number | null },
+) {
   if (a.estado !== b.estado) return a.estado.localeCompare(b.estado);
+  if (a.semanaInicio !== b.semanaInicio) {
+    if (a.semanaInicio == null) return -1;
+    if (b.semanaInicio == null) return 1;
+    return a.semanaInicio < b.semanaInicio ? -1 : 1;
+  }
   return (a.distanciaKm ?? Infinity) - (b.distanciaKm ?? Infinity);
 }
 
@@ -48,7 +66,7 @@ prospectosRouter.get('/vendedor/:vendedorId', async (req, res) => {
   const snap = await db.collection('prospectos').where('vendedorId', '==', req.params.vendedorId).get();
   const prospectos = snap.docs
     .map((d) => shape(d.id, d.data() as ProspectoDoc))
-    .sort(porEstadoYDistancia);
+    .sort(porEstadoYSemanaYDistancia);
   res.json(prospectos);
 });
 
@@ -74,7 +92,10 @@ prospectosRouter.post('/', async (req, res) => {
 prospectosRouter.post('/bulk', requireAdmin, async (req, res) => {
   const { vendedorId, items } = req.body as {
     vendedorId: string;
-    items: { nombre: string; direccion: string; giro?: string; telefono?: string; distanciaKm?: number; lat?: number; lng?: number; origen?: string }[];
+    items: {
+      nombre: string; direccion: string; giro?: string; telefono?: string; distanciaKm?: number; lat?: number; lng?: number; origen?: string;
+      semanaInicio?: string | null; semanaHasta?: string | null;
+    }[];
   };
   if (!vendedorId || !Array.isArray(items)) return res.status(400).json({ error: 'vendedorId e items son requeridos' });
 
@@ -92,6 +113,7 @@ prospectosRouter.post('/bulk', requireAdmin, async (req, res) => {
       const data: ProspectoDoc = {
         vendedorId, nombre: i.nombre, direccion: i.direccion || '', giro: i.giro ?? null, telefono: i.telefono ?? null,
         distanciaKm: i.distanciaKm ?? null, lat: i.lat ?? null, lng: i.lng ?? null,
+        semanaInicio: i.semanaInicio ?? null, semanaHasta: i.semanaHasta ?? null,
         origen: i.origen || 'denue', estado: 'por_visitar', createdAt: Timestamp.now(),
       };
       batch.set(ref, data);
@@ -100,7 +122,7 @@ prospectosRouter.post('/bulk', requireAdmin, async (req, res) => {
   }
 
   const snap = await db.collection('prospectos').where('vendedorId', '==', vendedorId).get();
-  const prospectos = snap.docs.map((d) => shape(d.id, d.data() as ProspectoDoc)).sort(porEstadoYDistancia);
+  const prospectos = snap.docs.map((d) => shape(d.id, d.data() as ProspectoDoc)).sort(porEstadoYSemanaYDistancia);
   res.status(201).json({ creados: nuevos.length, prospectos });
 });
 

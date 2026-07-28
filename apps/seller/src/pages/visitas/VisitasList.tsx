@@ -10,6 +10,12 @@ const pinIcon = (color: string) => (
 
 const MIN_LEADS_PARA_BUSCADOR = 7;
 
+const MES_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+function formatFechaCorta(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return `${d.getDate()} ${MES_CORTO[d.getMonth()]}`;
+}
+
 // Sin acentos ni mayúsculas, para que "papeleria" encuentre "Papelería".
 const normalizar = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
@@ -144,6 +150,12 @@ export function VisitasList() {
                     fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20,
                     color: isDone ? '#1c7a4f' : '#c96a1e', background: isDone ? '#dcf1e5' : 'var(--aviva-orange-100)',
                   }}>{isDone ? 'Visitado' : 'Por visitar'}</span>
+                  {!isDone && p.semanaInicio && p.semanaHasta && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 600, color: '#7a857d' }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9aa39c" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                      {formatFechaCorta(p.semanaInicio)}–{formatFechaCorta(p.semanaHasta)}
+                    </span>
+                  )}
                   {p.distanciaKm != null && (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11.5, fontWeight: 600, color: 'var(--ink-100)' }}>
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9aa39c" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/></svg>
