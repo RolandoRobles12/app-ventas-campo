@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, Timestamp, FieldPath } from '../db.js';
-import { resolveVendedorIds } from './_filters.js';
+import { resolveVendedorIds, countChunked, getVendedoresDocs } from './_filters.js';
 import { isEmptyRestriction, parseDateRangeQuery, parseCsvParam } from '../firestore-helpers.js';
 
 export const dashboardRouter = Router();
@@ -32,29 +32,12 @@ interface UbicacionDoc {
 // (LocationTracker manda uno cada 5 min mientras la app está abierta).
 const VENTANA_EN_RUTA_MIN = 20;
 
-async function countVisitas(ids: string[] | null, extra: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query): Promise<number> {
-  if (isEmptyRestriction(ids)) return 0;
-  let query: FirebaseFirestore.Query = db.collection('visitas');
-  if (ids) query = query.where('vendedorId', 'in', ids);
-  query = extra(query);
-  return (await query.count().get()).data().count;
-}
-
-async function countProspectos(ids: string[] | null, extra: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query): Promise<number> {
-  if (isEmptyRestriction(ids)) return 0;
-  let query: FirebaseFirestore.Query = db.collection('prospectos');
-  if (ids) query = query.where('vendedorId', 'in', ids);
-  query = extra(query);
-  return (await query.count().get()).data().count;
-}
-
-async function countVendedores(ids: string[] | null, extra: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query): Promise<number> {
-  if (isEmptyRestriction(ids)) return 0;
-  let query: FirebaseFirestore.Query = db.collection('vendedores');
-  if (ids) query = query.where(FieldPath.documentId(), 'in', ids);
-  query = extra(query);
-  return (await query.count().get()).data().count;
-}
+const countVisitas = (ids: string[] | null, extra: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query) =>
+  countChunked('visitas', 'vendedorId', ids, extra);
+const countProspectos = (ids: string[] | null, extra: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query) =>
+  countChunked('prospectos', 'vendedorId', ids, extra);
+const countVendedores = (ids: string[] | null, extra: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query) =>
+  countChunked('vendedores', FieldPath.documentId(), ids, extra);
 
 dashboardRouter.get('/summary', async (req, res) => {
   const { productoIds, vendedorIds, desde, hasta } = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
@@ -131,10 +114,8 @@ dashboardRouter.get('/actividad', async (req, res) => {
   if (isEmptyRestriction(ids)) return res.json([]);
   const rango = parseDateRangeQuery(desde, hasta);
 
-  const vendedoresSnap = ids
-    ? await db.collection('vendedores').where(FieldPath.documentId(), 'in', ids).get()
-    : await db.collection('vendedores').get();
-  const vendedores = vendedoresSnap.docs
+  const vendedoresDocs = await getVendedoresDocs(ids);
+  const vendedores = vendedoresDocs
     .map((d) => ({ id: d.id, ...(d.data() as VendedorDoc) }))
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
 

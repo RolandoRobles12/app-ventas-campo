@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { AggregateField } from 'firebase-admin/firestore';
-import { db, Timestamp, FieldPath } from '../db.js';
-import { resolveVendedorIds } from './_filters.js';
+import { db, Timestamp } from '../db.js';
+import { resolveVendedorIds, getVendedoresDocs } from './_filters.js';
 import { isEmptyRestriction, parseCsvParam } from '../firestore-helpers.js';
 
 export const seguimientoRouter = Router();
@@ -34,10 +34,8 @@ seguimientoRouter.get('/', async (req, res) => {
   const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
   if (isEmptyRestriction(ids)) return res.json([]);
 
-  const vendedoresSnap = ids
-    ? await db.collection('vendedores').where(FieldPath.documentId(), 'in', ids).get()
-    : await db.collection('vendedores').get();
-  const vendedores = vendedoresSnap.docs.map((d) => ({ id: d.id, ...(d.data() as VendedorDoc) }));
+  const vendedoresDocs = await getVendedoresDocs(ids);
+  const vendedores = vendedoresDocs.map((d) => ({ id: d.id, ...(d.data() as VendedorDoc) }));
 
   const productos = new Map<string, string>();
   await Promise.all([...new Set(vendedores.map((v) => v.productoId))].map(async (pid) => {

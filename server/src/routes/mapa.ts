@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
-import { resolveVendedorIds } from './_filters.js';
+import { resolveVendedorIds, countChunked, getRecientesPorVendedor } from './_filters.js';
 import { isEmptyRestriction, parseDateRangeQuery, parseCsvParam } from '../firestore-helpers.js';
 
 export const mapaRouter = Router();
@@ -21,32 +21,22 @@ interface VisitaGeoDoc {
   lng?: number | null;
 }
 
-async function countProspectos(ids: string[] | null, extra: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query): Promise<number> {
-  if (isEmptyRestriction(ids)) return 0;
-  let query: FirebaseFirestore.Query = db.collection('prospectos');
-  if (ids) query = query.where('vendedorId', 'in', ids);
-  query = extra(query);
-  return (await query.count().get()).data().count;
-}
+const countProspectos = (ids: string[] | null, extra: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query) =>
+  countChunked('prospectos', 'vendedorId', ids, extra);
 
 mapaRouter.get('/leads', async (req, res) => {
   const { productoIds, vendedorIds, desde, hasta } = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
   const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
   const rango = parseDateRangeQuery(desde, hasta);
 
-  let leads: { id: string; data: ProspectoDoc }[] = [];
-  if (!isEmptyRestriction(ids)) {
-    let query: FirebaseFirestore.Query = db.collection('prospectos');
-    if (ids) query = query.where('vendedorId', 'in', ids);
-    if (rango) query = query.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end));
-    // Se pide de más porque filtramos lat/lng en memoria (Firestore no permite
-    // combinar dos filtros "!= null" en la misma consulta).
-    const snap = await query.orderBy('createdAt', 'desc').limit(600).get();
-    leads = snap.docs
-      .map((d) => ({ id: d.id, data: d.data() as ProspectoDoc }))
-      .filter((l) => l.data.lat != null && l.data.lng != null)
-      .slice(0, 300);
-  }
+  // Se pide de más porque filtramos lat/lng en memoria (Firestore no permite
+  // combinar dos filtros "!= null" en la misma consulta).
+  const leadDocs = await getRecientesPorVendedor('prospectos', ids, 600, (q) =>
+    rango ? q.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end)) : q);
+  const leads = leadDocs
+    .map((d) => ({ id: d.id, data: d.data() as ProspectoDoc }))
+    .filter((l) => l.data.lat != null && l.data.lng != null)
+    .slice(0, 300);
 
   const leadVendedorIds = [...new Set(leads.map((l) => l.data.vendedorId))];
   const vendedores = new Map<string, string>();
@@ -82,11 +72,9 @@ mapaRouter.get('/calor', async (req, res) => {
   if (isEmptyRestriction(ids)) return res.json({ puntos: [], visitasTotales: 0, visitasConUbicacion: 0 });
   const rango = parseDateRangeQuery(desde, hasta);
 
-  let query: FirebaseFirestore.Query = db.collection('visitas');
-  if (ids) query = query.where('vendedorId', 'in', ids);
-  if (rango) query = query.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end));
-  const snap = await query.orderBy('createdAt', 'desc').limit(2000).get();
-  const visitas = snap.docs.map((d) => d.data() as VisitaGeoDoc);
+  const visitaDocs = await getRecientesPorVendedor('visitas', ids, 2000, (q) =>
+    rango ? q.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end)) : q);
+  const visitas = visitaDocs.map((d) => d.data() as VisitaGeoDoc);
 
   // Resuelve coordenadas faltantes vía el prospecto asociado (una lectura por prospecto único).
   const sinGps = [...new Set(visitas.filter((v) => (v.lat == null || v.lng == null) && v.prospectoId).map((v) => v.prospectoId as string))];
