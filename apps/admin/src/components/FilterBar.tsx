@@ -12,11 +12,24 @@ const dateInputStyle: React.CSSProperties = {
   border: '1px solid #d9e1db', background: '#fff', borderRadius: 8, padding: '8px 10px', fontSize: 13, color: '#263238',
 };
 
-export function FilterBar({ extra }: { extra?: React.ReactNode }) {
+export function FilterBar({
+  extra, extraActivo, onLimpiarExtra,
+}: {
+  extra?: React.ReactNode;
+  // Filtro propio de la página (p.ej. "Resultado" en Visitas), que vive fuera
+  // del FiltersContext compartido: sin esto, "Limpiar filtros" no sabría que
+  // hay algo ahí que limpiar ni cómo hacerlo.
+  extraActivo?: boolean;
+  onLimpiarExtra?: () => void;
+}) {
   const {
     productos, vendedoresFiltrados, fProductos, fVendedores, setFProductos, setFVendedores,
     fRango, setFRango, fDesdePersonalizado, fHastaPersonalizado, setFDesdePersonalizado, setFHastaPersonalizado,
+    hayFiltrosActivos, limpiarFiltros,
   } = useFilters();
+
+  const mostrarLimpiar = hayFiltrosActivos || !!extraActivo;
+  const limpiarTodo = () => { limpiarFiltros(); onLimpiarExtra?.(); };
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -52,6 +65,18 @@ export function FilterBar({ extra }: { extra?: React.ReactNode }) {
         </>
       )}
       {extra}
+      {mostrarLimpiar && (
+        <button
+          type="button" onClick={limpiarTodo}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: '1px solid #f0c4bd', color: '#c0392b',
+            borderRadius: 8, padding: '8px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c0392b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          Limpiar filtros
+        </button>
+      )}
     </div>
   );
 }

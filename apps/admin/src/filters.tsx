@@ -22,6 +22,9 @@ interface FiltersState {
   fDesde: string | null;
   fHasta: string | null;
   reload: () => void;
+  // true si producto, vendedor o rango de fecha tienen algo distinto de "todos"/"todo".
+  hayFiltrosActivos: boolean;
+  limpiarFiltros: () => void;
 }
 
 const FiltersContext = createContext<FiltersState | null>(null);
@@ -57,6 +60,16 @@ export function FiltersProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const hayFiltrosActivos = fProductos.length > 0 || fVendedores.length > 0 || fRango !== 'todo';
+
+  const limpiarFiltros = () => {
+    setFProductosState([]);
+    setFVendedoresState([]);
+    setFRango('todo');
+    setFDesdePersonalizado(null);
+    setFHastaPersonalizado(null);
+  };
+
   return (
     <FiltersContext.Provider value={{
       productos, vendedores, vendedoresFiltrados, fProductos, fVendedores,
@@ -66,6 +79,7 @@ export function FiltersProvider({ children }: { children: ReactNode }) {
       fDesdePersonalizado, fHastaPersonalizado, setFDesdePersonalizado, setFHastaPersonalizado,
       fDesde: rango?.desde ?? null, fHasta: rango?.hasta ?? null,
       reload,
+      hayFiltrosActivos, limpiarFiltros,
     }}>
       {children}
     </FiltersContext.Provider>

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { AggregateField } from 'firebase-admin/firestore';
-import { db, FieldPath, Timestamp } from '../db.js';
-import { resolveVendedorIds } from './_filters.js';
+import { db, Timestamp } from '../db.js';
+import { resolveVendedorIds, countChunked, sumChunked, getVendedoresDocs, getRecientesPorVendedor } from './_filters.js';
 import { isEmptyRestriction, toIso, parseDateRangeQuery, parseCsvParam } from '../firestore-helpers.js';
 
 export const reportesRouter = Router();
@@ -18,21 +18,17 @@ interface VisitaDoc {
   createdAt: FirebaseFirestore.Timestamp;
 }
 
-async function countVisitas(ids: string[] | null, extra: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query): Promise<number> {
-  if (isEmptyRestriction(ids)) return 0;
-  let query: FirebaseFirestore.Query = db.collection('visitas');
-  if (ids) query = query.where('vendedorId', 'in', ids);
-  query = extra(query);
-  return (await query.count().get()).data().count;
-}
+const countVisitas = (ids: string[] | null, extra: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query) =>
+  countChunked('visitas', 'vendedorId', ids, extra);
 
 async function kmRecorridos(vendedorId: string | null, ids: string[] | null): Promise<number> {
-  let query: FirebaseFirestore.Query = db.collection('prospectos').where('estado', '==', 'visitado');
-  if (vendedorId) query = query.where('vendedorId', '==', vendedorId);
-  else if (isEmptyRestriction(ids)) return 0;
-  else if (ids) query = query.where('vendedorId', 'in', ids);
-  const snap = await query.aggregate({ sum: AggregateField.sum('distanciaKm') }).get();
-  return Math.round(((snap.data().sum as number | null) || 0) * 10) / 10;
+  if (vendedorId) {
+    const snap = await db.collection('prospectos').where('estado', '==', 'visitado').where('vendedorId', '==', vendedorId)
+      .aggregate({ sum: AggregateField.sum('distanciaKm') }).get();
+    return Math.round(((snap.data().sum as number | null) || 0) * 10) / 10;
+  }
+  const total = await sumChunked('prospectos', 'distanciaKm', ids, (q) => q.where('estado', '==', 'visitado'));
+  return Math.round(total * 10) / 10;
 }
 
 function conRango(q: FirebaseFirestore.Query, rango: { start: Date; end: Date } | null): FirebaseFirestore.Query {
@@ -61,10 +57,8 @@ reportesRouter.get('/vendedores', async (req, res) => {
   if (isEmptyRestriction(ids)) return res.json([]);
   const rango = parseDateRangeQuery(desde, hasta);
 
-  const snap = ids
-    ? await db.collection('vendedores').where(FieldPath.documentId(), 'in', ids).get()
-    : await db.collection('vendedores').get();
-  const vendedores = snap.docs.map((d) => ({ id: d.id, nombre: (d.data() as { nombre: string }).nombre }));
+  const vendedoresDocs = await getVendedoresDocs(ids);
+  const vendedores = vendedoresDocs.map((d) => ({ id: d.id, nombre: (d.data() as { nombre: string }).nombre }));
 
   const out = await Promise.all(vendedores.map(async (v) => {
     const [total, solicitudes, km] = await Promise.all([
@@ -84,13 +78,10 @@ reportesRouter.get('/evidencias', async (req, res) => {
   if (isEmptyRestriction(ids)) return res.json([]);
   const rango = parseDateRangeQuery(desde, hasta);
 
-  let query: FirebaseFirestore.Query = db.collection('visitas');
-  if (ids) query = query.where('vendedorId', 'in', ids);
-  query = conRango(query, rango);
   // fotos != [] no se puede combinar con orderBy(createdAt) en Firestore; se
   // pide de más y se filtra/recorta en memoria.
-  const snap = await query.orderBy('createdAt', 'desc').limit(50).get();
-  const visitas = snap.docs.map((d) => ({ id: d.id, ...(d.data() as VisitaDoc) }));
+  const visitaDocs = await getRecientesPorVendedor('visitas', ids, 50, (q) => conRango(q, rango));
+  const visitas = visitaDocs.map((d) => ({ id: d.id, ...(d.data() as VisitaDoc) }));
 
   // Una visita puede traer varias fotos: se aplana a una tarjeta de evidencia
   // por foto (con un id propio, ver más abajo) en vez de mostrar solo la
