@@ -142,16 +142,10 @@ async function main() {
   }
 
   // Metas de ejemplo por vendedor (solicitudes/día y venta/mes)
-  const today = new Date();
-  const fechaHoy = today.toISOString().slice(0, 10);
   for (const nombre of Object.keys(vendedorRecords)) {
     const id = vendedorRecords[nombre];
     await db.collection('vendedores').doc(id).set({
       metaSolicitudesDia: 5, metaVentaMes: 120000,
-    }, { merge: true });
-    await db.collection('jornadas').doc(`${id}_${fechaHoy}`).set({
-      vendedorId: id, fecha: fechaHoy, horaEntrada: '09:30', horaSalidaComer: null, horaRegreso: null,
-      horaSalida: null, activa: true, createdAt: Timestamp.now(),
     }, { merge: true });
   }
 

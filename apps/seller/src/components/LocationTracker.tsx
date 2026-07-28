@@ -1,27 +1,26 @@
 import { useEffect, useRef } from 'react';
 import { api } from '../api';
 import { useSession } from '../session';
-import { useJornada } from '../jornada';
 
 const INTERVALO_MS = 5 * 60 * 1000;
 
-// No renderiza nada — solo corre mientras la jornada está activa, mandando
-// un punto GPS cada 5 minutos para armar el recorrido del día. Es "mejor
-// esfuerzo": en un navegador (no una app nativa) no hay forma de garantizar
-// que siga corriendo con la pantalla apagada o la pestaña en segundo plano
-// (esa es una restricción del sistema operativo, no de este código; en
-// Android Chrome el timer puede seguir corriendo un rato en segundo plano,
-// pero no está garantizado). Para no dejar huecos grandes, en cuanto la
-// pestaña vuelve a primer plano se manda un punto de recuperación si ya
-// casi le tocaba al siguiente ciclo.
+// No renderiza nada — corre mientras la app esté abierta y haya un vendedor
+// con sesión (ya no depende de "iniciar jornada" a mano), mandando un punto
+// GPS cada 5 minutos para armar el recorrido del día y que Seguimiento/Mapa
+// de calor en el admin tengan datos reales. Es "mejor esfuerzo": en un
+// navegador (no una app nativa) no hay forma de garantizar que siga
+// corriendo con la pantalla apagada o la pestaña en segundo plano (esa es
+// una restricción del sistema operativo, no de este código; en Android
+// Chrome el timer puede seguir corriendo un rato en segundo plano, pero no
+// está garantizado). Para no dejar huecos grandes, en cuanto la pestaña
+// vuelve a primer plano se manda un punto de recuperación si ya casi le
+// tocaba al siguiente ciclo.
 export function LocationTracker() {
   const { vendedor } = useSession();
-  const { jornada } = useJornada();
-  const activa = jornada?.activa ?? false;
   const lastPingRef = useRef(0);
 
   useEffect(() => {
-    if (!activa || !vendedor || !('geolocation' in navigator)) return;
+    if (!vendedor || !('geolocation' in navigator)) return;
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -51,7 +50,7 @@ export function LocationTracker() {
       }, INTERVALO_MS);
     };
 
-    ping(); // punto inmediato al iniciar la jornada, sin esperar el primer ciclo
+    ping(); // punto inmediato al abrir la app, sin esperar el primer ciclo
     schedule();
 
     const onVisibility = () => {
@@ -65,7 +64,7 @@ export function LocationTracker() {
       if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [activa, vendedor]);
+  }, [vendedor]);
 
   return null;
 }

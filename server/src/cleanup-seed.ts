@@ -1,8 +1,12 @@
 /**
  * Borra los datos de ejemplo que crea `seed.ts` (vendedores demo, sus
- * jornadas/ubicaciones/prospectos/visitas, y los deals CRM `source: 'local'`)
- * de la base de Firestore a la que apunten las credenciales actuales — si no
- * está definida FIRESTORE_EMULATOR_HOST, eso es la base REAL de producción.
+ * ubicaciones/prospectos/visitas, y los deals CRM `source: 'local'`) de la
+ * base de Firestore a la que apunten las credenciales actuales — si no está
+ * definida FIRESTORE_EMULATOR_HOST, eso es la base REAL de producción.
+ *
+ * `jornadas` sigue en la lista de colecciones a limpiar solo para borrar
+ * documentos viejos que hayan quedado de antes de quitar esa función —
+ * `seed.ts` ya no escribe ahí.
  *
  * Nunca toca: la colección `usuarios` (roles de admin), ni `productos`/`giros`
  * (catálogo real, no datos de actividad).
