@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
-import { toIso, parseDateRangeQuery, parseCsvParam } from '../firestore-helpers.js';
-import { requireAdmin } from '../auth.js';
+import { toIso, parseDateRangeQuery, parseCsvParam, parseCapturadoEn } from '../firestore-helpers.js';
+import { requireAdmin, puedeActuarComoVendedor, vendedorAjeno } from '../auth.js';
 import { resolveVendedorIds } from './_filters.js';
 
 export const ubicacionesRouter = Router();
@@ -24,6 +24,11 @@ interface VendedorLookupDoc {
 const MAX_VENDEDORES_RECORRIDO = 20;
 const MAX_PUNTOS_POR_VENDEDOR = 1000;
 
+// Un fix de red (sin GPS real) puede traer precisión de 1-2 km y mete picos
+// absurdos en la polilínea del recorrido; los puntos peores que esto se
+// omiten al dibujar. Los que no traen accuracy (registros viejos) se dejan.
+const MAX_ACCURACY_RECORRIDO_M = 200;
+
 function parseCoord(raw: unknown, min: number, max: number): number | null {
   const n = Number(raw);
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
@@ -31,18 +36,23 @@ function parseCoord(raw: unknown, min: number, max: number): number | null {
 
 // Un punto de GPS del recorrido del vendedor (ver LocationTracker en la app
 // del vendedor: manda uno cada ~5 min mientras la jornada está activa).
+// `capturadoEn` viene solo en los puntos que se guardaron sin señal y se
+// reenvían después, para que el recorrido conserve la hora real de captura.
 ubicacionesRouter.post('/', async (req, res) => {
-  const { vendedorId, lat, lng, accuracy } = req.body as { vendedorId?: string; lat?: unknown; lng?: unknown; accuracy?: unknown };
+  const { vendedorId, lat, lng, accuracy, capturadoEn } = req.body as {
+    vendedorId?: string; lat?: unknown; lng?: unknown; accuracy?: unknown; capturadoEn?: unknown;
+  };
   const parsedLat = parseCoord(lat, -90, 90);
   const parsedLng = parseCoord(lng, -180, 180);
   if (!vendedorId || parsedLat == null || parsedLng == null) {
     return res.status(400).json({ error: 'vendedorId, lat y lng son requeridos' });
   }
+  if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
 
   const data: UbicacionDoc = {
     vendedorId, lat: parsedLat, lng: parsedLng,
     accuracy: parseCoord(accuracy, 0, 100000),
-    createdAt: Timestamp.now(),
+    createdAt: parseCapturadoEn(capturadoEn) ?? Timestamp.now(),
   };
   await db.collection('ubicaciones').add(data);
   res.status(201).json({ ok: true });
@@ -92,10 +102,10 @@ ubicacionesRouter.get('/recorrido', requireAdmin, async (req, res) => {
       vendedorId: id,
       nombre: v?.nombre ?? '—',
       color: v?.color ?? '#2a6fdb',
-      puntos: puntosSnaps[i].docs.map((d) => {
-        const u = d.data() as UbicacionDoc;
-        return { lat: u.lat, lng: u.lng, createdAt: toIso(u.createdAt) };
-      }),
+      puntos: puntosSnaps[i].docs
+        .map((d) => d.data() as UbicacionDoc)
+        .filter((u) => u.accuracy == null || u.accuracy <= MAX_ACCURACY_RECORRIDO_M)
+        .map((u) => ({ lat: u.lat, lng: u.lng, createdAt: toIso(u.createdAt) })),
     };
   });
 

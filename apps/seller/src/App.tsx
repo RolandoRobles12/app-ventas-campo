@@ -9,6 +9,8 @@ import { VisitSuccess } from './pages/visitas/VisitSuccess';
 import { PhoneShell } from './components/PhoneShell';
 import { BottomNav } from './components/BottomNav';
 import { LocationTracker } from './components/LocationTracker';
+import { LocationGate } from './components/LocationGate';
+import { OfflineSync } from './offline';
 
 function AppShell() {
   const { vendedor, loading } = useSession();
@@ -22,9 +24,12 @@ function AppShell() {
   }
 
   return (
-    <>
-      <LocationTracker />
-      <PhoneShell>
+    <PhoneShell>
+      {/* Sin ubicación habilitada no se puede usar la app: el gate bloquea
+          todo, y el tracker/sync solo arrancan cuando ya hay ubicación. */}
+      <LocationGate>
+        <LocationTracker />
+        <OfflineSync />
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <Routes>
             <Route path="/" element={<Home />} />
@@ -35,8 +40,8 @@ function AppShell() {
           </Routes>
         </div>
         <BottomNav />
-      </PhoneShell>
-    </>
+      </LocationGate>
+    </PhoneShell>
   );
 }
 

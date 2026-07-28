@@ -44,6 +44,26 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
   next();
 }
 
+// La app del vendedor manda `vendedorId` en el body/URL, pero el servidor no
+// se fía de eso: una cuenta que no es admin solo puede leer/escribir datos
+// del vendedor cuyo email coincide con el de la sesión. Sin esto, cualquier
+// cuenta @avivacredito.com podría inyectar visitas/ubicaciones a nombre de
+// otro vendedor y los datos de seguimiento dejarían de ser confiables.
+export async function puedeActuarComoVendedor(email: string, vendedorId: string): Promise<boolean> {
+  const [vendedorDoc, esAdmin] = await Promise.all([
+    db.collection('vendedores').doc(vendedorId).get(),
+    isAdminEmail(email),
+  ]);
+  if (esAdmin) return true;
+  if (!vendedorDoc.exists) return false;
+  const vEmail = (vendedorDoc.data() as { email?: string | null }).email;
+  return !!vEmail && vEmail.toLowerCase() === email.toLowerCase();
+}
+
+export function vendedorAjeno(res: Response) {
+  return res.status(403).json({ error: 'vendedor_ajeno', message: 'No puedes actuar a nombre de otro vendedor.' });
+}
+
 // Los correos en INITIAL_ADMIN_EMAILS siempre recuperan acceso de admin al
 // arrancar el servidor, aunque alguien los haya quitado por error desde
 // "Usuarios" — resuelve el huevo-y-la-gallina del primer alta (nadie puede

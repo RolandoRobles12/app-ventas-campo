@@ -11,3 +11,12 @@ createRoot(document.getElementById('root')!).render(
     </BrowserRouter>
   </StrictMode>,
 )
+
+// Solo en producción: en dev interferiría con el HMR de Vite. Con esto la app
+// es instalable (PWA) y abre aunque no haya señal; los datos offline los
+// maneja src/offline.ts, no el service worker.
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  })
+}

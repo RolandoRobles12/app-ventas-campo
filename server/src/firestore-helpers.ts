@@ -59,6 +59,22 @@ export function parseCsvParam(raw?: string): string[] {
   return raw ? raw.split(',').map((s) => s.trim()).filter(Boolean) : [];
 }
 
+// Registros (visitas/pings de ubicación) capturados sin señal llegan después
+// con la hora real de captura en `capturadoEn` (epoch millis). Se acepta solo
+// dentro de una ventana razonable — ni futuro ni historia vieja — para que un
+// cliente no pueda inyectar registros con fechas arbitrarias; fuera de la
+// ventana (o sin el campo) se usa la hora del servidor.
+const MAX_ANTIGUEDAD_CAPTURA_MS = 48 * 60 * 60 * 1000;
+const MAX_ADELANTO_CAPTURA_MS = 5 * 60 * 1000;
+
+export function parseCapturadoEn(raw: unknown): Timestamp | null {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const ahora = Date.now();
+  if (n > ahora + MAX_ADELANTO_CAPTURA_MS || n < ahora - MAX_ANTIGUEDAD_CAPTURA_MS) return null;
+  return Timestamp.fromMillis(n);
+}
+
 export function haversineMetros(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371000;
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;

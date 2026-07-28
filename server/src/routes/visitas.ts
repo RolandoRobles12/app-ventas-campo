@@ -2,9 +2,9 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { db, Timestamp, FieldPath } from '../db.js';
-import { toIso, haversineMetros, chunkArray, parseDateRangeQuery, parseCsvParam, isEmptyRestriction } from '../firestore-helpers.js';
+import { toIso, haversineMetros, chunkArray, parseDateRangeQuery, parseCsvParam, isEmptyRestriction, parseCapturadoEn } from '../firestore-helpers.js';
 import { saveUpload } from '../storage.js';
-import { requireAdmin } from '../auth.js';
+import { requireAdmin, puedeActuarComoVendedor, vendedorAjeno } from '../auth.js';
 import { productosPorId } from './vendedores.js';
 import { resolveVendedorIds } from './_filters.js';
 
@@ -217,8 +217,9 @@ function uploadFotos(req: Request, res: Response, next: NextFunction) {
 }
 
 visitasRouter.post('/', uploadFotos, async (req, res) => {
-  const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy } = req.body as Record<string, string>;
+  const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy, capturadoEn } = req.body as Record<string, string>;
   if (!vendedorId || !resultado) return res.status(400).json({ error: 'vendedorId y resultado son requeridos' });
+  if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
   const files = (req.files as Express.Multer.File[] | undefined) || [];
   // La app del vendedor solo permite capturar fotos en el momento (cámara en
   // vivo vía getUserMedia, sin selector de archivos) — se exige al menos una
@@ -278,7 +279,10 @@ visitasRouter.post('/', uploadFotos, async (req, res) => {
     gpsAccuracy: hasGps ? parseCoord(gpsAccuracy, 0, 100000) : null,
     ubicacionValida,
     distanciaValidacionMetros,
-    createdAt: Timestamp.now(),
+    // Una visita registrada sin señal se reenvía después desde la cola local
+    // del teléfono; capturadoEn conserva la hora real en que se hizo la visita
+    // para que las metas del día y la racha no se muevan al día del reenvío.
+    createdAt: parseCapturadoEn(capturadoEn) ?? Timestamp.now(),
   };
   const ref = await db.collection('visitas').add(visitaData);
 

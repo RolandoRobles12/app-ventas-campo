@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
 import { toIso } from '../firestore-helpers.js';
-import { requireAdmin } from '../auth.js';
+import { requireAdmin, puedeActuarComoVendedor, vendedorAjeno } from '../auth.js';
 
 export const prospectosRouter = Router();
 
@@ -41,8 +41,10 @@ function porEstadoYDistancia(a: { estado: string; distanciaKm: number | null }, 
   return (a.distanciaKm ?? Infinity) - (b.distanciaKm ?? Infinity);
 }
 
-// Lista de prospectos de un vendedor (usada por la app del vendedor y por el admin)
+// Lista de prospectos de un vendedor (usada por la app del vendedor y por el
+// admin). Los leads traen datos de contacto: un vendedor solo puede ver los suyos.
 prospectosRouter.get('/vendedor/:vendedorId', async (req, res) => {
+  if (!(await puedeActuarComoVendedor(req.user!.email, req.params.vendedorId))) return vendedorAjeno(res);
   const snap = await db.collection('prospectos').where('vendedorId', '==', req.params.vendedorId).get();
   const prospectos = snap.docs
     .map((d) => shape(d.id, d.data() as ProspectoDoc))
@@ -57,6 +59,7 @@ prospectosRouter.post('/', async (req, res) => {
     distanciaKm?: number; lat?: number; lng?: number; origen?: string;
   };
   if (!vendedorId || !nombre) return res.status(400).json({ error: 'vendedorId y nombre son requeridos' });
+  if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
 
   const data: ProspectoDoc = {
     vendedorId, nombre, direccion: direccion || '', giro: giro ?? null, telefono: telefono ?? null,
