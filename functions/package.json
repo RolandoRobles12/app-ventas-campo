@@ -8,16 +8,22 @@
   },
   "main": "dist/index.js",
   "scripts": {
-    "build": "npm run build --prefix ../server && tsc -p tsconfig.json && node scripts/bundle-local-deps.mjs",
+    "build": "node scripts/copy-server-src.mjs && tsc -p tsconfig.json",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "npm run build && firebase deploy --only functions"
   },
   "dependencies": {
-    "@aviva/server": "file:../server",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "express-async-errors": "^3.1.1",
     "firebase-admin": "^12.7.0",
-    "firebase-functions": "^6.0.0"
+    "firebase-functions": "^6.0.0",
+    "multer": "^2.2.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^2.2.0",
     "typescript": "^5.6.2"
   }
 }
