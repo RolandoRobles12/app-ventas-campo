@@ -7,7 +7,7 @@
 //     el último index.html cacheado.
 //   - assets del build (JS/CSS con hash en el nombre): caché primero — un
 //     hash nuevo es una URL nueva, así que nunca se sirve una versión vieja.
-const CACHE = 'aviva-vendedor-v1';
+const CACHE = 'aviva-vendedor-v2';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
