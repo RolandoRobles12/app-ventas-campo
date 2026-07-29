@@ -12,9 +12,15 @@ export const visitasRouter = Router();
 
 const MAX_FOTOS_POR_VISITA = 5;
 
+// La app del vendedor captura fotos con la cámara a resolución nativa (sin
+// recompresión agresiva, para no perder calidad de evidencia), así que el
+// límite por archivo debe dar margen a fotos de celulares modernos (una
+// foto en 4K puede pesar varios MB incluso en JPEG).
+const MAX_TAMANO_FOTO_BYTES = 20 * 1024 * 1024;
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 8 * 1024 * 1024 },
+  limits: { fileSize: MAX_TAMANO_FOTO_BYTES },
   fileFilter: (_req, file, cb) => {
     if (!file.mimetype.startsWith('image/')) return cb(new Error('SOLO_IMAGENES'));
     cb(null, true);
@@ -210,13 +216,24 @@ visitasRouter.get('/vendedor/:vendedorId', requireAdmin, async (req, res) => {
 // middleware del router) para poder responder 400 en vez de dejar que un
 // rechazo de fileFilter/límite de tamaño/cantidad caiga al manejador de
 // errores genérico de app.ts, que respondería 500.
+function mensajeErrorFotos(err: unknown): string {
+  if (err instanceof Error && err.message === 'SOLO_IMAGENES') return 'Las fotografías deben ser imágenes.';
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      const mb = Math.round(MAX_TAMANO_FOTO_BYTES / (1024 * 1024));
+      return `Cada fotografía debe pesar menos de ${mb} MB.`;
+    }
+    if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+      return `Solo se permiten ${MAX_FOTOS_POR_VISITA} fotografías por visita.`;
+    }
+  }
+  return 'No se pudieron procesar las fotografías. Intenta de nuevo.';
+}
+
 function uploadFotos(req: Request, res: Response, next: NextFunction) {
   upload.array('fotos', MAX_FOTOS_POR_VISITA)(req, res, (err: unknown) => {
     if (!err) return next();
-    const message = err instanceof Error && err.message === 'SOLO_IMAGENES'
-      ? 'Las fotografías deben ser imágenes.'
-      : `No se pudieron procesar las fotografías (máximo ${MAX_FOTOS_POR_VISITA}).`;
-    res.status(400).json({ error: 'fotos_invalidas', message });
+    res.status(400).json({ error: 'fotos_invalidas', message: mensajeErrorFotos(err) });
   });
 }
 
