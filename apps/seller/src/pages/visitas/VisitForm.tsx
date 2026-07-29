@@ -5,6 +5,7 @@ import { useSession } from '../../session';
 import { MapPreview } from '../../components/MapPreview';
 import { CameraCapture } from '../../components/CameraCapture';
 import { guardarVisitaPendiente, prospectosConCache } from '../../offline';
+import { subirFotos } from '../../uploadFotos';
 import { RESULTADO_OPTIONS, resultadoColor } from '@aviva/ui';
 
 const GIROS = ['Abarrotes', 'Ferretería', 'Papelería', 'Alimentos', 'Servicios', 'Otro'];
@@ -149,11 +150,8 @@ export function VisitForm({ mode }: { mode: 'lead' | 'nuevo' }) {
         await encolar();
         return;
       }
-      const fd = new FormData();
-      Object.entries(campos).forEach(([k, v]) => fd.append(k, v));
-      fd.append('capturadoEn', String(capturadoEn));
-      photos.forEach((p) => fd.append('fotos', p.file));
-      await api.registrarVisita(fd);
+      const fotos = await subirFotos(vendedor.id, photos.map((p) => p.file));
+      await api.registrarVisita({ ...campos, capturadoEn, fotos });
       irAExito(false);
     } catch (err) {
       if (err instanceof ApiError) {

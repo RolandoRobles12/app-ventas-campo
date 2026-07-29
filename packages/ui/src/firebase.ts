@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { GoogleAuthProvider, getAuth } from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 
 // El apiKey de un web app de Firebase no es secreto: la seguridad la dan las
 // reglas de Firestore y la verificación del ID token en el backend, no
@@ -15,6 +16,7 @@ const firebaseConfig = {
 
 export const firebaseApp = initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
+export const storage = getStorage(firebaseApp);
 
 export const ALLOWED_EMAIL_DOMAIN = 'avivacredito.com';
 
