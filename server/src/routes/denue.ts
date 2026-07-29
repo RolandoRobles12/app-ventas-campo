@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { consultarDenue, isDenueConfigured, centroYRadioDePoligono, type UbicacionGps, type PuntoGeo } from '../integrations/denue.js';
+import { consultarDenue, isDenueConfigured, centroYRadioDePoligonos, type UbicacionGps, type PuntoGeo } from '../integrations/denue.js';
 import { geocodificar, isGoogleMapsConfigured } from '../integrations/googleMaps.js';
 
 export const denueRouter = Router();
@@ -15,24 +15,25 @@ denueRouter.post('/consulta', async (req, res) => {
       message: 'Configura DENUE_TOKEN en el servidor para consultar el API real del DENUE (INEGI).',
     });
   }
-  const { giros, cantidad, ciudad, colonia, lat, lng, radioMetros, poligono } = req.body as {
+  const { giros, cantidad, ciudad, colonia, lat, lng, radioMetros, poligonos, excluir } = req.body as {
     giros: string[]; cantidad: number;
     ciudad?: string; colonia?: string;
     lat?: number; lng?: number; radioMetros?: number;
-    poligono?: PuntoGeo[];
+    poligonos?: PuntoGeo[][];
+    excluir?: string[];
   };
 
-  const poligonoValido = Array.isArray(poligono) && poligono.length >= 3
-    && poligono.every((p) => typeof p?.lat === 'number' && typeof p?.lng === 'number')
-    ? poligono
-    : null;
+  const poligonosValidos = Array.isArray(poligonos)
+    ? poligonos.filter((p) => Array.isArray(p) && p.length >= 3 && p.every((pt) => typeof pt?.lat === 'number' && typeof pt?.lng === 'number'))
+    : [];
 
   let ubicacion: UbicacionGps;
-  if (poligonoValido) {
-    // El polígono manda sobre ciudad/colonia/GPS: si el usuario dibujó una
-    // zona a mano, es la delimitación más precisa que dio, así que se usa
-    // para centrar y acotar la búsqueda en vez de cualquier otro modo.
-    ubicacion = centroYRadioDePoligono(poligonoValido);
+  if (poligonosValidos.length) {
+    // Las zonas dibujadas mandan sobre ciudad/colonia/GPS: si el usuario
+    // dibujó una o varias zonas a mano, es la delimitación más precisa que
+    // dio, así que se usa para centrar y acotar la búsqueda en vez de
+    // cualquier otro modo.
+    ubicacion = centroYRadioDePoligonos(poligonosValidos);
   } else if (lat != null && lng != null) {
     ubicacion = { lat, lng, radioMetros };
   } else if (ciudad || colonia) {
@@ -64,8 +65,14 @@ denueRouter.post('/consulta', async (req, res) => {
   }
 
   try {
-    const resultados = await consultarDenue({ giros: giros || [], cantidad: cantidad || 10, ubicacion, poligono: poligonoValido || undefined });
-    const zona = poligonoValido ? `polígono de ${poligonoValido.length} puntos (círculo ${ubicacion.radioMetros}m)` : `radio ${ubicacion.radioMetros || 1500}m`;
+    const resultados = await consultarDenue({
+      giros: giros || [], cantidad: cantidad || 10, ubicacion,
+      poligonos: poligonosValidos.length ? poligonosValidos : undefined,
+      excluir,
+    });
+    const zona = poligonosValidos.length
+      ? `${poligonosValidos.length} polígono(s) (círculo ${ubicacion.radioMetros}m)`
+      : `radio ${ubicacion.radioMetros || 1500}m`;
     console.log(`DENUE: ${resultados.length} resultados en ${zona} alrededor de (${ubicacion.lat}, ${ubicacion.lng}), giros=${(giros || []).join('|')}`);
     res.json({ resultados });
   } catch (err: any) {

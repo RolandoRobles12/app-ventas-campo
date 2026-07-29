@@ -94,59 +94,115 @@ export function MarkerPickerMap({
   return <div ref={containerRef} style={{ height, width: '100%' }} />;
 }
 
-// Dibuja un polígono a mano clic a clic — google.maps.drawing.DrawingManager
-// ya no existe en la API (deprecado y removido en la v3.65+), así que se
-// arma el path directamente con clics sobre el mapa.
+export const ZONA_COLORS = ['#0f5132', '#1d5fae', '#a3471d', '#7b1da3', '#a31d5f', '#1d8fa3'];
+
+// Dibuja una o varias zonas (polígonos) a mano clic a clic —
+// google.maps.drawing.DrawingManager ya no existe en la API (deprecado y
+// removido en la v3.65+), así que se arma cada path directamente con clics
+// sobre el mapa. `zones` es un arreglo de contornos; los clics del mapa
+// agregan puntos únicamente a `zones[activeZoneIndex]` (la zona "activa"),
+// pero todas las zonas quedan visibles y editables (arrastrar sus vértices)
+// al mismo tiempo.
 export function PolygonDrawMap({
-  points, onChange, height,
+  zones, activeZoneIndex, onChange, height,
 }: {
-  points: LatLng[]; onChange: (points: LatLng[]) => void; height: number | string;
+  zones: LatLng[][]; activeZoneIndex: number; onChange: (zones: LatLng[][]) => void; height: number | string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
-  const polygonRef = useRef<google.maps.Polygon | null>(null);
-  const pointsRef = useRef<LatLng[]>(points);
+  const polygonsRef = useRef<google.maps.Polygon[]>([]);
+  const zonesRef = useRef<LatLng[][]>(zones);
+  const activeIndexRef = useRef(activeZoneIndex);
+  const onChangeRef = useRef(onChange);
+  const syncZonesRef = useRef<() => void>(() => {});
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    let cancelled = false;
-    loadGoogleMaps().then((g) => {
-      if (cancelled || !containerRef.current || mapRef.current) return;
-      const center = pointsRef.current[0] || DEFAULT_CENTER;
-      const map = new g.maps.Map(containerRef.current, { center, zoom: 13, streetViewControl: false, mapTypeControl: false });
-      mapRef.current = map;
+  zonesRef.current = zones;
+  activeIndexRef.current = activeZoneIndex;
+  onChangeRef.current = onChange;
+
+  // Crea/destruye overlays de google.maps.Polygon para que coincidan con
+  // zonesRef.current, y corrige el path de las zonas que cambiaron por
+  // fuera del propio dibujo (ej. "Limpiar", o quitar una zona de en medio
+  // corre a las siguientes a su nuevo índice). Solo lee de refs, nunca de
+  // `zones`/`onChange` directamente, para poder llamarse tanto desde el
+  // efecto de montaje (una vez el mapa cargó, de forma asíncrona) como del
+  // efecto que reacciona a cambios de `zones` — cualquiera que dispare
+  // primero dejará el mapa sincronizado.
+  syncZonesRef.current = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const zonas = zonesRef.current;
+
+    while (polygonsRef.current.length > zonas.length) {
+      polygonsRef.current.pop()!.setMap(null);
+    }
+    while (polygonsRef.current.length < zonas.length) {
+      const idx = polygonsRef.current.length;
+      const color = ZONA_COLORS[idx % ZONA_COLORS.length];
       // Sin `paths` en el constructor: así el Polygon arranca con un MVCArray
       // vacío pero válido (patrón recomendado por Google para dibujar a
       // clics). Pasar `paths: []` explícito es el patrón que se rompía.
-      polygonRef.current = new g.maps.Polygon({
-        map, editable: true,
-        fillColor: '#157347', fillOpacity: 0.15, strokeColor: '#0f5132', strokeWeight: 2.5,
-      });
-      if (pointsRef.current.length) polygonRef.current.setPath(pointsRef.current);
-
+      const polygon = new google.maps.Polygon({ map, editable: true, fillColor: color, fillOpacity: 0.15, strokeColor: color, strokeWeight: 2.5 });
       const syncFromPolygon = () => {
-        const path = polygonRef.current!.getPath();
+        const path = polygon.getPath();
         const pts: LatLng[] = [];
         for (let i = 0; i < path.getLength(); i++) {
           const p = path.getAt(i);
           pts.push({ lat: p.lat(), lng: p.lng() });
         }
-        pointsRef.current = pts;
-        onChange(pts);
+        const next = zonesRef.current.slice();
+        next[idx] = pts;
+        onChangeRef.current(next);
       };
-      const path = polygonRef.current.getPath();
+      const path = polygon.getPath();
       path.addListener('set_at', syncFromPolygon);
       path.addListener('insert_at', syncFromPolygon);
       path.addListener('remove_at', syncFromPolygon);
+      polygonsRef.current.push(polygon);
+    }
+    polygonsRef.current.forEach((polygon, idx) => {
+      const target = zonas[idx] || [];
+      const path = polygon.getPath();
+      const actual: LatLng[] = [];
+      for (let i = 0; i < path.getLength(); i++) {
+        const p = path.getAt(i);
+        actual.push({ lat: p.lat(), lng: p.lng() });
+      }
+      // Comparación por contenido (no solo longitud): al quitar una zona que
+      // no es la última, los overlays restantes deben "correrse" a los
+      // puntos de la zona que ahora ocupa su índice, aunque tengan el mismo
+      // número de puntos que los que ya traían.
+      if (JSON.stringify(actual) !== JSON.stringify(target)) polygon.setPath(target);
+    });
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    loadGoogleMaps().then((g) => {
+      if (cancelled || !containerRef.current || mapRef.current) return;
+      const center = zonesRef.current.flat()[0] || DEFAULT_CENTER;
+      const map = new g.maps.Map(containerRef.current, { center, zoom: 13, streetViewControl: false, mapTypeControl: false });
+      mapRef.current = map;
 
       map.addListener('click', (e: google.maps.MapMouseEvent) => {
         if (!e.latLng) return;
-        polygonRef.current!.getPath().push(e.latLng);
+        const activePolygon = polygonsRef.current[activeIndexRef.current];
+        if (activePolygon) activePolygon.getPath().push(e.latLng);
       });
+
+      // El mapa carga de forma asíncrona (loadGoogleMaps): si `zones` no
+      // vuelve a cambiar después de este punto, este es el único momento en
+      // que se crean los overlays iniciales.
+      syncZonesRef.current();
     }).catch((err) => !cancelled && setError(err.message));
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    syncZonesRef.current();
+  }, [zones]);
 
   if (error) return <MapError height={height} message={error} />;
   return <div ref={containerRef} style={{ height, width: '100%' }} />;

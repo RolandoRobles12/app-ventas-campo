@@ -3,7 +3,7 @@ import { api, type Prospecto, type ZonaPunto } from '../api';
 import { useFilters } from '../filters';
 import { useToast } from '../toast';
 import { PlaceAutocompleteInput, type PlaceResult } from './PlaceAutocompleteInput';
-import { MarkerPickerMap, PolygonDrawMap } from './LocationPickerMap';
+import { MarkerPickerMap, PolygonDrawMap, ZONA_COLORS } from './LocationPickerMap';
 
 interface WizardItem {
   id?: string;
@@ -30,7 +30,12 @@ interface ZonaState {
   selectedCiudad: PlaceResult | null;
   selectedColonia: PlaceResult | null;
   drawZone: boolean;
-  polygon: ZonaPunto[];
+  // Varias zonas (contornos) dibujadas a mano — un negocio cuenta si cae
+  // dentro de CUALQUIERA de ellas. `activePoligono` indica cuál recibe los
+  // puntos cuando el admin hace clic en el mapa. Siempre hay al menos una
+  // entrada (posiblemente vacía) para poder empezar a dibujar.
+  poligonos: ZonaPunto[][];
+  activePoligono: number;
   polygonResetKey: number;
   lat: number | null;
   lng: number | null;
@@ -71,10 +76,11 @@ function formatRangoCorto(desde: string, hasta: string): string {
   return `${formatFechaCorta(desde)} – ${formatFechaCorta(hasta)}`;
 }
 
-function nuevaZona(giros: string[], ciudad: string, colonia: string, polygon: ZonaPunto[]): ZonaState {
+function nuevaZona(giros: string[], ciudad: string, colonia: string, poligonos: ZonaPunto[][]): ZonaState {
   return {
     modo: 'zona', ciudad, colonia, selectedCiudad: null, selectedColonia: null,
-    drawZone: false, polygon, polygonResetKey: 0, lat: null, lng: null, radio: 1500, giros, cantidad: 15,
+    drawZone: false, poligonos: poligonos.length ? poligonos : [[]], activePoligono: 0, polygonResetKey: 0,
+    lat: null, lng: null, radio: 1500, giros, cantidad: 15,
   };
 }
 
@@ -126,7 +132,7 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
   const [periodo, setPeriodo] = useState<Periodo>('ninguno');
   const [fechaInicio, setFechaInicio] = useState(todayISO());
   const [weeks, setWeeks] = useState<WeekConfig[]>([
-    { desde: null, hasta: null, zona: nuevaZona(vendedorInicial?.giros || [], vendedorInicial?.ciudad || '', vendedorInicial?.colonia || '', vendedorInicial?.zonaPoligono || []) },
+    { desde: null, hasta: null, zona: nuevaZona(vendedorInicial?.giros || [], vendedorInicial?.ciudad || '', vendedorInicial?.colonia || '', vendedorInicial?.zonaPoligonos || []) },
   ]);
   const [activeWeekIdx, setActiveWeekIdx] = useState(0);
 
@@ -163,10 +169,10 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     setWeeks((prev) => prev.map((w, i) => (i === activeWeekIdx ? { ...w, zona: { ...w.zona, ...patch } } : w)));
   };
 
-  const resetPlan = (giros: string[], ciudad: string, colonia: string, polygon: ZonaPunto[]) => {
+  const resetPlan = (giros: string[], ciudad: string, colonia: string, poligonos: ZonaPunto[][]) => {
     setPeriodo('ninguno');
     setFechaInicio(todayISO());
-    setWeeks([{ desde: null, hasta: null, zona: nuevaZona(giros, ciudad, colonia, polygon) }]);
+    setWeeks([{ desde: null, hasta: null, zona: nuevaZona(giros, ciudad, colonia, poligonos) }]);
     setActiveWeekIdx(0);
   };
 
@@ -174,7 +180,7 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     const first = vendedores.find((v) => v.productoId === productoId);
     setWProductoId(productoId);
     setWVendorId(first?.id || '');
-    resetPlan(first?.giros || [], first?.ciudad || '', first?.colonia || '', first?.zonaPoligono || []);
+    resetPlan(first?.giros || [], first?.ciudad || '', first?.colonia || '', first?.zonaPoligonos || []);
     setWResults([]);
     setWMetaSolicitudesDia(first?.metaSolicitudesDia ?? 5);
     setWMetaVentaMes(first?.metaVentaMes ?? 120000);
@@ -184,10 +190,24 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
     const v = vendedores.find((x) => x.id === vendorId);
     if (!v) return;
     setWVendorId(v.id);
-    resetPlan(v.giros, v.ciudad, v.colonia || '', v.zonaPoligono || []);
+    resetPlan(v.giros, v.ciudad, v.colonia || '', v.zonaPoligonos || []);
     setWResults([]);
     setWMetaSolicitudesDia(v.metaSolicitudesDia ?? 5);
     setWMetaVentaMes(v.metaVentaMes ?? 120000);
+  };
+
+  const agregarZona = () => {
+    patchActiveZona({ poligonos: [...activeZona.poligonos, []], activePoligono: activeZona.poligonos.length });
+  };
+
+  const quitarZona = (idx: number) => {
+    if (activeZona.poligonos.length <= 1) {
+      patchActiveZona({ poligonos: [[]], activePoligono: 0 });
+      return;
+    }
+    const nuevos = activeZona.poligonos.filter((_, i) => i !== idx);
+    const activo = Math.min(activeZona.activePoligono > idx ? activeZona.activePoligono - 1 : activeZona.activePoligono, nuevos.length - 1);
+    patchActiveZona({ poligonos: nuevos, activePoligono: activo });
   };
 
   const onPeriodoChange = (p: Periodo) => {
@@ -259,13 +279,20 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
         : zonaResuelta
           ? { giros: zona.giros, cantidad: zona.cantidad, lat: zonaResuelta.lat, lng: zonaResuelta.lng, radioMetros: zona.selectedColonia === zonaResuelta ? 2500 : 6000 }
           : { giros: zona.giros, cantidad: zona.cantidad, ciudad: zona.ciudad, colonia: zona.colonia };
-      // El polígono manda sobre cualquier otro modo: si el usuario dibujó una
-      // zona, el servidor usa esos vértices para centrar y acotar la búsqueda
-      // (ver centroYRadioDePoligono en server/src/integrations/denue.ts) y
-      // filtra los resultados para quedarse solo con los que caen dentro.
-      if (zona.drawZone && zona.polygon.length >= 3) {
-        params.poligono = zona.polygon;
+      // Las zonas dibujadas mandan sobre cualquier otro modo: si el usuario
+      // dibujó una o varias, el servidor usa esos vértices para centrar y
+      // acotar la búsqueda (ver centroYRadioDePoligonos en
+      // server/src/integrations/denue.ts) y filtra los resultados para
+      // quedarse solo con los que caen dentro de alguna.
+      const zonasValidas = zona.poligonos.filter((z) => z.length >= 3);
+      if (zona.drawZone && zonasValidas.length) {
+        params.poligonos = zonasValidas;
       }
+      // Excluye lo que ya está en la ruta (cualquier semana, incl. manuales):
+      // sin esto, dos semanas con la misma zona/giros reciben el mismo
+      // top-N del DENUE y la segunda consulta se queda en 0 resultados
+      // nuevos porque todo lo que trae ya "existe" en la lista combinada.
+      params.excluir = wResults.map((r) => `${r.nombre}::${r.direccion}`);
       const { resultados } = await api.consultarDenue(params);
       const nuevos: WizardItem[] = resultados.map((r: any) => ({
         nombre: r.nombre, direccion: r.direccion, giro: r.giro, distanciaKm: r.distanciaKm,
@@ -342,7 +369,8 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
         api.actualizarRuta(wVendorId, {
           productoId: wProductoId, ciudad: zonaPrincipal.ciudad, colonia: zonaPrincipal.colonia,
           giros: [...new Set(weeks.flatMap((w) => w.zona.giros))],
-          drawZone: zonaPrincipal.drawZone, zonaPoligono: zonaPrincipal.drawZone ? zonaPrincipal.polygon : null,
+          drawZone: zonaPrincipal.drawZone,
+          zonaPoligonos: zonaPrincipal.drawZone ? zonaPrincipal.poligonos.filter((z) => z.length >= 3) : null,
         }),
         api.actualizarMetas(wVendorId, { metaSolicitudesDia: wMetaSolicitudesDia, metaVentaMes: wMetaVentaMes }),
       ]);
@@ -494,22 +522,63 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
                 <span onClick={() => patchActiveZona({ drawZone: !activeZona.drawZone })} style={{ width: 40, height: 23, borderRadius: 20, flex: 'none', position: 'relative', transition: 'background .15s', background: activeZona.drawZone ? '#157347' : '#cdd8d0' }}>
                   <span style={{ position: 'absolute', top: 2, left: 2, width: 19, height: 19, borderRadius: '50%', background: '#fff', transition: 'transform .15s', transform: `translateX(${activeZona.drawZone ? 17 : 0}px)` }} />
                 </span>
-                <span style={{ fontSize: 13, color: '#3a4a41' }}>Dibujar zona en el mapa <span style={{ color: '#8a978f' }}>(opcional)</span></span>
+                <span style={{ fontSize: 13, color: '#3a4a41' }}>Dibujar zona(s) en el mapa <span style={{ color: '#8a978f' }}>(opcional)</span></span>
               </label>
               {activeZona.drawZone && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ fontSize: 12, color: '#8a978f', display: 'flex', alignItems: 'center', gap: 7 }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a978f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
-                    Haz clic para agregar puntos y dibujar el contorno de la zona; arrastra un punto para ajustarlo. Al generar la ruta, los prospectos se acotan a este contorno.
+                    Haz clic para agregar puntos a la zona activa (resaltada abajo); arrastra un punto para ajustarlo. Puedes agregar varias zonas — un negocio cuenta si cae dentro de cualquiera de ellas.
                   </div>
                   <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #e6ece7', position: 'relative' }}>
-                    <PolygonDrawMap key={activeWeekIdx * 1000 + activeZona.polygonResetKey} points={activeZona.polygon} onChange={(pts) => patchActiveZona({ polygon: pts })} height={220} />
-                    {activeZona.polygon.length > 0 && (
-                      <button onClick={() => patchActiveZona({ polygon: [], polygonResetKey: activeZona.polygonResetKey + 1 })} style={{ position: 'absolute', right: 12, top: 12, background: '#fff', border: 'none', borderRadius: 7, padding: '6px 10px', fontSize: 12, fontWeight: 600, color: '#c0392b', boxShadow: '0 1px 4px rgba(0,0,0,.2)' }}>Limpiar</button>
+                    <PolygonDrawMap
+                      key={activeWeekIdx * 1000 + activeZona.polygonResetKey}
+                      zones={activeZona.poligonos}
+                      activeZoneIndex={activeZona.activePoligono}
+                      onChange={(zs) => patchActiveZona({ poligonos: zs })}
+                      height={220}
+                    />
+                    {activeZona.poligonos[activeZona.activePoligono]?.length > 0 && (
+                      <button
+                        onClick={() => patchActiveZona({ poligonos: activeZona.poligonos.map((z, i) => (i === activeZona.activePoligono ? [] : z)) })}
+                        style={{ position: 'absolute', right: 12, top: 12, background: '#fff', border: 'none', borderRadius: 7, padding: '6px 10px', fontSize: 12, fontWeight: 600, color: '#c0392b', boxShadow: '0 1px 4px rgba(0,0,0,.2)' }}
+                      >
+                        Limpiar zona activa
+                      </button>
                     )}
                   </div>
-                  {activeZona.polygon.length > 0 && activeZona.polygon.length < 3 && (
-                    <div style={{ fontSize: 11.5, color: '#c96a1e' }}>Agrega al menos 3 puntos para que la zona sea válida.</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {activeZona.poligonos.map((z, idx) => {
+                      const activo = idx === activeZona.activePoligono;
+                      const color = ZONA_COLORS[idx % ZONA_COLORS.length];
+                      return (
+                        <div
+                          key={idx} onClick={() => patchActiveZona({ activePoligono: idx })}
+                          style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', border: '1.5px solid', borderColor: activo ? color : '#e0e8e2', background: activo ? '#f2f8f4' : '#fff', borderRadius: 8, padding: '5px 9px' }}
+                        >
+                          <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, flex: 'none' }} />
+                          <span style={{ fontSize: 11.5, fontWeight: 600, color: '#3a4a41' }}>Zona {idx + 1} · {z.length} pto{z.length === 1 ? '' : 's'}</span>
+                          {activeZona.poligonos.length > 1 && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); quitarZona(idx); }} title="Quitar zona"
+                              style={{ border: 'none', background: 'none', padding: 0, display: 'flex', cursor: 'pointer' }}
+                            >
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#c0392b" strokeWidth="3" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <button
+                      onClick={agregarZona}
+                      style={{ display: 'flex', alignItems: 'center', gap: 5, border: '1.5px dashed #cdd8d0', background: 'transparent', borderRadius: 8, padding: '5px 10px', fontSize: 11.5, fontWeight: 600, color: '#157347', cursor: 'pointer' }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#157347" strokeWidth="3" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                      Agregar zona
+                    </button>
+                  </div>
+                  {activeZona.poligonos.some((z) => z.length > 0 && z.length < 3) && (
+                    <div style={{ fontSize: 11.5, color: '#c96a1e' }}>Agrega al menos 3 puntos a cada zona para que sea válida.</div>
                   )}
                 </div>
               )}
