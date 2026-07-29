@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { api, type SeguimientoItem } from '../api';
 import { useFilters } from '../filters';
+import { RANGO_LABELS } from '../lib/dateRanges';
 import { FilterBar } from '../components/FilterBar';
 import { RecorridoModal } from '../components/RecorridoModal';
 import { estadoBadgeStyle } from '../badges';
 
 export function Seguimiento() {
-  const { fProductos, fVendedores } = useFilters();
+  const { fProductos, fVendedores, fRango, fDesde, fHasta } = useFilters();
   const [items, setItems] = useState<SeguimientoItem[]>([]);
   const [tick, setTick] = useState(0);
   const [recorridoDe, setRecorridoDe] = useState<SeguimientoItem | null>(null);
@@ -78,7 +79,16 @@ export function Seguimiento() {
         ))}
       </div>
 
-      {recorridoDe && <RecorridoModal vendedorId={recorridoDe.id} nombre={recorridoDe.nombre} onClose={() => setRecorridoDe(null)} />}
+      {recorridoDe && (
+        <RecorridoModal
+          vendedorId={recorridoDe.id}
+          nombre={recorridoDe.nombre}
+          desde={fDesde}
+          hasta={fHasta}
+          rangoLabel={fRango !== 'todo' ? RANGO_LABELS[fRango] : null}
+          onClose={() => setRecorridoDe(null)}
+        />
+      )}
     </div>
   );
 }
