@@ -4,7 +4,7 @@ export interface Producto { id: string; nombre: string; esDeCampo: boolean; giro
 export interface ZonaPunto { lat: number; lng: number }
 export interface Vendedor {
   id: string; nombre: string; iniciales: string; color: string; email: string | null; estado: string;
-  ciudad: string; colonia: string | null; drawZone: boolean; zonaPoligono: ZonaPunto[] | null;
+  ciudad: string; colonia: string | null; drawZone: boolean; zonaPoligonos: ZonaPunto[][] | null;
   producto: string; productoId: string;
   giros: string[]; prospectosCount?: number;
   metaSolicitudesDia: number; metaVentaMes: number;
@@ -107,7 +107,7 @@ export const api = {
 
   productos: () => req<Producto[]>('/productos/de-campo'),
   vendedores: (producto?: string) => req<Vendedor[]>(`/vendedores${qs({ producto })}`),
-  actualizarRuta: (id: string, data: { productoId?: string; ciudad?: string; colonia?: string; giros?: string[]; drawZone?: boolean; zonaPoligono?: ZonaPunto[] | null }) =>
+  actualizarRuta: (id: string, data: { productoId?: string; ciudad?: string; colonia?: string; giros?: string[]; drawZone?: boolean; zonaPoligonos?: ZonaPunto[][] | null }) =>
     req<Vendedor>(`/vendedores/${id}/ruta`, { method: 'PUT', body: JSON.stringify(data) }),
   actualizarMetas: (id: string, data: { metaSolicitudesDia?: number; metaVentaMes?: number }) =>
     req<{ id: string; metaSolicitudesDia: number; metaVentaMes: number }>(`/metas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -132,7 +132,8 @@ export const api = {
     giros: string[]; cantidad: number;
     ciudad?: string; colonia?: string;
     lat?: number; lng?: number; radioMetros?: number;
-    poligono?: ZonaPunto[];
+    poligonos?: ZonaPunto[][];
+    excluir?: string[];
   }) => req<{ resultados: any[] }>('/denue/consulta', { method: 'POST', body: JSON.stringify(data) }),
 
   dashboardSummary: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>

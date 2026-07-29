@@ -238,23 +238,33 @@ export function puntoEnPoligono(punto: PuntoGeo, poligono: PuntoGeo[]): boolean 
   return dentro;
 }
 
+// El admin puede dibujar varias zonas (polígonos) para una misma búsqueda —
+// un negocio cuenta si cae dentro de CUALQUIERA de ellas (unión, no intersección).
+export function puntoEnAlgunPoligono(punto: PuntoGeo, poligonos: PuntoGeo[][]): boolean {
+  return poligonos.some((poligono) => puntoEnPoligono(punto, poligono));
+}
+
 // El DENUE no soporta buscar "dentro de un polígono": su único modo real de
-// búsqueda geográfica es punto+radio. Para que el polígono dibujado en el
-// wizard sí tenga efecto, lo envolvemos en el círculo más chico que lo cubre
-// (centro = centroide de los vértices, radio = distancia al vértice más
-// lejano + 15% de margen) para la consulta al DENUE, y luego los resultados
-// se filtran con puntoEnPoligono() para quedarnos solo con los que caen
-// realmente dentro del contorno dibujado, no solo dentro del círculo.
-export function centroYRadioDePoligono(poligono: PuntoGeo[]): UbicacionGps {
-  const lat = poligono.reduce((s, p) => s + p.lat, 0) / poligono.length;
-  const lng = poligono.reduce((s, p) => s + p.lng, 0) / poligono.length;
+// búsqueda geográfica es punto+radio. Para que los polígonos dibujados en el
+// wizard sí tengan efecto, los envolvemos en el círculo más chico que cubre
+// TODOS sus vértices (centro = centroide combinado, radio = distancia al
+// vértice más lejano de cualquier zona + 15% de margen) para la consulta al
+// DENUE, y luego los resultados se filtran con puntoEnAlgunPoligono() para
+// quedarnos solo con los que caen realmente dentro de algún contorno
+// dibujado, no solo dentro del círculo que los engloba a todos.
+export function centroYRadioDePoligonos(poligonos: PuntoGeo[][]): UbicacionGps {
+  const vertices = poligonos.flat();
+  const lat = vertices.reduce((s, p) => s + p.lat, 0) / vertices.length;
+  const lng = vertices.reduce((s, p) => s + p.lng, 0) / vertices.length;
   const centro = { lat, lng };
-  const radioVertices = Math.max(...poligono.map((p) => haversineMetros(centro, p)));
+  const radioVertices = Math.max(...vertices.map((p) => haversineMetros(centro, p)));
   // Mismo tope de 10000m que ya usa el campo "Radio (m)" del modo GPS: un
   // círculo más grande que eso vuelve la búsqueda al DENUE lenta o propensa
   // a timeout sin ganar precisión real (el filtro por polígono ya recorta
   // lo que sobra del círculo).
-  const radioMetros = Math.min(10000, Math.max(300, Math.round(radioVertices * 1.15)));
+  // Tope real del DENUE de INEGI: su "Buscar" por radio no acepta más de
+  // 5000m (un radio mayor no da error, se cuelga hasta tronar por timeout).
+  const radioMetros = Math.min(5000, Math.max(300, Math.round(radioVertices * 1.15)));
   return { lat, lng, radioMetros };
 }
 
@@ -262,7 +272,12 @@ export async function consultarDenue(opts: {
   giros: string[];
   cantidad: number;
   ubicacion: UbicacionGps;
-  poligono?: PuntoGeo[];
+  poligonos?: PuntoGeo[][];
+  // nombre::direccion de prospectos que ya están en la ruta (de cualquier
+  // semana) — se descartan ANTES del slice(0, cantidad) para que, si dos
+  // semanas comparten zona/giros, la segunda consulta traiga negocios
+  // distintos en vez de repetir (y de paso vaciar) el mismo top-N del DENUE.
+  excluir?: string[];
 }): Promise<DenueProspecto[]> {
   const token = process.env.DENUE_TOKEN;
   if (!token) {
@@ -281,9 +296,17 @@ export async function consultarDenue(opts: {
   // request lento/colgado ya no bloquea a los demás — antes, un giro atorado
   // a mitad de la lista dejaba la búsqueda entera esperando su timeout de 20s
   // antes de siquiera intentar los giros restantes.
+  // El DENUE real de INEGI documenta 5000m como radio máximo de búsqueda; un
+  // radio mayor no da un error limpio, sino que el request se cuelga y
+  // termina tronando por el timeout de 20s (esto es lo que reportaban como
+  // "no se pudo conectar / tiempo de espera agotado" en zonas grandes). Se
+  // acota aquí, en el único lugar que arma el request real, sin importar de
+  // dónde haya salido `radioMetros` (GPS, ciudad/colonia o el círculo que
+  // envuelve un polígono).
+  const radioBuscado = Math.min(5000, ubicacion.radioMetros || 1500);
   const porGiro = await Promise.allSettled(giros.map(async (giro) => {
     const keyword = KEYWORD_POR_GIRO[giro] || normalize(giro);
-    const alcance = `${ubicacion.lat},${ubicacion.lng}/${ubicacion.radioMetros || 1500}`;
+    const alcance = `${ubicacion.lat},${ubicacion.lng}/${radioBuscado}`;
     return { giro, raw: await buscarDenue(keyword, alcance, token) };
   }));
 
@@ -331,14 +354,21 @@ export async function consultarDenue(opts: {
     throw new Error(errores[0]);
   }
 
-  // El DENUE ya respondió con el círculo que envuelve el polígono (ver
-  // centroYRadioDePoligono); aquí se descarta lo que cayó dentro del círculo
-  // pero fuera del contorno real que dibujó el usuario. Sin lat/lng no hay
-  // forma de ubicar el resultado, así que ante la duda se descarta.
-  const dentroDeZona = opts.poligono && opts.poligono.length >= 3
-    ? merged.filter((p) => p.lat != null && p.lng != null && puntoEnPoligono({ lat: p.lat, lng: p.lng }, opts.poligono!))
+  // El DENUE ya respondió con el círculo que envuelve todas las zonas (ver
+  // centroYRadioDePoligonos); aquí se descarta lo que cayó dentro del
+  // círculo pero fuera de cualquier contorno real que dibujó el usuario.
+  // Sin lat/lng no hay forma de ubicar el resultado, así que ante la duda
+  // se descarta.
+  const poligonosValidos = (opts.poligonos || []).filter((p) => p.length >= 3);
+  const dentroDeZona = poligonosValidos.length
+    ? merged.filter((p) => p.lat != null && p.lng != null && puntoEnAlgunPoligono({ lat: p.lat, lng: p.lng }, poligonosValidos))
     : merged;
 
-  dentroDeZona.sort((a, b) => (a.distanciaKm ?? Infinity) - (b.distanciaKm ?? Infinity));
-  return dentroDeZona.slice(0, cantidad);
+  const excluidos = new Set(opts.excluir || []);
+  const sinRepetidos = excluidos.size
+    ? dentroDeZona.filter((p) => !excluidos.has(`${p.nombre}::${p.direccion}`))
+    : dentroDeZona;
+
+  sinRepetidos.sort((a, b) => (a.distanciaKm ?? Infinity) - (b.distanciaKm ?? Infinity));
+  return sinRepetidos.slice(0, cantidad);
 }
