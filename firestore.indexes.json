@@ -58,22 +58,6 @@
         { "fieldPath": "estado", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "ASCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "crmDeals",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "dealOwnerId", "order": "ASCENDING" },
-        { "fieldPath": "dealCreatedAt", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "crmDeals",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "dealOwnerId", "order": "ASCENDING" },
-        { "fieldPath": "desembolsoEnteredAt", "order": "ASCENDING" }
-      ]
     }
   ],
   "fieldOverrides": []
