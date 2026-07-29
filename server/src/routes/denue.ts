@@ -35,7 +35,10 @@ denueRouter.post('/consulta', async (req, res) => {
     // cualquier otro modo.
     ubicacion = centroYRadioDePoligonos(poligonosValidos);
   } else if (lat != null && lng != null) {
-    ubicacion = { lat, lng, radioMetros };
+    // El DENUE real de INEGI no acepta más de 5000m de radio (un radio
+    // mayor no da error, se cuelga hasta tronar por timeout) — se acota
+    // aquí para que el log ya refleje el radio real de la consulta.
+    ubicacion = { lat, lng, radioMetros: radioMetros != null ? Math.min(5000, radioMetros) : radioMetros };
   } else if (ciudad || colonia) {
     try {
       // Cualquier combinación sirve: solo C.P., solo colonia, solo ciudad, o
@@ -52,8 +55,10 @@ denueRouter.post('/consulta', async (req, res) => {
       }
       console.log(`DENUE: "${texto}" -> ${geo.direccionFormateada} (${geo.lat}, ${geo.lng})`);
       // Sin C.P./colonia (radio amplio para cubrir el municipio completo) vs.
-      // con un punto más preciso (colonia aledaña al kiosco, radio más cerrado).
-      ubicacion = { lat: geo.lat, lng: geo.lng, radioMetros: radioMetros ?? (colonia ? 2500 : 6000) };
+      // con un punto más preciso (colonia aledaña al kiosco, radio más
+      // cerrado). 5000m es el tope real que acepta el DENUE de INEGI, no
+      // solo un valor "amplio" arbitrario.
+      ubicacion = { lat: geo.lat, lng: geo.lng, radioMetros: Math.min(5000, radioMetros ?? (colonia ? 2500 : 5000)) };
     } catch (err: any) {
       if (err.message === 'GOOGLE_MAPS_NOT_CONFIGURED') {
         return res.status(501).json({ error: 'GOOGLE_MAPS_NOT_CONFIGURED', message: 'Configura GOOGLE_MAPS_API_KEY en el servidor para buscar por municipio/colonia/C.P.' });

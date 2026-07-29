@@ -277,7 +277,7 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
       const params: Parameters<typeof api.consultarDenue>[0] = zona.modo === 'gps'
         ? { giros: zona.giros, cantidad: zona.cantidad, lat: zona.lat!, lng: zona.lng!, radioMetros: zona.radio }
         : zonaResuelta
-          ? { giros: zona.giros, cantidad: zona.cantidad, lat: zonaResuelta.lat, lng: zonaResuelta.lng, radioMetros: zona.selectedColonia === zonaResuelta ? 2500 : 6000 }
+          ? { giros: zona.giros, cantidad: zona.cantidad, lat: zonaResuelta.lat, lng: zonaResuelta.lng, radioMetros: zona.selectedColonia === zonaResuelta ? 2500 : 5000 }
           : { giros: zona.giros, cantidad: zona.cantidad, ciudad: zona.ciudad, colonia: zona.colonia };
       // Las zonas dibujadas mandan sobre cualquier otro modo: si el usuario
       // dibujó una o varias, el servidor usa esos vértices para centrar y
@@ -494,8 +494,8 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
                       {geoLoading ? 'Obteniendo ubicación…' : 'Usar mi ubicación actual'}
                     </button>
                     <div style={{ flex: 1 }}>
-                      <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#3a4a41', marginBottom: 6 }}>Radio (m)</label>
-                      <input type="number" min={200} max={10000} step={100} value={activeZona.radio} onChange={(e) => patchActiveZona({ radio: Math.max(200, Math.min(10000, parseInt(e.target.value, 10) || 1500)) })} style={{ width: '100%', border: '1px solid #d9e1db', background: '#f8faf8', borderRadius: 8, padding: '11px 13px', fontSize: 14, color: '#263238' }} />
+                      <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#3a4a41', marginBottom: 6 }}>Radio (m) <span style={{ fontWeight: 400, color: '#8a978f' }}>· máx. 5,000 (límite del DENUE)</span></label>
+                      <input type="number" min={200} max={5000} step={100} value={activeZona.radio} onChange={(e) => patchActiveZona({ radio: Math.max(200, Math.min(5000, parseInt(e.target.value, 10) || 1500)) })} style={{ width: '100%', border: '1px solid #d9e1db', background: '#f8faf8', borderRadius: 8, padding: '11px 13px', fontSize: 14, color: '#263238' }} />
                     </div>
                   </div>
                   {geoError && <div style={{ fontSize: 12, color: '#c0392b' }}>{geoError}</div>}

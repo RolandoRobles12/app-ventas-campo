@@ -262,7 +262,9 @@ export function centroYRadioDePoligonos(poligonos: PuntoGeo[][]): UbicacionGps {
   // círculo más grande que eso vuelve la búsqueda al DENUE lenta o propensa
   // a timeout sin ganar precisión real (el filtro por polígono ya recorta
   // lo que sobra del círculo).
-  const radioMetros = Math.min(10000, Math.max(300, Math.round(radioVertices * 1.15)));
+  // Tope real del DENUE de INEGI: su "Buscar" por radio no acepta más de
+  // 5000m (un radio mayor no da error, se cuelga hasta tronar por timeout).
+  const radioMetros = Math.min(5000, Math.max(300, Math.round(radioVertices * 1.15)));
   return { lat, lng, radioMetros };
 }
 
@@ -294,9 +296,17 @@ export async function consultarDenue(opts: {
   // request lento/colgado ya no bloquea a los demás — antes, un giro atorado
   // a mitad de la lista dejaba la búsqueda entera esperando su timeout de 20s
   // antes de siquiera intentar los giros restantes.
+  // El DENUE real de INEGI documenta 5000m como radio máximo de búsqueda; un
+  // radio mayor no da un error limpio, sino que el request se cuelga y
+  // termina tronando por el timeout de 20s (esto es lo que reportaban como
+  // "no se pudo conectar / tiempo de espera agotado" en zonas grandes). Se
+  // acota aquí, en el único lugar que arma el request real, sin importar de
+  // dónde haya salido `radioMetros` (GPS, ciudad/colonia o el círculo que
+  // envuelve un polígono).
+  const radioBuscado = Math.min(5000, ubicacion.radioMetros || 1500);
   const porGiro = await Promise.allSettled(giros.map(async (giro) => {
     const keyword = KEYWORD_POR_GIRO[giro] || normalize(giro);
-    const alcance = `${ubicacion.lat},${ubicacion.lng}/${ubicacion.radioMetros || 1500}`;
+    const alcance = `${ubicacion.lat},${ubicacion.lng}/${radioBuscado}`;
     return { giro, raw: await buscarDenue(keyword, alcance, token) };
   }));
 
