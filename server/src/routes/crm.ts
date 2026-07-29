@@ -23,11 +23,6 @@ interface CrmDealDoc {
   source: 'hubspot' | 'local';
   lastSyncedAt: Timestamp | null;
   createdAt: Timestamp;
-  // Fecha real del deal en HubSpot (no la de sincronización): cuándo se
-  // creó (para contar "solicitudes" del día) y cuándo entró a Desembolso
-  // (para "venta" del mes) — ver GET /metas/:vendedorId/hoy.
-  dealCreatedAt?: Timestamp | null;
-  desembolsoEnteredAt?: Timestamp | null;
 }
 
 interface VendedorDoc {
@@ -118,8 +113,6 @@ export async function syncHubspotDeals(): Promise<{ created: number; updated: nu
       hubspotOwnerId: rd.hubspotOwnerId, dealOwnerLabel: rd.dealOwnerLabel,
       dealOwnerId: dealOwner?.id ?? null, serviceOwner: rd.serviceOwner,
       hubspotCompanyId: rd.hubspotCompanyId, source: 'hubspot' as const, lastSyncedAt: Timestamp.now(),
-      dealCreatedAt: rd.createdAt ? Timestamp.fromDate(new Date(rd.createdAt)) : null,
-      desembolsoEnteredAt: rd.desembolsoEnteredAt ? Timestamp.fromDate(new Date(rd.desembolsoEnteredAt)) : null,
     };
     if (!existingSnap.empty) {
       await db.collection('crmDeals').doc(existingSnap.docs[0].id).update(data);

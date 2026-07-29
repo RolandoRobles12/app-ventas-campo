@@ -1,28 +1,47 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
 import { requireAdmin, puedeActuarComoVendedor, vendedorAjeno } from '../auth.js';
+import { isHubspotConfigured, fetchProductividadVendedor } from '../integrations/hubspot.js';
 import type { VendedorDoc } from './vendedores.js';
 
 export const metasRouter = Router();
 
-interface CrmDealDoc {
-  dealOwnerId?: string | null;
-  amount?: number | null;
+const MX_TZ = 'America/Mexico_City';
+
+// Convierte un año/mes/día/hora, interpretados en `timeZone`, al instante
+// UTC real que representan. Hace falta porque "hoy" y "este mes" deben
+// calcularse en hora de México (igual que el script de referencia con
+// zoneinfo), no en la hora del servidor — Cloud Functions corre en UTC, así
+// que sin esto la medianoche del corte quedaría movida varias horas.
+function zonaAUtc(y: number, m: number, d: number, hh: number, mm: number, ss: number, timeZone: string): Date {
+  const guess = new Date(Date.UTC(y, m - 1, d, hh, mm, ss));
+  const partes = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(guess);
+  const get = (t: string) => Number(partes.find((p) => p.type === t)!.value);
+  const comoSiUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+  return new Date(guess.getTime() - (comoSiUtc - guess.getTime()));
 }
 
-function monthRange() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  return { start, end };
+// Fecha de hoy (año/mes/día) tal como se ve en `timeZone`, sin importar en
+// qué zona corra el proceso.
+function hoyEnZona(timeZone: string): { year: number; month: number; day: number } {
+  const partes = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const get = (t: string) => Number(partes.find((p) => p.type === t)!.value);
+  return { year: get('year'), month: get('month'), day: get('day') };
 }
 
-function dayRange() {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  return { start, end };
+// Rangos [inicio, fin) de "hoy" y "este mes" en hora de México — los mismos
+// que usa el script de referencia (createdate de hoy / entrada a Desembolso
+// de este mes), para consultar HubSpot en vivo.
+function rangosMexico() {
+  const { year, month, day } = hoyEnZona(MX_TZ);
+  const dayStart = zonaAUtc(year, month, day, 0, 0, 0, MX_TZ);
+  const dayEnd = zonaAUtc(year, month, day + 1, 0, 0, 0, MX_TZ);
+  const monthStart = zonaAUtc(year, month, 1, 0, 0, 0, MX_TZ);
+  const monthEnd = month === 12 ? zonaAUtc(year + 1, 1, 1, 0, 0, 0, MX_TZ) : zonaAUtc(year, month + 1, 1, 0, 0, 0, MX_TZ);
+  return { dayStart, dayEnd, monthStart, monthEnd };
 }
 
 // Días consecutivos (terminando hoy o ayer) en los que el vendedor registró
@@ -51,41 +70,41 @@ async function calcularRacha(vendedorId: string): Promise<number> {
 }
 
 // Avance real: es productividad de HubSpot, independiente de las visitas a
-// prospectos que el vendedor registra en la app. Solicitudes de hoy = deals
-// de CRM de ese vendedor CREADOS hoy en HubSpot (cada solicitud nueva es un
-// deal nuevo); colocación del mes = suma de los deals que ENTRARON a la
-// etapa "Desembolso" este mes (por la fecha real de HubSpot, no la de
-// sincronización a Firestore — ver dealCreatedAt/desembolsoEnteredAt en
-// integrations/hubspot.ts y routes/crm.ts). Ambos requieren haber
-// sincronizado el CRM (POST /crm/sync) recientemente para reflejar deals de
-// hoy. La meta (el objetivo) la define el admin una sola vez por vendedor
-// —ver PUT abajo— y vive directo en su documento, no por periodo: el
-// objetivo de "hoy" es el mismo día tras día hasta que alguien lo cambie.
+// prospectos que el vendedor registra en la app (esa es otra métrica aparte,
+// no se tocan entre sí). Solicitudes de hoy = deals creados hoy en HubSpot
+// para el owner de ese vendedor; colocación del mes = suma de los deals que
+// entraron a la etapa Desembolso este mes — ambos consultados en vivo contra
+// HubSpot (ver fetchProductividadVendedor en integrations/hubspot.ts), igual
+// que hace el script de referencia: sin depender de crmDeals ni de la
+// sincronización manual de la página de CRM Prospectos. La meta (el
+// objetivo) la define el admin una sola vez por vendedor —ver PUT abajo— y
+// vive directo en su documento, no por periodo: el objetivo de "hoy" es el
+// mismo día tras día hasta que alguien lo cambie.
 metasRouter.get('/:vendedorId/hoy', async (req, res) => {
   const vendedorId = req.params.vendedorId;
   if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
-  const { start: dayStart, end: dayEnd } = dayRange();
-  const { start: monthStart, end: monthEnd } = monthRange();
 
-  const [solicitudesHoySnap, vendedorDoc, colocacionesSnap, racha] = await Promise.all([
-    db.collection('crmDeals')
-      .where('dealOwnerId', '==', vendedorId)
-      .where('dealCreatedAt', '>=', Timestamp.fromDate(dayStart))
-      .where('dealCreatedAt', '<', Timestamp.fromDate(dayEnd))
-      .count()
-      .get(),
+  const [vendedorDoc, racha] = await Promise.all([
     db.collection('vendedores').doc(vendedorId).get(),
-    db.collection('crmDeals')
-      .where('dealOwnerId', '==', vendedorId)
-      .where('desembolsoEnteredAt', '>=', Timestamp.fromDate(monthStart))
-      .where('desembolsoEnteredAt', '<', Timestamp.fromDate(monthEnd))
-      .get(),
     calcularRacha(vendedorId),
   ]);
-
-  const solicitudesHoy = solicitudesHoySnap.data().count;
   const vendedor = vendedorDoc.data() as VendedorDoc | undefined;
-  const colocacionMes = colocacionesSnap.docs.reduce((sum, d) => sum + ((d.data() as CrmDealDoc).amount || 0), 0);
+
+  let solicitudesHoy = 0;
+  let colocacionMes = 0;
+  // Sin email de vendedor, o sin HubSpot configurado, no hay con qué
+  // resolver su owner — se queda en 0 en vez de tronar el home completo.
+  if (vendedor?.email && isHubspotConfigured()) {
+    try {
+      const productividad = await fetchProductividadVendedor(vendedor.email, rangosMexico());
+      solicitudesHoy = productividad.solicitudesHoy;
+      colocacionMes = productividad.colocacionMes.amount;
+    } catch (err: any) {
+      // Un hiccup de HubSpot no debe tumbar el home del vendedor — se loguea
+      // para diagnóstico y se muestra 0 en vez de un 500.
+      console.error(`No se pudo consultar productividad de HubSpot para vendedor ${vendedorId}:`, err?.message || err);
+    }
+  }
 
   res.json({
     solicitudesHoy: { actual: solicitudesHoy, meta: vendedor?.metaSolicitudesDia ?? 5 },

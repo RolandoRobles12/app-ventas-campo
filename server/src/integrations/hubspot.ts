@@ -69,14 +69,31 @@ function authHeaders() {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
-async function hsFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${HUBSPOT_BASE}${path}`, { ...init, headers: { ...authHeaders(), ...(init?.headers || {}) } });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`HubSpot respondió ${res.status}: ${body.slice(0, 300)}`);
+// Reintenta 429 (respeta Retry-After) y 5xx con backoff exponencial — el
+// endpoint de búsqueda (usado en vivo por fetchProductividadVendedor, en
+// cada carga del home del vendedor) tiene un límite de rate más estricto
+// que el resto del API, así que aquí sí importa no tronar ante un 429
+// ocasional bajo carga concurrente de varios vendedores a la vez.
+async function hsFetch<T>(path: string, init?: RequestInit, tries = 4): Promise<T> {
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const res = await fetch(`${HUBSPOT_BASE}${path}`, { ...init, headers: { ...authHeaders(), ...(init?.headers || {}) } });
+    if (res.status === 429 && attempt < tries - 1) {
+      const retryAfter = Number(res.headers.get('Retry-After')) || 1;
+      await new Promise((r) => setTimeout(r, retryAfter * 1000));
+      continue;
+    }
+    if (res.status >= 500 && attempt < tries - 1) {
+      await new Promise((r) => setTimeout(r, 2 ** attempt * 1000));
+      continue;
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`HubSpot respondió ${res.status}: ${body.slice(0, 300)}`);
+    }
+    if (res.status === 204) return undefined as T;
+    return (await res.json()) as T;
   }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  throw new Error('HubSpot: se agotaron los reintentos');
 }
 
 interface HubspotPipelineStage { id: string; label: string; }
@@ -210,11 +227,6 @@ export interface HubspotDealDTO {
   dealOwnerEmail: string | null;
   serviceOwner: string | null;
   hubspotCompanyId: string | null;
-  // Fecha real en que el deal se creó en HubSpot (para contar "solicitudes"
-  // del día) y fecha real en que entró a Desembolso (para "venta" del mes) —
-  // ninguna de las dos es la fecha en que se sincronizó a Firestore.
-  createdAt: string | null;
-  desembolsoEnteredAt: string | null;
 }
 
 export async function fetchHubspotDeals(): Promise<HubspotDealDTO[]> {
@@ -224,7 +236,7 @@ export async function fetchHubspotDeals(): Promise<HubspotDealDTO[]> {
   const owners = await hsFetchAllPages<HubspotOwner>('/crm/v3/owners?limit=100');
   const ownerById = new Map(owners.map((o) => [o.id, { nombre: [o.firstName, o.lastName].filter(Boolean).join(' ') || o.email, email: o.email }]));
 
-  const properties = ['dealname', 'amount', 'dealstage', 'hubspot_owner_id', SERVICE_OWNER_PROPERTY, 'createdate', DESEMBOLSO_ENTERED_PROPERTY];
+  const properties = ['dealname', 'amount', 'dealstage', 'hubspot_owner_id', SERVICE_OWNER_PROPERTY];
   // Solo deals del pipeline de "Nuevas visitas" — antes se traían deals de
   // toda la cuenta de HubSpot sin filtrar por pipeline.
   const deals = await hsSearchAllPages<HubspotDealResult>('deals', {
@@ -258,8 +270,6 @@ export async function fetchHubspotDeals(): Promise<HubspotDealDTO[]> {
       dealOwnerEmail: owner?.email || null,
       serviceOwner: d.properties[SERVICE_OWNER_PROPERTY] || null,
       hubspotCompanyId: companyId,
-      createdAt: d.properties.createdate || null,
-      desembolsoEnteredAt: d.properties[DESEMBOLSO_ENTERED_PROPERTY] || null,
     };
   });
 }
@@ -301,4 +311,79 @@ export function hubspotDealUrl(hubspotDealId: string): string | null {
   const portalId = hubspotPortalId();
   if (!portalId) return null;
   return `https://app.hubspot.com/contacts/${portalId}/deal/${hubspotDealId}`;
+}
+
+// ---------------------------------------------------------------------------
+// Productividad del vendedor (home del vendedor): "solicitudes hoy" y
+// "colocación del mes" son productividad de HubSpot, independiente de las
+// visitas a prospectos que el vendedor registra en la app — por eso se
+// consulta HubSpot en vivo aquí en vez de reusar la sincronización de
+// crmDeals que alimenta la página de CRM Prospectos (son dos cosas aparte).
+// Mismo método que el script de referencia: resolver el owner por email y
+// filtrar deals por fecha real de HubSpot (createdate / fecha de entrada a
+// Desembolso), no por cuándo se sincronizó nada a Firestore.
+// ---------------------------------------------------------------------------
+
+// El endpoint de owners soporta filtrar por email directo en la URL — un
+// solo request, sin tener que paginar/traer todos los owners como hace
+// listHubspotOwners() (usado en otros lados para armar un directorio completo).
+export async function findHubspotOwnerIdByEmail(email: string): Promise<string | null> {
+  const data = await hsFetch<{ results: HubspotOwner[] }>(`/crm/v3/owners/?email=${encodeURIComponent(email)}`);
+  return data.results[0]?.id ?? null;
+}
+
+// Cuenta deals de ese owner cuya `propiedadFecha` cae en [desde, hasta). No
+// hace falta paginar: la respuesta de /search trae `total` con el conteo
+// exacto que cumple el filtro, sin importar cuántas páginas de resultados
+// existan — se pide `limit: 1` y ni siquiera se leen los `results`.
+async function contarDealsPorFecha(propiedadFecha: string, ownerId: string, desde: Date, hasta: Date): Promise<number> {
+  const data = await hsFetch<{ total: number }>('/crm/v3/objects/deals/search', {
+    method: 'POST',
+    body: JSON.stringify({
+      filterGroups: [{ filters: [
+        { propertyName: propiedadFecha, operator: 'GTE', value: String(desde.getTime()) },
+        { propertyName: propiedadFecha, operator: 'LT', value: String(hasta.getTime()) },
+        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: ownerId },
+      ] }],
+      properties: [],
+      limit: 1,
+    }),
+  });
+  return data.total;
+}
+
+// Igual que contarDealsPorFecha, pero trayendo `amount` para sumarlo (aquí sí
+// hace falta paginar sobre los resultados reales, no solo el total).
+async function sumarDealsPorFecha(propiedadFecha: string, ownerId: string, desde: Date, hasta: Date): Promise<{ count: number; amount: number }> {
+  const deals = await hsSearchAllPages<{ properties: { amount?: string } }>('deals', {
+    filterGroups: [{ filters: [
+      { propertyName: propiedadFecha, operator: 'GTE', value: String(desde.getTime()) },
+      { propertyName: propiedadFecha, operator: 'LT', value: String(hasta.getTime()) },
+      { propertyName: 'hubspot_owner_id', operator: 'EQ', value: ownerId },
+    ] }],
+    properties: ['amount'],
+  });
+  const amount = deals.reduce((sum, d) => sum + (d.properties.amount ? Number(d.properties.amount) : 0), 0);
+  return { count: deals.length, amount };
+}
+
+export interface ProductividadHubspot {
+  solicitudesHoy: number;
+  colocacionMes: { count: number; amount: number };
+}
+
+export async function fetchProductividadVendedor(
+  email: string,
+  rangos: { dayStart: Date; dayEnd: Date; monthStart: Date; monthEnd: Date },
+): Promise<ProductividadHubspot> {
+  const ownerId = await findHubspotOwnerIdByEmail(email);
+  // Sin owner en HubSpot con ese email no hay nada que contar — no es un
+  // error, solo falta que a ese vendedor le den de alta como owner allá.
+  if (!ownerId) return { solicitudesHoy: 0, colocacionMes: { count: 0, amount: 0 } };
+
+  const [solicitudesHoy, colocacionMes] = await Promise.all([
+    contarDealsPorFecha('createdate', ownerId, rangos.dayStart, rangos.dayEnd),
+    sumarDealsPorFecha(DESEMBOLSO_ENTERED_PROPERTY, ownerId, rangos.monthStart, rangos.monthEnd),
+  ]);
+  return { solicitudesHoy, colocacionMes };
 }
