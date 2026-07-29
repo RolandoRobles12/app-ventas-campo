@@ -1,0 +1,30 @@
+rules_version = '2';
+
+// Antes, las fotos de visitas las subía el servidor (Admin SDK, sin pasar por
+// estas reglas) recibiéndolas por POST /api/visitas. Eso obligaba al binario
+// a cruzar el rewrite de Firebase Hosting hacia la función, que tiene un
+// límite fijo de 10 MB por request (no configurable) — con varias fotos de
+// celular esto se rebasaba fácil. Ahora la app del vendedor sube cada foto
+// directo desde el navegador a Storage con el SDK cliente (sin pasar por
+// Hosting ni por la función), y el servidor solo recibe las URLs resultantes.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /visitas/{vendedorId}/{archivo} {
+      // Las URLs de descarga (`getDownloadURL()`) llevan un token que ya da
+      // acceso de lectura por sí solo; esta regla solo cubre acceso directo
+      // sin ese token, y refleja el mismo público (cualquiera con el enlace)
+      // que tenían las fotos antes vía `makePublic()`.
+      allow read: if true;
+
+      // Solo cuentas del dominio autenticadas por Firebase Auth pueden
+      // escribir, y solo imágenes dentro del límite razonable para evidencia
+      // de visita. Qué vendedor puede usar qué `vendedorId` se valida aparte,
+      // en el servidor, al crear el documento de la visita.
+      allow write: if request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower().matches('.*@avivacredito[.]com$')
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}

@@ -7,7 +7,6 @@ import express from 'express';
 // servidor completo para todos los usuarios, no solo devolvía un 500.
 import 'express-async-errors';
 import cors from 'cors';
-import path from 'node:path';
 
 import { requireAuth, requireAdmin, bootstrapInitialAdmins } from './auth.js';
 import { authRouter } from './routes/auth.js';
@@ -30,7 +29,6 @@ const origins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim())
 
 app.use(cors({ origin: origins.length ? origins : true }));
 app.use(express.json());
-app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 

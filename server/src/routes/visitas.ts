@@ -1,9 +1,6 @@
 import { Router } from 'express';
-import type { Request, Response, NextFunction } from 'express';
-import multer from 'multer';
 import { db, Timestamp, FieldPath } from '../db.js';
 import { toIso, haversineMetros, chunkArray, parseDateRangeQuery, parseCsvParam, isEmptyRestriction, parseCapturadoEn } from '../firestore-helpers.js';
-import { saveUpload } from '../storage.js';
 import { requireAdmin, puedeActuarComoVendedor, vendedorAjeno } from '../auth.js';
 import { productosPorId } from './vendedores.js';
 import { resolveVendedorIds } from './_filters.js';
@@ -11,21 +8,6 @@ import { resolveVendedorIds } from './_filters.js';
 export const visitasRouter = Router();
 
 const MAX_FOTOS_POR_VISITA = 5;
-
-// La app del vendedor captura fotos con la cámara a resolución nativa (sin
-// recompresión agresiva, para no perder calidad de evidencia), así que el
-// límite por archivo debe dar margen a fotos de celulares modernos (una
-// foto en 4K puede pesar varios MB incluso en JPEG).
-const MAX_TAMANO_FOTO_BYTES = 20 * 1024 * 1024;
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_TAMANO_FOTO_BYTES },
-  fileFilter: (_req, file, cb) => {
-    if (!file.mimetype.startsWith('image/')) return cb(new Error('SOLO_IMAGENES'));
-    cb(null, true);
-  },
-});
 
 // Radio dentro del cual la ubicación GPS capturada en la visita se considera
 // que corresponde al negocio. Solo aplica a prospectos que vienen del DENUE
@@ -212,41 +194,41 @@ visitasRouter.get('/vendedor/:vendedorId', requireAdmin, async (req, res) => {
   res.json(snap.docs.map((d) => shape(d.id, d.data() as VisitaDoc)));
 });
 
-// upload.array() se envuelve a mano (en vez de pasarlo directo como
-// middleware del router) para poder responder 400 en vez de dejar que un
-// rechazo de fileFilter/límite de tamaño/cantidad caiga al manejador de
-// errores genérico de app.ts, que respondería 500.
-function mensajeErrorFotos(err: unknown): string {
-  if (err instanceof Error && err.message === 'SOLO_IMAGENES') return 'Las fotografías deben ser imágenes.';
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      const mb = Math.round(MAX_TAMANO_FOTO_BYTES / (1024 * 1024));
-      return `Cada fotografía debe pesar menos de ${mb} MB.`;
-    }
-    if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
-      return `Solo se permiten ${MAX_FOTOS_POR_VISITA} fotografías por visita.`;
-    }
+// Las fotos ya no llegan como multipart: la app del vendedor las sube directo
+// a Firebase Storage con el SDK cliente (ver apps/seller/src/uploadFotos.ts)
+// y aquí solo llegan las URLs resultantes. Esto evita el límite fijo de
+// 10 MB por request que impone el rewrite de Firebase Hosting hacia la
+// función, que aplicaba sin importar el límite configurado en el servidor.
+// Se valida que cada URL sea realmente una descarga de Storage dentro de la
+// carpeta del propio vendedor, para que nadie pueda inyectar URLs arbitrarias
+// a nombre de otro vendedor.
+function fotoUrlValida(url: string, vendedorId: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
   }
-  return 'No se pudieron procesar las fotografías. Intenta de nuevo.';
+  if (parsed.hostname !== 'firebasestorage.googleapis.com') return false;
+  const [, objectPathRaw] = parsed.pathname.split('/o/');
+  if (!objectPathRaw) return false;
+  const objectPath = decodeURIComponent(objectPathRaw);
+  return objectPath.startsWith(`visitas/${vendedorId}/`);
 }
 
-function uploadFotos(req: Request, res: Response, next: NextFunction) {
-  upload.array('fotos', MAX_FOTOS_POR_VISITA)(req, res, (err: unknown) => {
-    if (!err) return next();
-    res.status(400).json({ error: 'fotos_invalidas', message: mensajeErrorFotos(err) });
-  });
-}
-
-visitasRouter.post('/', uploadFotos, async (req, res) => {
-  const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy, capturadoEn } = req.body as Record<string, string>;
+visitasRouter.post('/', async (req, res) => {
+  const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy, capturadoEn, fotos: fotosRaw } = req.body as Record<string, string> & { fotos?: unknown };
   if (!vendedorId || !resultado) return res.status(400).json({ error: 'vendedorId y resultado son requeridos' });
   if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
-  const files = (req.files as Express.Multer.File[] | undefined) || [];
+
   // La app del vendedor solo permite capturar fotos en el momento (cámara en
   // vivo vía getUserMedia, sin selector de archivos) — se exige al menos una
   // aquí también para que nadie pueda saltarse ese requisito pegándole
   // directo a la API.
-  if (files.length === 0) return res.status(400).json({ error: 'foto_requerida', message: 'Al menos una fotografía de evidencia es requerida.' });
+  const fotosCandidatas = Array.isArray(fotosRaw) ? fotosRaw.filter((f): f is string => typeof f === 'string') : [];
+  if (fotosCandidatas.length === 0) return res.status(400).json({ error: 'foto_requerida', message: 'Al menos una fotografía de evidencia es requerida.' });
+  if (fotosCandidatas.length > MAX_FOTOS_POR_VISITA) return res.status(400).json({ error: 'fotos_invalidas', message: `Solo se permiten ${MAX_FOTOS_POR_VISITA} fotografías por visita.` });
+  if (!fotosCandidatas.every((url) => fotoUrlValida(url, vendedorId))) return res.status(400).json({ error: 'fotos_invalidas', message: 'No se pudieron procesar las fotografías. Intenta de nuevo.' });
 
   const gpsLat = parseCoord(lat, -90, 90);
   const gpsLng = parseCoord(lng, -180, 180);
@@ -268,8 +250,6 @@ visitasRouter.post('/', uploadFotos, async (req, res) => {
   } else if (prospecto && prospectoRef) {
     await prospectoRef.update({ estado: 'visitado' });
   }
-
-  const fotos = await Promise.all(files.map((f) => saveUpload(f)));
 
   // Valida la ubicación solo cuando el teléfono entregó GPS real (no la
   // coordenada de respaldo del prospecto, que trivialmente daría distancia 0)
@@ -294,7 +274,7 @@ visitasRouter.post('/', uploadFotos, async (req, res) => {
     direccion: direccion || prospecto?.direccion || '',
     resultado,
     notas: notas || null,
-    fotos,
+    fotos: fotosCandidatas,
     lat: hasGps ? gpsLat : prospecto?.lat ?? null,
     lng: hasGps ? gpsLng : prospecto?.lng ?? null,
     gpsAccuracy: hasGps ? parseCoord(gpsAccuracy, 0, 100000) : null,

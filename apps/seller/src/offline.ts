@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError, type Prospecto } from './api';
+import { subirFotos } from './uploadFotos';
 
 // Persistencia local para trabajar sin señal (la realidad del campo): las
 // visitas (con sus fotos, que son Blobs y no caben en localStorage) van a
@@ -119,14 +120,12 @@ export async function sincronizarPendientes(): Promise<void> {
   try {
     await enviarPingsPendientes();
     for (const { key, visita } of await listarVisitasPendientes()) {
-      const fd = new FormData();
-      Object.entries(visita.campos).forEach(([k, val]) => fd.append(k, val));
-      fd.append('capturadoEn', String(visita.capturadoEn));
-      visita.fotos.forEach((b, i) => {
-        fd.append('fotos', new File([b], `visita-${visita.capturadoEn}-${i}.jpg`, { type: 'image/jpeg' }));
-      });
       try {
-        await api.registrarVisita(fd);
+        // Si falla justo después de subir las fotos pero antes de guardar la
+        // visita, el próximo reintento las vuelve a subir (quedan huérfanas
+        // en Storage) — aceptable frente a perder la visita del vendedor.
+        const fotos = await subirFotos(visita.campos.vendedorId, visita.fotos);
+        await api.registrarVisita({ ...visita.campos, capturadoEn: visita.capturadoEn, fotos });
       } catch (err) {
         if (!esDescartable(err)) return;
       }

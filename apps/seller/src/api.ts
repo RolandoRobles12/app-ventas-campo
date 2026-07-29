@@ -67,8 +67,8 @@ export const api = {
   crearProspectoManual: (data: { vendedorId: string; nombre: string; direccion: string; giro?: string }) =>
     req<Prospecto>('/prospectos', { method: 'POST', body: JSON.stringify(data) }),
   metasHoy: (vendedorId: string) => req<Metas>(`/metas/${vendedorId}/hoy`),
-  registrarVisita: (formData: FormData) =>
-    req<{ id: string }>('/visitas', { method: 'POST', body: formData }),
+  registrarVisita: (data: Record<string, unknown>) =>
+    req<{ id: string }>('/visitas', { method: 'POST', body: JSON.stringify(data) }),
   registrarUbicacion: (data: { vendedorId: string; lat: number; lng: number; accuracy?: number; capturadoEn?: number }) =>
     req<{ ok: boolean }>('/ubicaciones', { method: 'POST', body: JSON.stringify(data) }),
 };

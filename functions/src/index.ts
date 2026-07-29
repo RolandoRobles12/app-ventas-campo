@@ -1,9 +1,5 @@
 import { onRequest } from 'firebase-functions/v2/https';
 
-// Cloud Functions no tiene disco persistente: las fotos de visitas deben
-// guardarse en Firebase Storage en vez de server/uploads.
-process.env.STORAGE_DRIVER ??= 'firebase';
-
 // El código de server/src se copia a ./_server antes de compilar (ver
 // scripts/copy-server-src.mjs) y se compila junto con este archivo — no es
 // un paquete npm aparte, así que no hay ninguna dependencia que Cloud Build
