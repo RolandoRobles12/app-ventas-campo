@@ -206,6 +206,11 @@ async function main() {
         productoId: productoRecords[d.producto], dealOwnerId: vendedorRecords[d.owner], source: 'local',
         hubspotDealId: null, hubspotOwnerId: null, hubspotCompanyId: null, dealOwnerLabel: null,
         lastSyncedAt: null, createdAt: Timestamp.now(),
+        // Fecha real del deal en HubSpot (aquí, de ejemplo): "hoy" para que
+        // el conteo de solicitudes del día tenga algo que mostrar en dev, y
+        // "entró a Desembolso" solo en el deal que ya está en esa etapa.
+        dealCreatedAt: Timestamp.now(),
+        desembolsoEnteredAt: d.etapa === 'Desembolso' ? Timestamp.now() : null,
       });
     }
     await batch.commit();
