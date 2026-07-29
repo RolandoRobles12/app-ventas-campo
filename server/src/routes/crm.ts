@@ -94,41 +94,51 @@ crmRouter.get('/deals', async (req, res) => {
   res.json(await Promise.all(deals.map((d) => shape(d.id, d.data, productos.get(d.data.productoId || ''), dealOwners.get(d.data.dealOwnerId || '')))));
 });
 
+// Lógica de sincronización propiamente dicha, sin nada de Express: la usa
+// tanto POST /crm/sync (botón "Sincronizar" del admin) como el cron de
+// functions/src/index.ts que la corre cada 30 min — así "solicitudes hoy"
+// y "colocación del mes" (ver GET /metas/:vendedorId/hoy) no dependen de que
+// alguien entre a la página de CRM y sincronice a mano.
+export async function syncHubspotDeals(): Promise<{ created: number; updated: number; total: number }> {
+  const remote = await fetchHubspotDeals();
+  const vendedoresSnap = await db.collection('vendedores').get();
+  const vendedores = vendedoresSnap.docs.map((d) => ({ id: d.id, ...(d.data() as VendedorDoc) }));
+  let created = 0, updated = 0;
+
+  for (const rd of remote) {
+    // Se empareja por email (no por nombre): es el mismo criterio que usa
+    // PATCH /deals/:id al escribir el dueño de vuelta a HubSpot, y evita que
+    // acentos/apodos/orden de nombre dejen el deal sin vendedor asignado.
+    const dealOwner = rd.dealOwnerEmail
+      ? vendedores.find((v) => v.email && v.email.toLowerCase() === rd.dealOwnerEmail!.toLowerCase())
+      : undefined;
+    const existingSnap = await db.collection('crmDeals').where('hubspotDealId', '==', rd.hubspotDealId).limit(1).get();
+    const data = {
+      cliente: rd.cliente, negocio: rd.negocio, etapa: rd.etapa, amount: rd.amount,
+      hubspotOwnerId: rd.hubspotOwnerId, dealOwnerLabel: rd.dealOwnerLabel,
+      dealOwnerId: dealOwner?.id ?? null, serviceOwner: rd.serviceOwner,
+      hubspotCompanyId: rd.hubspotCompanyId, source: 'hubspot' as const, lastSyncedAt: Timestamp.now(),
+      dealCreatedAt: rd.createdAt ? Timestamp.fromDate(new Date(rd.createdAt)) : null,
+      desembolsoEnteredAt: rd.desembolsoEnteredAt ? Timestamp.fromDate(new Date(rd.desembolsoEnteredAt)) : null,
+    };
+    if (!existingSnap.empty) {
+      await db.collection('crmDeals').doc(existingSnap.docs[0].id).update(data);
+      updated++;
+    } else {
+      await db.collection('crmDeals').add({ ...data, hubspotDealId: rd.hubspotDealId, createdAt: Timestamp.now() });
+      created++;
+    }
+  }
+  return { created, updated, total: remote.length };
+}
+
 crmRouter.post('/sync', async (_req, res) => {
   if (!isHubspotConfigured()) {
     return res.status(501).json({ error: 'HUBSPOT_NOT_CONFIGURED', message: 'Configura HUBSPOT_TOKEN en el servidor para sincronizar con HubSpot.' });
   }
   try {
-    const remote = await fetchHubspotDeals();
-    const vendedoresSnap = await db.collection('vendedores').get();
-    const vendedores = vendedoresSnap.docs.map((d) => ({ id: d.id, ...(d.data() as VendedorDoc) }));
-    let created = 0, updated = 0;
-
-    for (const rd of remote) {
-      // Se empareja por email (no por nombre): es el mismo criterio que usa
-      // PATCH /deals/:id al escribir el dueño de vuelta a HubSpot, y evita que
-      // acentos/apodos/orden de nombre dejen el deal sin vendedor asignado.
-      const dealOwner = rd.dealOwnerEmail
-        ? vendedores.find((v) => v.email && v.email.toLowerCase() === rd.dealOwnerEmail!.toLowerCase())
-        : undefined;
-      const existingSnap = await db.collection('crmDeals').where('hubspotDealId', '==', rd.hubspotDealId).limit(1).get();
-      const data = {
-        cliente: rd.cliente, negocio: rd.negocio, etapa: rd.etapa, amount: rd.amount,
-        hubspotOwnerId: rd.hubspotOwnerId, dealOwnerLabel: rd.dealOwnerLabel,
-        dealOwnerId: dealOwner?.id ?? null, serviceOwner: rd.serviceOwner,
-        hubspotCompanyId: rd.hubspotCompanyId, source: 'hubspot' as const, lastSyncedAt: Timestamp.now(),
-        dealCreatedAt: rd.createdAt ? Timestamp.fromDate(new Date(rd.createdAt)) : null,
-        desembolsoEnteredAt: rd.desembolsoEnteredAt ? Timestamp.fromDate(new Date(rd.desembolsoEnteredAt)) : null,
-      };
-      if (!existingSnap.empty) {
-        await db.collection('crmDeals').doc(existingSnap.docs[0].id).update(data);
-        updated++;
-      } else {
-        await db.collection('crmDeals').add({ ...data, hubspotDealId: rd.hubspotDealId, createdAt: Timestamp.now() });
-        created++;
-      }
-    }
-    res.json({ ok: true, created, updated, total: remote.length });
+    const result = await syncHubspotDeals();
+    res.json({ ok: true, ...result });
   } catch (err: any) {
     res.status(502).json({ error: 'HUBSPOT_SYNC_FAILED', message: err?.message || 'Error sincronizando con HubSpot' });
   }
