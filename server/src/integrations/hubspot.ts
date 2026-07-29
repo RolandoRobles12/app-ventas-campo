@@ -48,6 +48,13 @@ const FUNNEL_STAGE_IDS: Record<string, string> = {
   rechazado: '1341410959',
 };
 
+// Propiedad de sistema que HubSpot mantiene solo: la fecha en que el deal
+// entró a la etapa de Desembolso. Es la única forma confiable de saber
+// CUÁNDO se desembolsó, a diferencia de la etapa actual del deal (que solo
+// dice DÓNDE está ahora) o de la fecha en que se sincronizó a Firestore (que
+// depende de cuándo alguien apretó "Sincronizar", no de la operación real).
+const DESEMBOLSO_ENTERED_PROPERTY = `hs_v2_date_entered_${FUNNEL_STAGE_IDS.desembolso}`;
+
 export function isHubspotConfigured(): boolean {
   return !!process.env.HUBSPOT_TOKEN;
 }
@@ -203,6 +210,11 @@ export interface HubspotDealDTO {
   dealOwnerEmail: string | null;
   serviceOwner: string | null;
   hubspotCompanyId: string | null;
+  // Fecha real en que el deal se creó en HubSpot (para contar "solicitudes"
+  // del día) y fecha real en que entró a Desembolso (para "venta" del mes) —
+  // ninguna de las dos es la fecha en que se sincronizó a Firestore.
+  createdAt: string | null;
+  desembolsoEnteredAt: string | null;
 }
 
 export async function fetchHubspotDeals(): Promise<HubspotDealDTO[]> {
@@ -212,7 +224,7 @@ export async function fetchHubspotDeals(): Promise<HubspotDealDTO[]> {
   const owners = await hsFetchAllPages<HubspotOwner>('/crm/v3/owners?limit=100');
   const ownerById = new Map(owners.map((o) => [o.id, { nombre: [o.firstName, o.lastName].filter(Boolean).join(' ') || o.email, email: o.email }]));
 
-  const properties = ['dealname', 'amount', 'dealstage', 'hubspot_owner_id', SERVICE_OWNER_PROPERTY];
+  const properties = ['dealname', 'amount', 'dealstage', 'hubspot_owner_id', SERVICE_OWNER_PROPERTY, 'createdate', DESEMBOLSO_ENTERED_PROPERTY];
   // Solo deals del pipeline de "Nuevas visitas" — antes se traían deals de
   // toda la cuenta de HubSpot sin filtrar por pipeline.
   const deals = await hsSearchAllPages<HubspotDealResult>('deals', {
@@ -246,6 +258,8 @@ export async function fetchHubspotDeals(): Promise<HubspotDealDTO[]> {
       dealOwnerEmail: owner?.email || null,
       serviceOwner: d.properties[SERVICE_OWNER_PROPERTY] || null,
       hubspotCompanyId: companyId,
+      createdAt: d.properties.createdate || null,
+      desembolsoEnteredAt: d.properties[DESEMBOLSO_ENTERED_PROPERTY] || null,
     };
   });
 }

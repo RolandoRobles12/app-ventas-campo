@@ -7,9 +7,7 @@ export const metasRouter = Router();
 
 interface CrmDealDoc {
   dealOwnerId?: string | null;
-  etapa: string;
   amount?: number | null;
-  createdAt: Timestamp;
 }
 
 function monthRange() {
@@ -52,12 +50,17 @@ async function calcularRacha(vendedorId: string): Promise<number> {
   return racha;
 }
 
-// Avance real: solicitudes de hoy se cuentan de las visitas capturadas por el
-// vendedor con resultado "Se realizó solicitud"; colocación del mes se suma de
-// los deals de CRM del vendedor que llegaron a la etapa "Desembolso" este mes.
-// La meta (el objetivo) la define el admin una sola vez por vendedor —ver PUT
-// abajo— y vive directo en su documento, no por periodo: el objetivo de "hoy"
-// es el mismo día tras día hasta que alguien lo cambie.
+// Avance real: es productividad de HubSpot, independiente de las visitas a
+// prospectos que el vendedor registra en la app. Solicitudes de hoy = deals
+// de CRM de ese vendedor CREADOS hoy en HubSpot (cada solicitud nueva es un
+// deal nuevo); colocación del mes = suma de los deals que ENTRARON a la
+// etapa "Desembolso" este mes (por la fecha real de HubSpot, no la de
+// sincronización a Firestore — ver dealCreatedAt/desembolsoEnteredAt en
+// integrations/hubspot.ts y routes/crm.ts). Ambos requieren haber
+// sincronizado el CRM (POST /crm/sync) recientemente para reflejar deals de
+// hoy. La meta (el objetivo) la define el admin una sola vez por vendedor
+// —ver PUT abajo— y vive directo en su documento, no por periodo: el
+// objetivo de "hoy" es el mismo día tras día hasta que alguien lo cambie.
 metasRouter.get('/:vendedorId/hoy', async (req, res) => {
   const vendedorId = req.params.vendedorId;
   if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
@@ -65,19 +68,17 @@ metasRouter.get('/:vendedorId/hoy', async (req, res) => {
   const { start: monthStart, end: monthEnd } = monthRange();
 
   const [solicitudesHoySnap, vendedorDoc, colocacionesSnap, racha] = await Promise.all([
-    db.collection('visitas')
-      .where('vendedorId', '==', vendedorId)
-      .where('resultado', '==', 'Se realizó solicitud')
-      .where('createdAt', '>=', Timestamp.fromDate(dayStart))
-      .where('createdAt', '<', Timestamp.fromDate(dayEnd))
+    db.collection('crmDeals')
+      .where('dealOwnerId', '==', vendedorId)
+      .where('dealCreatedAt', '>=', Timestamp.fromDate(dayStart))
+      .where('dealCreatedAt', '<', Timestamp.fromDate(dayEnd))
       .count()
       .get(),
     db.collection('vendedores').doc(vendedorId).get(),
     db.collection('crmDeals')
       .where('dealOwnerId', '==', vendedorId)
-      .where('etapa', '==', 'Desembolso')
-      .where('createdAt', '>=', Timestamp.fromDate(monthStart))
-      .where('createdAt', '<', Timestamp.fromDate(monthEnd))
+      .where('desembolsoEnteredAt', '>=', Timestamp.fromDate(monthStart))
+      .where('desembolsoEnteredAt', '<', Timestamp.fromDate(monthEnd))
       .get(),
     calcularRacha(vendedorId),
   ]);
