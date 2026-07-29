@@ -165,8 +165,18 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
 
   const activeWeek = weeks[activeWeekIdx] ?? weeks[0];
   const activeZona = activeWeek.zona;
-  const patchActiveZona = (patch: Partial<ZonaState>) => {
-    setWeeks((prev) => prev.map((w, i) => (i === activeWeekIdx ? { ...w, zona: { ...w.zona, ...patch } } : w)));
+  // Acepta un objeto o una función (zona actual -> parche): la función lee
+  // la zona vigente DENTRO del propio setWeeks (no la cerradura de
+  // `activeZona` del render en que se creó el handler), así que agregar o
+  // quitar una zona nunca pisa un punto que el mapa acabe de agregar un
+  // instante antes por otro evento (clic en el mapa) que todavía no se
+  // había reflejado en el render donde vive `activeZona`.
+  const patchActiveZona = (patch: Partial<ZonaState> | ((z: ZonaState) => Partial<ZonaState>)) => {
+    setWeeks((prev) => prev.map((w, i) => {
+      if (i !== activeWeekIdx) return w;
+      const p = typeof patch === 'function' ? patch(w.zona) : patch;
+      return { ...w, zona: { ...w.zona, ...p } };
+    }));
   };
 
   const resetPlan = (giros: string[], ciudad: string, colonia: string, poligonos: ZonaPunto[][]) => {
@@ -197,17 +207,16 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
   };
 
   const agregarZona = () => {
-    patchActiveZona({ poligonos: [...activeZona.poligonos, []], activePoligono: activeZona.poligonos.length });
+    patchActiveZona((z) => ({ poligonos: [...z.poligonos, []], activePoligono: z.poligonos.length }));
   };
 
   const quitarZona = (idx: number) => {
-    if (activeZona.poligonos.length <= 1) {
-      patchActiveZona({ poligonos: [[]], activePoligono: 0 });
-      return;
-    }
-    const nuevos = activeZona.poligonos.filter((_, i) => i !== idx);
-    const activo = Math.min(activeZona.activePoligono > idx ? activeZona.activePoligono - 1 : activeZona.activePoligono, nuevos.length - 1);
-    patchActiveZona({ poligonos: nuevos, activePoligono: activo });
+    patchActiveZona((z) => {
+      if (z.poligonos.length <= 1) return { poligonos: [[]], activePoligono: 0 };
+      const nuevos = z.poligonos.filter((_, i) => i !== idx);
+      const activo = Math.min(z.activePoligono > idx ? z.activePoligono - 1 : z.activePoligono, nuevos.length - 1);
+      return { poligonos: nuevos, activePoligono: activo };
+    });
   };
 
   const onPeriodoChange = (p: Periodo) => {
@@ -540,7 +549,7 @@ export function RouteWizard({ vendedorId, onClose, onSaved }: { vendedorId: stri
                     />
                     {activeZona.poligonos[activeZona.activePoligono]?.length > 0 && (
                       <button
-                        onClick={() => patchActiveZona({ poligonos: activeZona.poligonos.map((z, i) => (i === activeZona.activePoligono ? [] : z)) })}
+                        onClick={() => patchActiveZona((z) => ({ poligonos: z.poligonos.map((p, i) => (i === z.activePoligono ? [] : p)) }))}
                         style={{ position: 'absolute', right: 12, top: 12, background: '#fff', border: 'none', borderRadius: 7, padding: '6px 10px', fontSize: 12, fontWeight: 600, color: '#c0392b', boxShadow: '0 1px 4px rgba(0,0,0,.2)' }}
                       >
                         Limpiar zona activa

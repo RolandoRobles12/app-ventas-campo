@@ -26,7 +26,7 @@ export function MarkerPickerMap({
     loadGoogleMaps().then((g) => {
       if (cancelled || !containerRef.current || mapRef.current) return;
       const center = lat != null && lng != null ? { lat, lng } : DEFAULT_CENTER;
-      const map = new g.maps.Map(containerRef.current, { center, zoom: lat != null ? 15 : 12, streetViewControl: false, mapTypeControl: false });
+      const map = new g.maps.Map(containerRef.current, { center, zoom: lat != null ? 15 : 12, streetViewControl: false, mapTypeControl: false, fullscreenControl: false });
       mapRef.current = map;
 
       const setPosition = (p: LatLng) => {
@@ -182,7 +182,7 @@ export function PolygonDrawMap({
     loadGoogleMaps().then((g) => {
       if (cancelled || !containerRef.current || mapRef.current) return;
       const center = zonesRef.current.flat()[0] || DEFAULT_CENTER;
-      const map = new g.maps.Map(containerRef.current, { center, zoom: 13, streetViewControl: false, mapTypeControl: false });
+      const map = new g.maps.Map(containerRef.current, { center, zoom: 13, streetViewControl: false, mapTypeControl: false, fullscreenControl: false });
       mapRef.current = map;
 
       map.addListener('click', (e: google.maps.MapMouseEvent) => {
