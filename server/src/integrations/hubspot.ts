@@ -55,8 +55,19 @@ const FUNNEL_STAGE_IDS: Record<string, string> = {
 // depende de cuándo alguien apretó "Sincronizar", no de la operación real).
 const DESEMBOLSO_ENTERED_PROPERTY = `hs_v2_date_entered_${FUNNEL_STAGE_IDS.desembolso}`;
 
+// Corte temporal (25-ago-2026): el cron de functions/src/index.ts (cada 30
+// min, escritura incondicional por deal) y la consulta en vivo de
+// GET /metas/:vendedorId/hoy (en cada carga del home del vendedor) estaban
+// generando el grueso del gasto de Firestore Entity Writes y Cloud Run del
+// proyecto. Todos los puntos de entrada a HubSpot (cron, POST /crm/sync,
+// GET /crm/pipelines, GET /crm/owners, PATCH /crm/deals/:id y
+// fetchProductividadVendedor) ya pasan por isHubspotConfigured(), así que
+// esta única bandera los apaga a todos sin tocar HUBSPOT_TOKEN.
+// Volver a `true` para reactivar.
+const HUBSPOT_TEMP_DISABLED = true;
+
 export function isHubspotConfigured(): boolean {
-  return !!process.env.HUBSPOT_TOKEN;
+  return !HUBSPOT_TEMP_DISABLED && !!process.env.HUBSPOT_TOKEN;
 }
 
 export function hubspotPortalId(): string | undefined {
