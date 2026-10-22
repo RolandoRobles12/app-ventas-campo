@@ -48,9 +48,7 @@ export function FilterBar({
       />
       <MultiSelectDropdown
         label="Vendedor"
-        options={[...vendedoresFiltrados]
-          .sort((a, b) => Number(a.estado === 'Baja') - Number(b.estado === 'Baja'))
-          .map((v) => ({ value: v.id, label: v.estado === 'Baja' ? `${v.nombre} (baja)` : v.nombre }))}
+        options={vendedoresFiltrados.filter((v) => v.estado !== 'Baja').map((v) => ({ value: v.id, label: v.nombre }))}
         selected={fVendedores}
         onChange={setFVendedores}
         placeholder="Todos los vendedores"

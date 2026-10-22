@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type EstadoRuta, type MetricasResumen } from '../api';
 import { useFilters } from '../filters';
-import { RANGO_LABELS, etiquetaDia, haceCuanto, sumarDias, toISODate } from '../lib/dateRanges';
+import { RANGO_LABELS, etiquetaDia, haceCuanto } from '../lib/dateRanges';
 import { FilterBar, PageHeader } from '../components/FilterBar';
 import { Avatar, Card, Medidor, StatTile, ThOrden } from '../components/ui';
 import { BarrasHorizontales, Columnas } from '../components/Graficas';
@@ -16,6 +16,9 @@ const ETIQUETA_RESULTADO: Record<string, string> = {
   'No es un negocio válido o existente': 'Cerrado o no existe',
 };
 
+const AYUDA_EN_NEGOCIO = 'Al guardar una visita, la tablet manda su ubicación GPS. Si estaba a 50 m o menos del negocio, la visita cuenta como hecha en el negocio; si estaba más lejos, probablemente se registró desde otro lugar.\n\nSolo se puede comprobar en negocios de la ruta (vienen del DENUE con su ubicación exacta) y cuando la tablet tenía GPS. Los negocios nuevos que registra el vendedor no tienen contra qué compararse y no cuentan.';
+const AYUDA_CUMPLIMIENTO = 'De las paradas que la ruta planeó para el periodo, cuántas ya se visitaron. Solo cuentan días ya terminados: lo de hoy se suma mañana.';
+
 type Col = 'nombre' | 'visitas' | 'diasActivos' | 'promedioDia' | 'cumplimiento' | 'ubicacionValida' | 'ultimaVisita';
 
 export function Resumen() {
@@ -26,13 +29,11 @@ export function Resumen() {
   const [orden, setOrden] = useState<{ k: Col; desc: boolean }>({ k: 'visitas', desc: true });
 
   useEffect(() => {
+    // Un rango personalizado a medio elegir no se consulta todavía.
+    if (fRango === 'personalizado' && (!fDesde || !fHasta)) return;
     setCargando(true);
-    // "Todo" no tiene sentido para métricas de periodo: se toman los últimos
-    // 90 días (el máximo que acepta el servidor).
-    const hoy = toISODate(new Date());
-    const desde = fRango === 'todo' ? sumarDias(hoy, -89) : fDesde;
-    const hasta = fRango === 'todo' ? hoy : fHasta;
-    api.metricas({ productoIds: fProductos, vendedorIds: fVendedores, desde, hasta })
+    // "Todo" = desde la primera visita registrada (el servidor acota a un año).
+    api.metricas({ productoIds: fProductos, vendedorIds: fVendedores, desde: fDesde, hasta: fHasta, todo: fRango === 'todo' })
       .then(setData).catch(() => {}).finally(() => setCargando(false));
     api.rutasEstado({ productoIds: fProductos, vendedorIds: fVendedores }).then((r) => setRutas(r.items)).catch(() => {});
   }, [fProductos, fVendedores, fRango, fDesde, fHasta]);
@@ -65,7 +66,7 @@ export function Resumen() {
     };
   }, [rutas, vendedores, data]);
 
-  const periodo = fRango === 'todo' ? 'Últimos 90 días' : RANGO_LABELS[fRango];
+  const periodo = fRango === 'todo' ? 'Todo el historial' : RANGO_LABELS[fRango];
   const hayAlertas = Object.values(alertas).some((a) => a.length);
 
   return (
@@ -73,7 +74,7 @@ export function Resumen() {
       <PageHeader
         icon={<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#157347" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18" /><rect x="7" y="10" width="3" height="8" /><rect x="12" y="6" width="3" height="12" /><rect x="17" y="13" width="3" height="5" /></svg>}
         title="Resumen"
-        subtitle={data ? `${periodo} · ${etiquetaDia(data.desde, false)} al ${etiquetaDia(data.hasta, false)}` : 'Cómo va la operación de campo'}
+        subtitle={data ? `${periodo} · del ${etiquetaDia(data.desde, false)} al ${etiquetaDia(data.hasta, false)} · cámbialo en el filtro de fechas (o elige "Personalizado")` : 'Cómo va la operación de campo'}
       />
       <FilterBar />
 
@@ -87,17 +88,17 @@ export function Resumen() {
           <StatTile
             label="Cumplimiento de ruta" value={t?.cumplimiento != null ? `${t.cumplimiento}%` : '—'}
             sub={t ? (t.planeados ? `${t.cumplidos.toLocaleString('es-MX')} de ${t.planeados.toLocaleString('es-MX')} paradas planeadas` : 'sin paradas planeadas en el periodo') : undefined}
-            ayuda="Paradas planeadas para días ya cerrados del periodo que ya se visitaron (lo de hoy no cuenta hasta mañana)."
+            ayuda={AYUDA_CUMPLIMIENTO}
           />
           <StatTile
             label="Visitas por vendedor al día" value={t ? t.promedioDia.toLocaleString('es-MX') : '—'}
             sub="promedio en los días que trabajó"
           />
           <StatTile
-            label="Visitas verificadas" value={t?.ubicacionValida != null ? `${t.ubicacionValida}%` : '—'}
-            sub={t?.validables ? `GPS a ≤50 m del negocio · ${t.validables.toLocaleString('es-MX')} verificables` : 'sin visitas verificables'}
+            label="Visitas hechas en el negocio" value={t?.ubicacionValida != null ? `${t.ubicacionValida}%` : '—'}
+            sub={t?.validables ? `${t.validas.toLocaleString('es-MX')} de ${t.validables.toLocaleString('es-MX')} visitas comprobables` : 'ninguna visita se pudo comprobar'}
             tono={t?.ubicacionValida == null ? 'neutro' : t.ubicacionValida >= 80 ? 'bien' : 'mal'}
-            ayuda="Solo aplica a negocios del DENUE, que tienen ubicación de referencia."
+            ayuda={AYUDA_EN_NEGOCIO}
           />
           <StatTile
             label="Vendedores con visitas" value={t ? <>{t.vendedoresConVisitas}<span style={{ fontSize: 18, color: '#8a978f' }}> / {t.vendedoresActivos}</span></> : '—'}
@@ -121,19 +122,19 @@ export function Resumen() {
               <Alerta titulo="Su ruta se acaba en ≤2 días" nombres={alertas.porVencer} link="/rutas?filtro=por_vencer" accion="Renovar rutas" />
               <Alerta titulo="Con 5+ paradas atrasadas" nombres={alertas.atrasadas} link="/rutas" accion="Ver rutas" />
               <Alerta titulo="Sin visitas en el periodo" nombres={alertas.sinVisitas} link="/en-vivo" accion="Ver en vivo" />
-              <Alerta titulo="Menos de 50% de visitas verificadas" nombres={alertas.noVerificadas} link="/visitas" accion="Revisar visitas" />
+              <Alerta titulo="Menos de la mitad de sus visitas en el negocio" nombres={alertas.noVerificadas} link="/visitas" accion="Revisar visitas" />
             </div>
           </Card>
         )}
 
-        <Card titulo="Desempeño por vendedor" subtitulo="Haz clic en un encabezado para ordenar" style={{ marginTop: 14 }} padding="18px 0 6px">
+        <Card titulo="Desempeño por vendedor" subtitulo="Haz clic en un encabezado para ordenar" style={{ marginTop: 14 }} padding="18px 0 6px" paddingEncabezado="0 20px">
           <div style={{ display: 'grid', gridTemplateColumns: GRID, padding: '0 20px 10px', fontSize: 12, fontWeight: 600, color: '#6f7d75', borderBottom: '1px solid #eef2ee', gap: 10 }}>
             <ThOrden k="nombre" orden={orden} setOrden={setOrden}>Vendedor</ThOrden>
             <ThOrden k="visitas" orden={orden} setOrden={setOrden} alinear="right">Visitas</ThOrden>
             <ThOrden k="diasActivos" orden={orden} setOrden={setOrden} alinear="right">Días activos</ThOrden>
             <ThOrden k="promedioDia" orden={orden} setOrden={setOrden} alinear="right">Prom./día</ThOrden>
             <ThOrden k="cumplimiento" orden={orden} setOrden={setOrden}>Cumplimiento de ruta</ThOrden>
-            <ThOrden k="ubicacionValida" orden={orden} setOrden={setOrden}>Verificadas</ThOrden>
+            <ThOrden k="ubicacionValida" orden={orden} setOrden={setOrden}>En el negocio</ThOrden>
             <ThOrden k="ultimaVisita" orden={orden} setOrden={setOrden}>Última visita</ThOrden>
           </div>
           {filas.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: '#9aa39c', fontSize: 13 }}>{data ? 'No hay vendedores en este filtro.' : 'Cargando…'}</div>}
@@ -142,7 +143,7 @@ export function Resumen() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                 <Avatar color={f.color} iniciales={f.iniciales} size={32} />
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, color: '#263238', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.nombre}{f.estado === 'Baja' && <span style={{ color: '#a8322a', fontWeight: 500 }}> · baja</span>}</div>
+                  <div style={{ fontWeight: 600, color: '#263238', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.nombre}</div>
                   <span style={prodBadgeStyle(f.producto)}>{f.producto}</span>
                 </div>
               </div>

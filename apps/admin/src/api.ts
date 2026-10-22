@@ -72,7 +72,7 @@ export interface MetricasResumen {
   totales: {
     visitas: number; visitasPrev: number; cambioPct: number | null;
     planeados: number; cumplidos: number; cumplimiento: number | null;
-    promedioDia: number; ubicacionValida: number | null; validables: number;
+    promedioDia: number; ubicacionValida: number | null; validables: number; validas: number;
     negociosNuevos: number; vendedoresActivos: number; vendedoresConVisitas: number;
   };
   serie: { fecha: string; visitas: number }[];
@@ -166,12 +166,10 @@ export const api = {
     req<{ creados: number; eliminados: number; desde: string | null; hasta: string | null }>(`/rutas/${vendedorId}/publicar`, post(data)),
   renovarRuta: (vendedorId: string) =>
     req<{ creados: number; desde: string | null; hasta: string | null; necesarios: number; encontrados: number }>(`/rutas/${vendedorId}/renovar`, post()),
-  reasignarPendientes: (vendedorId: string, aVendedorId: string) =>
-    req<{ movidos: number }>(`/rutas/${vendedorId}/reasignar`, post({ aVendedorId })),
 
   prospectos: (vendedorId: string) => req<Prospecto[]>(`/prospectos/vendedor/${vendedorId}`),
 
-  metricas: (f: Filtro) => req<MetricasResumen>(`/metricas/resumen${qs({ ...f })}`),
+  metricas: (f: Filtro & { todo?: boolean }) => req<MetricasResumen>(`/metricas/resumen${qs({ ...f, todo: f.todo ? '1' : undefined })}`),
   enVivo: (f: { productoIds?: string[]; vendedorIds?: string[] }) => req<{ hoy: string; items: EnVivoItem[] }>(`/seguimiento${qs(f)}`),
   mapaCalor: (f: Filtro) => req<MapaCalorResponse>(`/mapa/calor${qs({ ...f })}`),
   recorridos: (f: Filtro) => req<RecorridoVendedor[]>(`/ubicaciones/recorrido${qs({ ...f })}`),

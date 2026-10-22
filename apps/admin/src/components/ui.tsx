@@ -1,14 +1,17 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 
 // Piezas visuales que repiten todas las pantallas del admin.
 
-export function Card({ titulo, subtitulo, accion, children, style, padding = '18px 20px' }: {
-  titulo?: ReactNode; subtitulo?: ReactNode; accion?: ReactNode; children: ReactNode; style?: CSSProperties; padding?: string | number;
+// `paddingEncabezado`: para tarjetas cuyo cuerpo va de orilla a orilla
+// (tablas con padding 0 a los lados), el título conserva su propio margen.
+export function Card({ titulo, subtitulo, accion, children, style, padding = '18px 20px', paddingEncabezado }: {
+  titulo?: ReactNode; subtitulo?: ReactNode; accion?: ReactNode; children: ReactNode; style?: CSSProperties;
+  padding?: string | number; paddingEncabezado?: string;
 }) {
   return (
     <section style={{ background: '#fff', border: '1px solid #e3eae5', borderRadius: 12, padding, ...style }}>
       {(titulo || accion) && (
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14, padding: paddingEncabezado }}>
           <div>
             {titulo && <h2 style={{ margin: 0, fontSize: 15.5, fontWeight: 600, color: '#263238' }}>{titulo}</h2>}
             {subtitulo && <div style={{ fontSize: 12.5, color: '#8a978f', marginTop: 3 }}>{subtitulo}</div>}
@@ -21,14 +24,37 @@ export function Card({ titulo, subtitulo, accion, children, style, padding = '18
   );
 }
 
+// Ícono ⓘ que muestra una explicación al pasar el cursor o al hacer clic.
+export function Ayuda({ texto }: { texto: string }) {
+  const [abierta, setAbierta] = useState(false);
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex' }} onMouseEnter={() => setAbierta(true)} onMouseLeave={() => setAbierta(false)}>
+      <button
+        type="button" aria-label="¿Qué significa?" onClick={() => setAbierta((x) => !x)}
+        style={{ width: 17, height: 17, borderRadius: '50%', border: '1.5px solid #9aa39c', background: '#fff', color: '#6f7d75', fontSize: 11, fontWeight: 700, lineHeight: 1, padding: 0, cursor: 'help', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+      >i</button>
+      {abierta && (
+        <span style={{
+          position: 'absolute', top: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)', zIndex: 50, width: 300,
+          background: '#1f2a24', color: '#eef3ef', borderRadius: 10, padding: '11px 13px', fontSize: 12.5, fontWeight: 400, lineHeight: 1.5,
+          whiteSpace: 'pre-line', boxShadow: '0 8px 24px rgba(0,0,0,.22)', textAlign: 'left',
+        }}>{texto}</span>
+      )}
+    </span>
+  );
+}
+
 // Indicador de una sola cifra: etiqueta, valor y una línea de contexto.
 export function StatTile({ label, value, sub, tono = 'neutro', ayuda }: {
   label: string; value: ReactNode; sub?: ReactNode; tono?: 'bien' | 'mal' | 'neutro'; ayuda?: string;
 }) {
   const color = tono === 'bien' ? '#1c7a4f' : tono === 'mal' ? '#b23a2b' : '#6f7d75';
   return (
-    <div style={{ background: '#fff', border: '1px solid #e3eae5', borderRadius: 12, padding: '16px 18px' }} title={ayuda}>
-      <div style={{ fontSize: 13, color: '#5a665f', fontWeight: 500 }}>{label}</div>
+    <div style={{ background: '#fff', border: '1px solid #e3eae5', borderRadius: 12, padding: '16px 18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#5a665f', fontWeight: 500 }}>
+        {label}
+        {ayuda && <Ayuda texto={ayuda} />}
+      </div>
       <div style={{ fontSize: 32, fontWeight: 600, color: '#1f2a24', marginTop: 6, lineHeight: 1.1 }}>{value}</div>
       {sub && <div style={{ fontSize: 12.5, fontWeight: 500, color, marginTop: 6 }}>{sub}</div>}
     </div>

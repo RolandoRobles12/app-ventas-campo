@@ -15,7 +15,7 @@ const GIROS = ['Abarrotes', 'Ferretería', 'Papelería', 'Alimentos', 'Belleza',
 // servidor es quien lo hace cumplir; este solo es para la interfaz).
 const MAX_FOTOS = 5;
 // Mismo radio que RADIO_UBICACION_VALIDA_METROS del servidor: dentro de él,
-// la visita queda "verificada" en el admin.
+// la visita cuenta en el admin como "hecha en el negocio".
 const RADIO_VERIFICADA_M = 50;
 const REAGENDA = 'Se reagenda visita';
 const NOTAS_RAPIDAS = ['No estaba el dueño', 'Pidió que regrese', 'Ya tiene crédito', 'Lo va a pensar', 'Negocio cerrado hoy'];
@@ -370,7 +370,7 @@ function Etiqueta({ children, falta = false, aviso }: { children: React.ReactNod
 }
 
 // Dónde está el vendedor respecto al negocio: dentro de 50 m la visita
-// queda verificada en el admin; más lejos se le avisa (no se le bloquea).
+// cuenta como hecha en el negocio; más lejos se le avisa (no se le bloquea).
 function Ubicacion({ gps, distancia }: { gps: GpsState; distancia: number | null }) {
   let fondo = '#eef5f0', color = '#356048', texto: string;
   if (gps.status === 'buscando') {
@@ -380,9 +380,9 @@ function Ubicacion({ gps, distancia }: { gps: GpsState; distancia: number | null
   } else if (distancia == null) {
     texto = `Ubicación capturada · precisión ±${gps.fix.accuracy} m`;
   } else if (distancia <= RADIO_VERIFICADA_M) {
-    fondo = '#dcf1e5'; color = '#15703f'; texto = `Estás en el negocio · visita verificada (${textoDistancia(distancia)})`;
+    fondo = '#dcf1e5'; color = '#15703f'; texto = `Estás en el negocio (a ${textoDistancia(distancia)}) · la visita cuenta como hecha aquí`;
   } else {
-    fondo = '#fdecdb'; color = '#8a4b0f'; texto = `Estás a ${textoDistancia(distancia)} del negocio · acércate para que la visita quede verificada`;
+    fondo = '#fdecdb'; color = '#8a4b0f'; texto = `Estás a ${textoDistancia(distancia)} del negocio · acércate a menos de 50 m para que cuente como hecha en el negocio`;
   }
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: fondo, color, borderRadius: 12, padding: '11px 13px', marginTop: 14, fontSize: 14, fontWeight: 700, lineHeight: 1.35 }}>

@@ -135,10 +135,11 @@ Cómo se refleja aquí (`server/src/equipo.ts`):
   actualizan nombre, producto, puesto, zona, tienda y hub manager.
 - Un vendedor cuyo colaborador ya no está activo (baja, fecha de baja
   cumplida, o ya no aparece) o que se cambió a un puesto que no es de campo
-  queda con `estado: 'Baja'`: ya no entra a la app y deja de aparecer en
-  Rutas/En vivo. No se borra nada; sus negocios pendientes se pueden pasar a
-  otro vendedor desde **Equipo → Bajas → Reasignar**. Si vuelve a estar
-  activo, se reactiva solo.
+  queda con `estado: 'Baja'`: ya no entra a la app y deja de aparecer en el
+  admin (Equipo, Rutas, En vivo, filtros). Las bajas no se gestionan aquí: se
+  gestionan en aviva-recruiting. No se borra nada (sus visitas siguen en el
+  historial) y sus pendientes dejan de bloquear esos negocios para el
+  planeador. Si vuelve a estar activo, se reactiva solo.
 - Una "Baja programada" sigue activa hasta su fecha. Un puesto vacío en la
   hoja no basta para dar de baja a nadie. Un vendedor sin colaborador en la
   base (alta manual o de prueba) no se toca.
@@ -177,18 +178,19 @@ Configuración (en `server/.env` y `functions/.env`):
 - **Solo visitas y rutas.** Se quitaron las metas de solicitudes y colocación (venían de HubSpot); el avance del día se mide en visitas contra las paradas que el admin le planeó para hoy.
 - **Tres pestañas**: *Mi ruta* (pantalla principal), *Mapa* e *Historial*. Al registrar una visita la barra de abajo se oculta: es una tarea de pantalla completa.
 - **Mi ruta**: avance del día (visitas de hoy contra la meta, racha de días seguidos), la **siguiente parada** (la más cercana según su GPS, con "Cómo llegar" y "Registrar visita" a un toque), el resto de las paradas de hoy ordenadas por cercanía (las atrasadas marcadas), las visitadas hoy y los próximos días plegados por si termina antes. En una tablet acostada se reparte en dos columnas.
-- **Registrar visita** en una sola pantalla con botón fijo abajo: resultado con botones grandes y texto corto ("Hizo solicitud", "Volver otro día"…; se guarda el mismo valor de siempre), foto obligatoria con la cámara en vivo, notas con frases rápidas. Avisa si el vendedor está a más de 50 m del negocio (la visita no quedaría "verificada" en el admin). "Volver otro día" pide la fecha y regresa el negocio a su ruta ese día en vez de cerrarlo.
+- **Registrar visita** en una sola pantalla con botón fijo abajo: resultado con botones grandes y texto corto ("Hizo solicitud", "Volver otro día"…; se guarda el mismo valor de siempre), foto obligatoria con la cámara en vivo, notas con frases rápidas. Avisa si el vendedor está a más de 50 m del negocio (la visita no contaría como "hecha en el negocio" en el admin). "Volver otro día" pide la fecha y regresa el negocio a su ruta ese día en vez de cerrarlo.
 - Después de guardar, la pantalla de éxito ofrece **"Ir a la siguiente"** (la parada más cercana que queda), para encadenar visitas sin volver a la lista.
 - **Sin señal** funciona igual: la ruta y el avance se guardan en la tablet, las visitas (con fotos) se encolan en IndexedDB y se envían solas; la cabecera muestra "Al día" o "N por enviar". La sesión también se recuerda para abrir la app sin señal.
 - **Rendimiento**: colores sólidos y sombras chicas, Google Maps solo en la pestaña Mapa, fotos reducidas a 1280 px antes de subir y una sola lectura de GPS compartida (cada minuto con la app visible; el punto del recorrido se manda cada 5 min, como antes).
 
 ### Admin (laptop/PC)
 
-- **Resumen**: indicadores del periodo (visitas vs periodo anterior, cumplimiento de ruta, visitas por vendedor al día, % de visitas verificadas por GPS, vendedores con visitas), visitas por día, resultado de las visitas, un bloque de **"Requiere atención"** (sin ruta, ruta por acabarse, paradas atrasadas, sin visitas, pocas verificadas) y el desempeño por vendedor ordenable.
+- **Resumen**: indicadores del periodo elegido en el filtro de fechas (presets, rango personalizado de hasta un año, o "Todo" desde la primera visita): visitas vs periodo anterior, cumplimiento de ruta, visitas por vendedor al día, % de **visitas hechas en el negocio** y vendedores con visitas; visitas por día (o por semana en periodos largos), resultado de las visitas, un bloque de **"Requiere atención"** y el desempeño por vendedor ordenable. Cada indicador que no es obvio tiene un ícono ⓘ con su explicación.
+  - *Visitas hechas en el negocio*: al guardar una visita la tablet manda su GPS; si estaba a 50 m o menos del negocio, cuenta. Solo se puede comprobar en negocios de la ruta (del DENUE, con ubicación exacta) y cuando hubo GPS; los negocios nuevos no cuentan.
 - **En vivo**: dónde está cada vendedor hoy, visitas contra lo planeado, última visita y quién no ha empezado; al elegir a uno se ve su recorrido GPS del día. Se actualiza cada minuto.
 - **Visitas**: el registro de cada visita con fotos, mapa de calor y rutas GPS, y **exportación a CSV** (Excel).
 - **Rutas**: estado de la ruta de cada vendedor (sin ruta / se acaba pronto / con ruta) y el **planeador**: zona (buscador, clic en el mapa o zonas dibujadas), giros y ritmo (visitas por día, días de trabajo, duración) → **Generar ruta**. El servidor trae los negocios del DENUE, quita los que ya trae otro vendedor del mismo producto o que se visitaron en los últimos 90 días, los ordena en un recorrido corto (vecino más cercano + 2-opt) y los reparte por día (`fechaPlan` + número de parada). La vista previa se puede editar antes de publicar. La configuración se guarda, así que **Renovar** (uno o varios vendedores a la vez) arma el siguiente periodo con un clic.
-- **Equipo**: conexión con la base de colaboradores, productos de campo (y qué giros busca cada uno) y vendedores activos/bajas.
+- **Equipo**: conexión con la base de colaboradores, productos de campo (y qué giros busca cada uno) y el equipo activo con filtros (producto, vendedor, hub manager, zona, búsqueda) y el estado de la ruta de cada uno.
 - Se quitaron *Dashboard*, *Mapa de Leads*, *Seguimiento* y *Reportes* (su contenido quedó en Resumen, En vivo y Visitas) y *CRM · Prospectos* junto con la integración de HubSpot (ya estaba apagada por costos). La colección `crmDeals` se queda en Firestore tal cual.
 
 ### Decisiones que se conservan

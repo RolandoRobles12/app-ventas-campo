@@ -18,7 +18,6 @@ import type { VendedorDoc } from './vendedores.js';
 //                            configuración para poder renovarla después.
 //   - POST /:id/renovar   → genera y publica el siguiente periodo con la
 //                            configuración guardada, sin pasar por la vista previa.
-//   - POST /:id/reasignar → pasa los pendientes a otro vendedor (bajas).
 //   - GET  /estado        → hasta cuándo tiene ruta cada vendedor.
 export const rutasRouter = Router();
 
@@ -64,7 +63,10 @@ async function leerVendedor(id: string): Promise<VendedorDoc & { id: string }> {
 // nueva va a reemplazar los pendientes del propio vendedor, esos sí pueden
 // volver a salir (si no, se perderían: ni en la ruta vieja ni en la nueva).
 async function exclusiones(productoId: string, vendedorId: string, reemplazar: boolean): Promise<Set<string>> {
-  const companeros = (await db.collection('vendedores').where('productoId', '==', productoId).select().get()).docs.map((d) => d.id);
+  // Solo vendedores activos: lo pendiente de alguien que ya no está activo
+  // no debe bloquear esos negocios para el resto.
+  const companeros = (await db.collection('vendedores').where('productoId', '==', productoId).select('estado').get())
+    .docs.filter((d) => d.get('estado') !== 'Baja').map((d) => d.id);
   const ids = [...new Set([...companeros, vendedorId])];
   const limiteVisitado = Date.now() - DIAS_SIN_REPETIR_VISITADO * 86_400_000;
   const snaps = await Promise.all(chunkArray(ids).map((c) => db.collection('prospectos')
@@ -283,24 +285,6 @@ rutasRouter.post('/:vendedorId/renovar', async (req, res) => {
     }
     const publicado = await publicar(vendedor.id, config, generada.items, false, generada.centro);
     res.json({ ...publicado, necesarios: generada.necesarios, encontrados: generada.encontrados });
-  } catch (err) {
-    return responderError(res, err);
-  }
-});
-
-rutasRouter.post('/:vendedorId/reasignar', async (req, res) => {
-  try {
-    const destinoId = req.body?.aVendedorId as string | undefined;
-    if (!destinoId || destinoId === req.params.vendedorId) return res.status(400).json({ error: 'DESTINO_INVALIDO', message: 'Elige a quién pasarle los pendientes.' });
-    const [origen, destino] = await Promise.all([leerVendedor(req.params.vendedorId), leerVendedor(destinoId)]);
-    if (destino.estado === 'Baja') return res.status(400).json({ error: 'VENDEDOR_BAJA', message: `${destino.nombre} está dado de baja.` });
-    const snap = await db.collection('prospectos').where('vendedorId', '==', origen.id).where('estado', '==', POR_VISITAR).select().get();
-    for (const lote of chunkArray(snap.docs, ESCRITURAS_POR_LOTE)) {
-      const batch = db.batch();
-      lote.forEach((d) => batch.update(d.ref, { vendedorId: destino.id }));
-      await batch.commit();
-    }
-    res.json({ movidos: snap.size });
   } catch (err) {
     return responderError(res, err);
   }

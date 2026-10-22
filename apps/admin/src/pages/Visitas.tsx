@@ -22,7 +22,7 @@ function celdaCsv(v: unknown): string {
   return /[",\n]/.test(segura) ? `"${segura.replace(/"/g, '""')}"` : segura;
 }
 
-const gridCols = '54px 2fr 1.2fr 1.1fr 1.5fr 1fr .95fr';
+const gridCols = '54px 2fr 1.2fr 1.1fr 1.5fr 1.15fr .95fr';
 
 export function Visitas() {
   const { fProductos, fVendedores, fDesde, fHasta } = useFilters();
@@ -98,7 +98,7 @@ export function Visitas() {
         filas.push(...r.items);
         cursor = r.nextCursor ?? undefined;
       } while (cursor && filas.length < MAX_EXPORTAR);
-      const encabezado = ['Fecha', 'Hora', 'Vendedor', 'Producto', 'Negocio', 'Dirección', 'Negocio nuevo', 'Resultado', 'Notas', 'Fotos', 'Ubicación verificada', 'Distancia al negocio (m)', 'Latitud', 'Longitud'];
+      const encabezado = ['Fecha', 'Hora', 'Vendedor', 'Producto', 'Negocio', 'Dirección', 'Negocio nuevo', 'Resultado', 'Notas', 'Fotos', 'Hecha en el negocio', 'Distancia al negocio (m)', 'Latitud', 'Longitud'];
       const lineas = filas.map((v) => {
         const d = new Date(v.createdAt);
         return [
@@ -201,7 +201,7 @@ export function Visitas() {
 
       <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: gridCols, padding: '12px 20px', fontSize: 12, fontWeight: 600, color: '#5a665f', borderBottom: '1px solid #eef2ee' }}>
-          <div /><div>Negocio</div><div>Vendedor</div><div>Producto</div><div>Resultado</div><div>Ubicación</div><div>Fecha</div>
+          <div /><div>Negocio</div><div>Vendedor</div><div>Producto</div><div>Resultado</div><div>¿En el negocio?</div><div>Fecha</div>
         </div>
         {loading ? (
           <div style={{ padding: 30, textAlign: 'center', color: '#8a978f', fontSize: 13 }}>Cargando visitas…</div>
@@ -240,10 +240,10 @@ export function Visitas() {
               <div><span style={resultadoBadgeStyle(v.resultado)}>{v.resultado}</span></div>
               <div>
                 {v.ubicacionValida === null ? (
-                  <span style={{ color: '#9aa39c' }}>—</span>
+                  <span title="No se puede comprobar: negocio nuevo o sin GPS" style={{ color: '#9aa39c' }}>No aplica</span>
                 ) : (
-                  <span title={`${v.distanciaValidacionMetros}m del negocio`} style={{ color: v.ubicacionValida ? '#1c7a4f' : '#c0392b', fontWeight: 600 }}>
-                    {v.ubicacionValida ? '✓ Válida' : '✕ Inválida'}
+                  <span title="Distancia entre el GPS de la tablet y el negocio al guardar la visita" style={{ color: v.ubicacionValida ? '#1c7a4f' : '#c0392b', fontWeight: 600 }}>
+                    {v.ubicacionValida ? '✓ Sí' : '✕ No'} <span style={{ fontWeight: 400, color: '#8a978f' }}>· a {v.distanciaValidacionMetros} m</span>
                   </span>
                 )}
               </div>
