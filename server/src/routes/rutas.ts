@@ -8,6 +8,7 @@ import {
   fechasDeTrabajo, normalizarConfig, ordenarRuta, repartirPorDias, siguienteDiaDeTrabajo, type RutaConfig,
 } from '../rutas/planificador.js';
 import type { VendedorDoc } from './vendedores.js';
+import { negocioIdDe } from '../negocios.js';
 
 // Planeación de rutas (solo admin). La idea es que armar la ruta de un
 // vendedor sean tres decisiones —zona, giros y ritmo— y un clic:
@@ -27,6 +28,7 @@ const DIAS_SIN_REPETIR_VISITADO = 90;
 const ESCRITURAS_POR_LOTE = 400;
 
 interface ProspectoExclusion {
+  negocioId?: string;
   nombre: string;
   direccion: string;
   estado: string;
@@ -35,6 +37,8 @@ interface ProspectoExclusion {
 }
 
 export interface ItemRuta {
+  negocioId?: string | null;
+  denueId?: string | null;
   nombre: string;
   direccion: string;
   giro?: string | null;
@@ -57,7 +61,7 @@ async function leerVendedor(id: string): Promise<VendedorDoc & { id: string }> {
   return { id: doc.id, ...(doc.data() as VendedorDoc) };
 }
 
-// Claves nombre::direccion que no deben volver a proponerse: lo pendiente de
+// Negocios (negocioId) que no deben volver a proponerse: lo pendiente de
 // cualquier vendedor del mismo producto (para que dos vendedores no lleguen
 // al mismo negocio) y lo que se visitó en los últimos 90 días. Si la ruta
 // nueva va a reemplazar los pendientes del propio vendedor, esos sí pueden
@@ -70,15 +74,21 @@ async function exclusiones(productoId: string, vendedorId: string, reemplazar: b
   const ids = [...new Set([...companeros, vendedorId])];
   const limiteVisitado = Date.now() - DIAS_SIN_REPETIR_VISITADO * 86_400_000;
   const snaps = await Promise.all(chunkArray(ids).map((c) => db.collection('prospectos')
-    .where('vendedorId', 'in', c).select('vendedorId', 'nombre', 'direccion', 'estado', 'createdAt', 'visitadoEn').get()));
+    .where('vendedorId', 'in', c).select('vendedorId', 'negocioId', 'nombre', 'direccion', 'estado', 'createdAt', 'visitadoEn').get()));
   const out = new Set<string>();
   for (const d of snaps.flatMap((s) => s.docs)) {
     const p = d.data() as ProspectoExclusion;
     if (reemplazar && p.estado === POR_VISITAR && d.get('vendedorId') === vendedorId) continue;
     const cuando = (p.visitadoEn ?? p.createdAt)?.toMillis() ?? 0;
-    if (p.estado === POR_VISITAR || cuando >= limiteVisitado) out.add(`${p.nombre}::${p.direccion}`);
+    if (p.estado === POR_VISITAR || cuando >= limiteVisitado) out.add(claveProspecto(p));
   }
   return out;
+}
+
+// Prospectos guardados antes de existir negocioId (ver backfill-historial.ts)
+// se identifican igual, calculándolo al vuelo.
+function claveProspecto(p: { negocioId?: string; nombre: string; direccion: string; lat?: number | null; lng?: number | null }): string {
+  return p.negocioId || negocioIdDe(p);
 }
 
 async function resolverUbicacion(config: RutaConfig): Promise<UbicacionGps> {
@@ -123,7 +133,7 @@ async function generar(vendedor: VendedorDoc & { id: string }, config: RutaConfi
 
   const centro = { lat: ubicacion.lat, lng: ubicacion.lng };
   const items: ItemRuta[] = repartirPorDias(ordenarRuta(resultados, centro), fechas, config.visitasPorDia).map((r) => ({
-    nombre: r.nombre, direccion: r.direccion, giro: r.giro, telefono: r.telefono ?? null,
+    negocioId: r.negocioId, denueId: r.denueId, nombre: r.nombre, direccion: r.direccion, giro: r.giro, telefono: r.telefono ?? null,
     lat: r.lat ?? null, lng: r.lng ?? null, distanciaKm: r.distanciaKm ?? null,
     fechaPlan: r.fechaPlan, orden: r.orden,
   }));
@@ -156,17 +166,30 @@ async function publicar(vendedorId: string, config: RutaConfig, items: ItemRuta[
 
   const eliminados = reemplazar ? await borrarPendientes(vendedorId) : 0;
   const existentes = reemplazar ? new Set<string>() : new Set(
-    (await db.collection('prospectos').where('vendedorId', '==', vendedorId).select('nombre', 'direccion').get())
-      .docs.map((d) => `${d.get('nombre')}::${d.get('direccion')}`),
+    (await db.collection('prospectos').where('vendedorId', '==', vendedorId).select('negocioId', 'nombre', 'direccion', 'lat', 'lng').get())
+      .docs.map((d) => claveProspecto(d.data() as ProspectoExclusion)),
   );
-  const nuevos = items.filter((i) => !existentes.has(`${i.nombre}::${i.direccion}`));
+  // El negocioId siempre lo calcula el servidor: no se confía en el que
+  // trae la vista previa (un negocio agregado a mano no lo tiene).
+  const conId = items.map((i) => {
+    const nombre = i.nombre.trim();
+    const direccion = (i.direccion || '').trim();
+    return { ...i, nombre, direccion, negocioId: negocioIdDe({ nombre, direccion, lat: i.lat, lng: i.lng }) };
+  });
+  const vistos = new Set<string>();
+  const nuevos = conId.filter((i) => {
+    if (existentes.has(i.negocioId) || vistos.has(i.negocioId)) return false;
+    vistos.add(i.negocioId);
+    return true;
+  });
 
   const ahora = Timestamp.now();
   for (const lote of chunkArray(nuevos, ESCRITURAS_POR_LOTE)) {
     const batch = db.batch();
     for (const i of lote) {
       batch.set(db.collection('prospectos').doc(), {
-        vendedorId, nombre: i.nombre.trim(), direccion: (i.direccion || '').trim(),
+        vendedorId, negocioId: i.negocioId, denueId: !i.manual && typeof i.denueId === 'string' ? i.denueId.slice(0, 32) : null,
+        nombre: i.nombre, direccion: i.direccion,
         giro: i.giro ?? null, telefono: i.telefono ?? null,
         lat: i.lat ?? null, lng: i.lng ?? null, distanciaKm: i.distanciaKm ?? null,
         origen: i.manual ? 'manual' : 'denue', estado: POR_VISITAR,

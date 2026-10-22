@@ -16,6 +16,7 @@
 
 import https from 'node:https';
 import { haversineMetros } from '../firestore-helpers.js';
+import { negocioIdDe } from '../negocios.js';
 
 const DENUE_BASE = 'https://www.inegi.org.mx/app/api/denue/v1/consulta';
 
@@ -55,6 +56,8 @@ export interface DenueRawResult {
 }
 
 export interface DenueProspecto {
+  negocioId: string;
+  denueId: string;
   nombre: string;
   direccion: string;
   giro: string;
@@ -278,7 +281,7 @@ export async function consultarDenue(opts: {
   cantidad: number;
   ubicacion: UbicacionGps;
   poligonos?: PuntoGeo[][];
-  // nombre::direccion de prospectos que ya están en la ruta (de cualquier
+  // negocioId (ver negocios.ts) de prospectos que ya están en la ruta (de cualquier
   // semana) — se descartan ANTES del slice(0, cantidad) para que, si dos
   // semanas comparten zona/giros, la segunda consulta traiga negocios
   // distintos en vez de repetir (y de paso vaciar) el mismo top-N del DENUE.
@@ -345,6 +348,8 @@ export async function consultarDenue(opts: {
         : undefined;
 
       merged.push({
+        negocioId: negocioIdDe({ nombre, direccion: direccion || 'Ubicación actual', lat, lng }),
+        denueId: String(r.Id),
         nombre,
         direccion: direccion || 'Ubicación actual',
         giro,
@@ -373,7 +378,7 @@ export async function consultarDenue(opts: {
 
   const excluidos = new Set(opts.excluir || []);
   const sinRepetidos = excluidos.size
-    ? dentroDeZona.filter((p) => !excluidos.has(`${p.nombre}::${p.direccion}`))
+    ? dentroDeZona.filter((p) => !excluidos.has(p.negocioId))
     : dentroDeZona;
 
   sinRepetidos.sort((a, b) => (a.distanciaKm ?? Infinity) - (b.distanciaKm ?? Infinity));

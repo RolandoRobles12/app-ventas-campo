@@ -31,11 +31,15 @@ interface PlaneadoMetrica {
 
 const CAMPOS_VISITA = ['vendedorId', 'resultado', 'createdAt', 'ubicacionValida', 'esNegocioNuevo'];
 
-async function visitasEnRango(ids: string[], start: Date, end: Date): Promise<VisitaMetrica[]> {
+// ids null = sin filtro de vendedor (una sola consulta por fecha, en vez de
+// bloques de 30 sobre un equipo que con el tiempo acumula a todos los que ya
+// no están activos).
+async function visitasEnRango(ids: string[] | null, start: Date, end: Date): Promise<VisitaMetrica[]> {
   const conRango = (q: FirebaseFirestore.Query) => q
     .where('createdAt', '>=', Timestamp.fromDate(start)).where('createdAt', '<', Timestamp.fromDate(end))
     .select(...CAMPOS_VISITA);
-  const snaps = await Promise.all(chunkArray(ids).map((c) => conRango(db.collection('visitas').where('vendedorId', 'in', c)).get()));
+  const consultas = ids ? chunkArray(ids).map((c) => db.collection('visitas').where('vendedorId', 'in', c)) : [db.collection('visitas')];
+  const snaps = await Promise.all(consultas.map((q) => conRango(q).get()));
   return snaps.flatMap((s) => s.docs.map((d) => d.data() as VisitaMetrica));
 }
 
@@ -73,11 +77,14 @@ metricasRouter.get('/resumen', async (req, res) => {
   if (diasEntre(desde, hasta) >= MAX_DIAS) desde = sumarDias(hasta, -(MAX_DIAS - 1));
   const largo = diasEntre(desde, hasta) + 1;
 
-  // El equipo es el activo en la base de colaboradores (ver equipo.ts): quien
-  // ya no está activo no aparece aquí, ni en totales ni en la tabla.
+  // La historia no se pierde cuando alguien deja de estar activo (ver
+  // equipo.ts): sus visitas del periodo cuentan en los totales y aparece en
+  // la tabla, marcado. El equipo actual (vendedoresActivos, quién no ha
+  // visitado) es solo el activo.
   const filtro = await resolveVendedorIds(parseCsvParam(q.vendedorIds), parseCsvParam(q.productoIds));
-  const vendedoresDocs = (await getVendedoresDocs(filtro)).filter((d) => d.get('estado') !== 'Baja');
+  const vendedoresDocs = await getVendedoresDocs(filtro);
   const ids = vendedoresDocs.map((d) => d.id);
+  const idsSet = new Set(ids);
   const { start, end } = rangoMx(desde, hasta);
   const prev = rangoMx(sumarDias(desde, -largo), sumarDias(desde, -1));
 
@@ -85,14 +92,15 @@ metricasRouter.get('/resumen', async (req, res) => {
   // trabajando (salvo que el periodo sea solo hoy).
   const limitePlan = hasta < hoy ? hasta : desde === hoy ? hoy : sumarDias(hoy, -1);
 
-  const [visitas, visitasPrev, planeados] = ids.length === 0
+  const [visitasTodas, visitasPrev, planeados] = ids.length === 0
     ? [[], 0, []] as [VisitaMetrica[], number, PlaneadoMetrica[]]
     : await Promise.all([
-      visitasEnRango(ids, start, end),
-      countChunked('visitas', 'vendedorId', ids, (qq) => qq
+      visitasEnRango(filtro, start, end),
+      countChunked('visitas', 'vendedorId', filtro, (qq) => qq
         .where('createdAt', '>=', Timestamp.fromDate(prev.start)).where('createdAt', '<', Timestamp.fromDate(prev.end))),
-      planeadosEnRango(desde, limitePlan, new Set(ids)),
+      planeadosEnRango(desde, limitePlan, idsSet),
     ]);
+  const visitas = visitasTodas.filter((v) => idsSet.has(v.vendedorId));
 
   const vendedores = vendedoresDocs.map((d) => ({ id: d.id, ...(d.data() as VendedorDoc) }));
   const productos = await productosPorId(vendedores.map((v) => v.productoId));
@@ -135,13 +143,14 @@ metricasRouter.get('/resumen', async (req, res) => {
   const totalCumplidos = planeados.filter((p) => p.estado === 'visitado').length;
 
   const filas = vendedores
+    .filter((v) => v.estado !== 'Baja' || porVendedor.has(v.id))
     .map((v) => {
       const pv = porVendedor.get(v.id);
       const plan = planPorVendedor.get(v.id) ?? { planeados: 0, cumplidos: 0 };
       const diasActivos = pv?.dias.size ?? 0;
       return {
         id: v.id, nombre: v.nombre, iniciales: v.iniciales, color: v.color,
-        producto: productos.get(v.productoId) ?? '—', estado: 'Activo',
+        producto: productos.get(v.productoId) ?? '—', estado: v.estado === 'Baja' ? 'Baja' : 'Activo',
         visitas: pv?.visitas ?? 0,
         diasActivos,
         promedioDia: diasActivos ? Math.round(((pv?.visitas ?? 0) / diasActivos) * 10) / 10 : 0,
@@ -156,7 +165,7 @@ metricasRouter.get('/resumen', async (req, res) => {
     .sort((a, b) => b.visitas - a.visitas || a.nombre.localeCompare(b.nombre));
 
   const diasVendedor = filas.reduce((s, f) => s + f.diasActivos, 0);
-  const activos = vendedores.length;
+  const activos = vendedores.filter((v) => v.estado !== 'Baja').length;
 
   res.json({
     desde, hasta, porSemana, limitePlan,
@@ -173,7 +182,8 @@ metricasRouter.get('/resumen', async (req, res) => {
       validas,
       negociosNuevos: nuevos,
       vendedoresActivos: activos,
-      vendedoresConVisitas: filas.filter((f) => f.visitas > 0).length,
+      vendedoresConVisitas: filas.filter((f) => f.estado === 'Activo' && f.visitas > 0).length,
+      vendedoresYaNoActivos: filas.filter((f) => f.estado === 'Baja').length,
     },
     serie: [...serieMap.entries()].map(([fecha, visitas]) => ({ fecha, visitas })),
     resultados: RESULTADOS.map((r) => ({ resultado: r, count: resultados.get(r) ?? 0 })),

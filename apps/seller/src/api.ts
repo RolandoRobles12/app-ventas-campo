@@ -13,6 +13,8 @@ export interface Vendedor {
 export interface Prospecto {
   id: string;
   vendedorId: string;
+  // El mismo negocio en cualquier ruta (de este u otro vendedor).
+  negocioId?: string;
   nombre: string;
   direccion: string;
   giro?: string | null;
@@ -44,6 +46,15 @@ export interface VisitaReciente {
   esNegocioNuevo: boolean;
   ubicacionValida: boolean | null;
   createdAt: string;
+}
+
+// Una visita anterior al mismo negocio, de este vendedor o de otro.
+export interface Antecedente {
+  fecha: string | null;
+  resultado: string;
+  notas: string | null;
+  vendedorNombre: string;
+  propia: boolean;
 }
 
 export interface Progreso {
@@ -85,6 +96,8 @@ export const api = {
   me: () => req<{ email: string; vendedor: Vendedor | null; baja: boolean }>('/auth/me'),
   prospectos: (vendedorId: string) => req<Prospecto[]>(`/prospectos/vendedor/${vendedorId}`),
   progreso: (vendedorId: string) => req<Progreso>(`/progreso/${vendedorId}`),
+  antecedentes: (vendedorId: string, prospectoIds: string[]) =>
+    req<Record<string, Antecedente[]>>(`/prospectos/vendedor/${vendedorId}/antecedentes?ids=${prospectoIds.map(encodeURIComponent).join(',')}`),
   registrarVisita: (data: Record<string, unknown>) =>
     req<{ id: string }>('/visitas', { method: 'POST', body: JSON.stringify(data) }),
   registrarUbicacion: (data: { vendedorId: string; lat: number; lng: number; accuracy?: number; capturadoEn?: number }) =>

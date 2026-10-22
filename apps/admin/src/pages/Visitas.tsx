@@ -4,6 +4,7 @@ import { useFilters } from '../filters';
 import { FilterBar, PageHeader } from '../components/FilterBar';
 import { MultiSelectDropdown } from '../components/MultiSelectDropdown';
 import { GeoMap } from '../components/GeoMap';
+import { HistorialNegocio } from '../components/HistorialNegocio';
 import { prodBadgeStyle, resultadoBadgeStyle } from '../badges';
 
 const PAGE_SIZE = 20;
@@ -33,6 +34,7 @@ export function Visitas() {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lightbox, setLightbox] = useState<{ fotos: string[]; index: number } | null>(null);
+  const [negocio, setNegocio] = useState<{ id: string; nombre: string } | null>(null);
 
   const [showCalor, setShowCalor] = useState(true);
   const [showRutas, setShowRutas] = useState(false);
@@ -98,11 +100,11 @@ export function Visitas() {
         filas.push(...r.items);
         cursor = r.nextCursor ?? undefined;
       } while (cursor && filas.length < MAX_EXPORTAR);
-      const encabezado = ['Fecha', 'Hora', 'Vendedor', 'Producto', 'Negocio', 'Dirección', 'Negocio nuevo', 'Resultado', 'Notas', 'Fotos', 'Hecha en el negocio', 'Distancia al negocio (m)', 'Latitud', 'Longitud'];
+      const encabezado = ['Fecha', 'Hora', 'Vendedor', 'Vendedor activo hoy', 'Producto', 'Negocio', 'Dirección', 'Negocio nuevo', 'Resultado', 'Notas', 'Fotos', 'Hecha en el negocio', 'Distancia al negocio (m)', 'Latitud', 'Longitud'];
       const lineas = filas.map((v) => {
         const d = new Date(v.createdAt);
         return [
-          d.toLocaleDateString('es-MX'), d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }), v.vendedorNombre, v.producto,
+          d.toLocaleDateString('es-MX'), d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }), v.vendedorNombre, v.vendedorActivo ? 'Sí' : 'No', v.producto,
           v.nombreNegocio, v.direccion, v.esNegocioNuevo ? 'Sí' : 'No', v.resultado, v.notas ?? '', (v.fotos ?? []).length,
           v.ubicacionValida == null ? '' : v.ubicacionValida ? 'Sí' : 'No', v.distanciaValidacionMetros ?? '', v.lat ?? '', v.lng ?? '',
         ].map(celdaCsv).join(',');
@@ -231,11 +233,18 @@ export function Visitas() {
                 )}
               </div>
               <div>
-                <div style={{ fontWeight: 600, color: '#263238' }}>{v.nombreNegocio}</div>
+                {v.negocioId ? (
+                  <button className="link-negocio" onClick={() => setNegocio({ id: v.negocioId!, nombre: v.nombreNegocio })} title="Ver todas las visitas a este negocio">
+                    {v.nombreNegocio}
+                  </button>
+                ) : <div style={{ fontWeight: 600, color: '#263238' }}>{v.nombreNegocio}</div>}
                 <div style={{ fontSize: 11, color: '#8a978f', marginTop: 1 }}>{v.direccion}</div>
                 {v.notas && <div style={{ fontSize: 11, color: '#9aa39c', marginTop: 2, fontStyle: 'italic' }}>&ldquo;{v.notas}&rdquo;</div>}
               </div>
-              <div style={{ color: '#3a4a41' }}>{v.vendedorNombre}</div>
+              <div style={{ color: v.vendedorActivo ? '#3a4a41' : '#6f7d75' }}>
+                {v.vendedorNombre}
+                {!v.vendedorActivo && <div><span title="Ya no está activo en la base de colaboradores" style={{ fontSize: 10.5, color: '#6f7d75', background: '#eef1ee', borderRadius: 999, padding: '1px 7px' }}>ya no activo</span></div>}
+              </div>
               <div><span style={prodBadgeStyle(v.producto)}>{v.producto}</span></div>
               <div><span style={resultadoBadgeStyle(v.resultado)}>{v.resultado}</span></div>
               <div>
@@ -266,6 +275,10 @@ export function Visitas() {
           </div>
         )}
       </div>
+
+      {negocio && (
+        <HistorialNegocio negocioId={negocio.id} nombre={negocio.nombre} onClose={() => setNegocio(null)} onFoto={(fotos) => setLightbox({ fotos, index: 0 })} />
+      )}
 
       {lightbox && (
         <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,40,30,.78)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, cursor: 'zoom-out' }}>

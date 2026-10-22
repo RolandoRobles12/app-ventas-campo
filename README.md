@@ -178,6 +178,7 @@ Configuración (en `server/.env` y `functions/.env`):
 - **Solo visitas y rutas.** Se quitaron las metas de solicitudes y colocación (venían de HubSpot); el avance del día se mide en visitas contra las paradas que el admin le planeó para hoy.
 - **Tres pestañas**: *Mi ruta* (pantalla principal), *Mapa* e *Historial*. Al registrar una visita la barra de abajo se oculta: es una tarea de pantalla completa.
 - **Mi ruta**: avance del día (visitas de hoy contra la meta, racha de días seguidos), la **siguiente parada** (la más cercana según su GPS, con "Cómo llegar" y "Registrar visita" a un toque), el resto de las paradas de hoy ordenadas por cercanía (las atrasadas marcadas), las visitadas hoy y los próximos días plegados por si termina antes. En una tablet acostada se reparte en dos columnas.
+- **Visitado antes**: al abrir un negocio, la tablet muestra las últimas visitas que recibió (fecha, resultado, nota y quién fue: "Tú" u otro vendedor, aunque ya no esté activo). Se baja junto con la ruta para lo de hoy, mañana y lo atrasado, así que también se ve sin señal.
 - **Registrar visita** en una sola pantalla con botón fijo abajo: resultado con botones grandes y texto corto ("Hizo solicitud", "Volver otro día"…; se guarda el mismo valor de siempre), foto obligatoria con la cámara en vivo, notas con frases rápidas. Avisa si el vendedor está a más de 50 m del negocio (la visita no contaría como "hecha en el negocio" en el admin). "Volver otro día" pide la fecha y regresa el negocio a su ruta ese día en vez de cerrarlo.
 - Después de guardar, la pantalla de éxito ofrece **"Ir a la siguiente"** (la parada más cercana que queda), para encadenar visitas sin volver a la lista.
 - **Sin señal** funciona igual: la ruta y el avance se guardan en la tablet, las visitas (con fotos) se encolan en IndexedDB y se envían solas; la cabecera muestra "Al día" o "N por enviar". La sesión también se recuerda para abrir la app sin señal.
@@ -188,10 +189,27 @@ Configuración (en `server/.env` y `functions/.env`):
 - **Resumen**: indicadores del periodo elegido en el filtro de fechas (presets, rango personalizado de hasta un año, o "Todo" desde la primera visita): visitas vs periodo anterior, cumplimiento de ruta, visitas por vendedor al día, % de **visitas hechas en el negocio** y vendedores con visitas; visitas por día (o por semana en periodos largos), resultado de las visitas, un bloque de **"Requiere atención"** y el desempeño por vendedor ordenable. Cada indicador que no es obvio tiene un ícono ⓘ con su explicación.
   - *Visitas hechas en el negocio*: al guardar una visita la tablet manda su GPS; si estaba a 50 m o menos del negocio, cuenta. Solo se puede comprobar en negocios de la ruta (del DENUE, con ubicación exacta) y cuando hubo GPS; los negocios nuevos no cuentan.
 - **En vivo**: dónde está cada vendedor hoy, visitas contra lo planeado, última visita y quién no ha empezado; al elegir a uno se ve su recorrido GPS del día. Se actualiza cada minuto.
-- **Visitas**: el registro de cada visita con fotos, mapa de calor y rutas GPS, y **exportación a CSV** (Excel).
+- **Visitas**: el registro de cada visita con fotos, mapa de calor y rutas GPS, y **exportación a CSV** (Excel). El nombre del negocio abre su **historial**: todas sus visitas, de cualquier vendedor, y en la ruta de quién está hoy.
 - **Rutas**: estado de la ruta de cada vendedor (sin ruta / se acaba pronto / con ruta) y el **planeador**: zona (buscador, clic en el mapa o zonas dibujadas), giros y ritmo (visitas por día, días de trabajo, duración) → **Generar ruta**. El servidor trae los negocios del DENUE, quita los que ya trae otro vendedor del mismo producto o que se visitaron en los últimos 90 días, los ordena en un recorrido corto (vecino más cercano + 2-opt) y los reparte por día (`fechaPlan` + número de parada). La vista previa se puede editar antes de publicar. La configuración se guarda, así que **Renovar** (uno o varios vendedores a la vez) arma el siguiente periodo con un clic.
 - **Equipo**: conexión con la base de colaboradores, productos de campo (y qué giros busca cada uno) y el equipo activo con filtros (producto, vendedor, hub manager, zona, búsqueda) y el estado de la ruta de cada uno.
 - Se quitaron *Dashboard*, *Mapa de Leads*, *Seguimiento* y *Reportes* (su contenido quedó en Resumen, En vivo y Visitas) y *CRM · Prospectos* junto con la integración de HubSpot (ya estaba apagada por costos). La colección `crmDeals` se queda en Firestore tal cual.
+
+### Historial: quien ya no está activo y cada negocio
+
+La base de colaboradores decide quién está activo hoy, pero lo que pasó en campo no se pierde:
+
+- **Equipo actual vs. historia.** Rutas, En vivo y Equipo solo trabajan con el equipo activo. Las pantallas de un periodo (Resumen y Visitas) cuentan todo lo que pasó en ese periodo: quien ya no está activo aparece en la tabla de Resumen con la etiqueta *ya no activo* si visitó en el periodo, y en el filtro de vendedores bajo **"Ya no activos"**. Los indicadores del equipo ("vendedores con visitas", "Requiere atención") siguen siendo solo del equipo activo. Si alguien vuelve a darse de alta con el mismo correo, se reactiva el mismo vendedor con toda su historia.
+- **La visita guarda cómo era el vendedor al hacerla**: `vendedorNombre`, `productoId`, `productoNombre`, `zona` y `hubManagerNombre`. Si después cambia de producto o de zona, sus visitas viejas siguen contando donde se hicieron.
+- **Cada negocio tiene un `negocioId`** (`server/src/negocios.ts`), el mismo en cualquier ruta y en cada visita: un hash del nombre y la dirección normalizados (sin acentos, mayúsculas ni puntuación), o del nombre y el GPS si un negocio nuevo se registró sin dirección. Con él se arma el historial del negocio, el planeador deja de proponer lo que ya trae otro vendedor o se visitó hace poco, y una ruta publicada no repite negocios. Del DENUE se guarda además su id (`denueId`) como referencia.
+
+**Datos anteriores a este cambio** (prospectos y visitas sin `negocioId` ni la foto del vendedor): se completan con
+
+```bash
+npm run db:backfill-historial            # dry run: conteos y ejemplos de lo que agregaría
+npm run db:backfill-historial -- --yes   # escribe
+```
+
+Solo agrega campos que faltan (nunca cambia uno que ya tiene valor) y se puede repetir. A las visitas viejas les pone el dato *actual* del vendedor, que es lo más cercano que queda. Ojo: escribe en la base a la que apunten tus credenciales (producción si no hay `FIRESTORE_EMULATOR_HOST`); saca un respaldo antes y corre primero el dry run. Mientras no se corra, todo funciona igual, pero el historial de un negocio solo muestra las visitas nuevas.
 
 ### Decisiones que se conservan
 
@@ -229,7 +247,7 @@ El proyecto está pensado para desplegarse como **dos sitios de Firebase Hosting
    ```
    O por partes: `npm run build`, `npm run build:functions`, luego `firebase deploy`.
 
-   El primer deploy después de quitar HubSpot va a avisar que la función programada `syncHubspotDealsScheduled` ya no está en el código y preguntar si se borra: sí (o `firebase functions:delete syncHubspotDealsScheduled`). Despliega también los índices nuevos de `firestore.indexes.json` (`--only firestore:indexes`) antes de usar Rutas y la app del vendedor.
+   El primer deploy después de quitar HubSpot va a avisar que la función programada `syncHubspotDealsScheduled` ya no está en el código y preguntar si se borra: sí (o `firebase functions:delete syncHubspotDealsScheduled`). Despliega también los índices nuevos de `firestore.indexes.json` (`--only firestore:indexes`) antes de usar Rutas, el historial de negocios y la app del vendedor.
 
 `firebase.json` ya reescribe `/api/**` hacia la función `api` en ambos sitios de Hosting, y todo lo demás cae a `index.html` (SPA). Como el frontend llama a rutas relativas (`/api/...`), no hace falta configurar CORS entre Hosting y la función; `CORS_ORIGINS` solo importa si llamas a la API desde otro dominio. Las fotos de visitas **no** pasan por ese rewrite: la app del vendedor las sube directo a Firebase Storage con el SDK cliente (`apps/seller/src/uploadFotos.ts`, reglas en `storage.rules`) y la función solo recibe las URLs resultantes — esto evita el límite fijo de 10 MB por request que Firebase Hosting impone a cualquier request reescrita hacia una función, sin importar el límite que configure el propio servidor.
 

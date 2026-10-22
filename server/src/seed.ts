@@ -4,6 +4,7 @@ import { slugify } from './firestore-helpers.js';
 import { hoyMx, sumarDias } from './fechas.js';
 import { GIROS_DENUE } from './integrations/denue.js';
 import { productoIdLocal } from './equipo.js';
+import { negocioIdDe } from './negocios.js';
 
 // Mismos productos que la base de colaboradores de aviva-recruiting (ver
 // integrations/recruiting.ts y equipo.ts): id local + si es de campo.
@@ -108,7 +109,8 @@ async function main() {
     LEADS_JORGE.forEach((l, i) => {
       const ref = db.collection('prospectos').doc();
       batch.set(ref, {
-        vendedorId: jorgeId, nombre: l.name, direccion: l.address, telefono: l.phone,
+        vendedorId: jorgeId, negocioId: negocioIdDe({ nombre: l.name, direccion: l.address }),
+        nombre: l.name, direccion: l.address, telefono: l.phone,
         distanciaKm: l.dist, giro: l.giro, origen: 'denue', estado: 'por_visitar',
         lat: l.lat, lng: l.lng, fechaPlan: sumarDias(hoy, i < 2 ? 0 : 1), orden: (i % 2) + 1,
         createdAt: Timestamp.now(),

@@ -62,7 +62,7 @@ export function Resumen() {
       porVencer: deRuta.filter((r) => r.pendientes > 0 && r.diasRestantes != null && r.diasRestantes <= 2).map((r) => nombre(r.vendedorId)),
       atrasadas: deRuta.filter((r) => r.atrasadas >= 5).sort((a, b) => b.atrasadas - a.atrasadas).map((r) => `${nombre(r.vendedorId)} (${r.atrasadas})`),
       sinVisitas: (data?.vendedores ?? []).filter((f) => f.estado !== 'Baja' && f.visitas === 0).map((f) => f.nombre),
-      noVerificadas: (data?.vendedores ?? []).filter((f) => f.ubicacionValida != null && f.ubicacionValida < 50).map((f) => `${f.nombre} (${f.ubicacionValida}%)`),
+      noVerificadas: (data?.vendedores ?? []).filter((f) => f.estado !== 'Baja' && f.ubicacionValida != null && f.ubicacionValida < 50).map((f) => `${f.nombre} (${f.ubicacionValida}%)`),
     };
   }, [rutas, vendedores, data]);
 
@@ -127,7 +127,12 @@ export function Resumen() {
           </Card>
         )}
 
-        <Card titulo="Desempeño por vendedor" subtitulo="Haz clic en un encabezado para ordenar" style={{ marginTop: 14 }} padding="18px 0 6px" paddingEncabezado="0 20px">
+        <Card
+          titulo="Desempeño por vendedor"
+          subtitulo={t?.vendedoresYaNoActivos
+            ? `Haz clic en un encabezado para ordenar · incluye ${t.vendedoresYaNoActivos === 1 ? 'a 1 persona que ya no está activa' : `a ${t.vendedoresYaNoActivos} personas que ya no están activas`} pero visitó en el periodo`
+            : 'Haz clic en un encabezado para ordenar'}
+          style={{ marginTop: 14 }} padding="18px 0 6px" paddingEncabezado="0 20px">
           <div style={{ display: 'grid', gridTemplateColumns: GRID, padding: '0 20px 10px', fontSize: 12, fontWeight: 600, color: '#6f7d75', borderBottom: '1px solid #eef2ee', gap: 10 }}>
             <ThOrden k="nombre" orden={orden} setOrden={setOrden}>Vendedor</ThOrden>
             <ThOrden k="visitas" orden={orden} setOrden={setOrden} alinear="right">Visitas</ThOrden>
@@ -141,10 +146,11 @@ export function Resumen() {
           {filas.map((f) => (
             <div key={f.id} className="rowh" style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', padding: '10px 20px', borderBottom: '1px solid #f2f5f2', fontSize: 13, gap: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                <Avatar color={f.color} iniciales={f.iniciales} size={32} />
+                <div style={{ opacity: f.estado === 'Baja' ? 0.45 : 1 }}><Avatar color={f.color} iniciales={f.iniciales} size={32} /></div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, color: '#263238', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.nombre}</div>
+                  <div style={{ fontWeight: 600, color: f.estado === 'Baja' ? '#6f7d75' : '#263238', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.nombre}</div>
                   <span style={prodBadgeStyle(f.producto)}>{f.producto}</span>
+                  {f.estado === 'Baja' && <span style={yaNoActivo} title="Ya no está activo en la base de colaboradores; sus visitas del periodo siguen contando.">ya no activo</span>}
                 </div>
               </div>
               <div style={num}>{f.visitas}</div>
@@ -162,6 +168,7 @@ export function Resumen() {
 }
 
 const GRID = 'minmax(200px, 2fr) 70px 90px 80px minmax(150px, 1.3fr) minmax(120px, 1fr) 120px';
+const yaNoActivo: React.CSSProperties = { marginLeft: 6, fontSize: 11, color: '#6f7d75', background: '#eef1ee', borderRadius: 999, padding: '1px 8px', whiteSpace: 'nowrap' };
 const num: React.CSSProperties = { textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: '#263238' };
 
 function Alerta({ titulo, nombres, link, accion }: { titulo: string; nombres: string[]; link: string; accion: string }) {

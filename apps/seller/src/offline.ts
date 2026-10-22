@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { api, ApiError, type Progreso, type Prospecto } from './api';
+import { api, ApiError, type Antecedente, type Progreso, type Prospecto } from './api';
 import { subirFotos } from './uploadFotos';
+import { fechaLocal, sumarDias } from './fechas';
 
 // Persistencia local para trabajar sin señal (la realidad del campo): las
 // visitas (con sus fotos, que son Blobs y no caben en localStorage) van a
@@ -203,11 +204,52 @@ export async function prospectosConCache(vendedorId: string): Promise<Prospecto[
   try {
     const lista = await api.prospectos(vendedorId);
     escribirJson(llaveRuta(vendedorId), lista);
+    precargarAntecedentes(vendedorId, lista);
     return aplicarMarcas(vendedorId, lista);
   } catch (err) {
     const cacheado = rutaEnCache(vendedorId);
     if (cacheado) return cacheado;
     throw err;
+  }
+}
+
+// ——— "Visitado antes" con copia local ———
+
+// Las visitas anteriores a cada negocio de lo que toca hoy y mañana (y lo
+// atrasado) se bajan con la ruta, para tenerlas a la mano sin señal.
+const llaveAntecedentes = (vendedorId: string) => `aviva.antecedentes.${vendedorId}`;
+interface CacheAntecedentes { en: number; datos: Record<string, Antecedente[]> }
+const ANTECEDENTES_VIGENCIA_MS = 15 * 60 * 1000;
+const MAX_ANTECEDENTES = 60;
+
+function precargarAntecedentes(vendedorId: string, lista: Prospecto[]) {
+  const manana = sumarDias(fechaLocal(), 1);
+  const ids = lista
+    .filter((p) => p.estado === 'por_visitar' && (!p.fechaPlan || p.fechaPlan <= manana))
+    .map((p) => p.id)
+    .slice(0, MAX_ANTECEDENTES);
+  if (!ids.length) return;
+  const cache = leerJson<CacheAntecedentes>(llaveAntecedentes(vendedorId), { en: 0, datos: {} });
+  if (Date.now() - cache.en < ANTECEDENTES_VIGENCIA_MS && ids.every((id) => id in cache.datos)) return;
+  api.antecedentes(vendedorId, ids)
+    .then((datos) => escribirJson(llaveAntecedentes(vendedorId), { en: Date.now(), datos }))
+    .catch(() => { /* sin señal: se queda la copia anterior */ });
+}
+
+export function antecedentesEnCache(vendedorId: string, prospectoId: string): Antecedente[] | null {
+  return leerJson<CacheAntecedentes>(llaveAntecedentes(vendedorId), { en: 0, datos: {} }).datos[prospectoId] ?? null;
+}
+
+// Para un negocio que no estaba en la copia (p. ej. uno de la próxima
+// semana): se pide al servidor y se agrega a la copia.
+export async function cargarAntecedentes(vendedorId: string, prospectoId: string): Promise<Antecedente[] | null> {
+  try {
+    const datos = await api.antecedentes(vendedorId, [prospectoId]);
+    const cache = leerJson<CacheAntecedentes>(llaveAntecedentes(vendedorId), { en: 0, datos: {} });
+    escribirJson(llaveAntecedentes(vendedorId), { en: cache.en, datos: { ...cache.datos, ...datos } });
+    return datos[prospectoId] ?? [];
+  } catch {
+    return antecedentesEnCache(vendedorId, prospectoId);
   }
 }
 
