@@ -13,16 +13,15 @@ import { authRouter } from './routes/auth.js';
 import { usuariosRouter } from './routes/usuarios.js';
 import { productosRouter } from './routes/productos.js';
 import { vendedoresRouter } from './routes/vendedores.js';
+import { equipoRouter } from './routes/equipo.js';
+import { rutasRouter } from './routes/rutas.js';
 import { prospectosRouter } from './routes/prospectos.js';
 import { visitasRouter } from './routes/visitas.js';
 import { ubicacionesRouter } from './routes/ubicaciones.js';
-import { metasRouter } from './routes/metas.js';
-import { denueRouter } from './routes/denue.js';
-import { crmRouter } from './routes/crm.js';
-import { dashboardRouter } from './routes/dashboard.js';
+import { progresoRouter } from './routes/progreso.js';
+import { metricasRouter } from './routes/metricas.js';
 import { mapaRouter } from './routes/mapa.js';
 import { seguimientoRouter } from './routes/seguimiento.js';
-import { reportesRouter } from './routes/reportes.js';
 
 export const app = express();
 const origins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -40,19 +39,19 @@ app.use('/api/auth', authRouter);
 app.use('/api/usuarios', requireAdmin, usuariosRouter);
 app.use('/api/productos', requireAdmin, productosRouter);
 app.use('/api/vendedores', requireAdmin, vendedoresRouter);
+app.use('/api/equipo', requireAdmin, equipoRouter);
+app.use('/api/rutas', requireAdmin, rutasRouter);
+app.use('/api/metricas', requireAdmin, metricasRouter);
+app.use('/api/mapa', requireAdmin, mapaRouter);
+app.use('/api/seguimiento', requireAdmin, seguimientoRouter);
 // Mixtos: la app del vendedor también usa algunas rutas de estos routers
 // (ver comentarios dentro de cada archivo); requireAdmin se aplica ahí
-// ruta por ruta, no a nivel router.
+// ruta por ruta, no a nivel router. `progreso` solo lo usa la app del
+// vendedor (cada quien el suyo, igual que prospectos/visitas).
 app.use('/api/prospectos', prospectosRouter);
 app.use('/api/visitas', visitasRouter);
 app.use('/api/ubicaciones', ubicacionesRouter);
-app.use('/api/metas', metasRouter);
-app.use('/api/denue', requireAdmin, denueRouter);
-app.use('/api/crm', requireAdmin, crmRouter);
-app.use('/api/dashboard', requireAdmin, dashboardRouter);
-app.use('/api/mapa', requireAdmin, mapaRouter);
-app.use('/api/seguimiento', requireAdmin, seguimientoRouter);
-app.use('/api/reportes', requireAdmin, reportesRouter);
+app.use('/api/progreso', progresoRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);

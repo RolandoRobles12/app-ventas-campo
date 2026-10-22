@@ -13,6 +13,8 @@ a { color: #157347; text-decoration: none; }
 a:hover { color: #0f5132; }
 button, input, select, textarea { font-family: inherit; }
 input, select, textarea { -webkit-appearance: none; appearance: none; }
+/* Casillas, radios y deslizadores sí necesitan su aspecto nativo (sin él no se ven). */
+input[type='checkbox'], input[type='radio'], input[type='range'] { -webkit-appearance: auto; appearance: auto; }
 button { cursor: pointer; }
 
 .adm-scroll::-webkit-scrollbar { width: 9px; height: 9px; }

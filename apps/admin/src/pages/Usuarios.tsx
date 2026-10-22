@@ -44,7 +44,7 @@ export function Usuarios() {
     <div className="screen">
       <PageHeader
         icon={<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#157347" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>}
-        title="Usuarios" subtitle="Administradores con acceso al panel"
+        title="Administradores" subtitle="Quién tiene acceso a este panel"
       />
 
       <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, marginBottom: 16 }}>

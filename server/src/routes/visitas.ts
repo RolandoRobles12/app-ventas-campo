@@ -3,11 +3,13 @@ import { db, Timestamp, FieldPath } from '../db.js';
 import { toIso, haversineMetros, chunkArray, parseDateRangeQuery, parseCsvParam, isEmptyRestriction, parseCapturadoEn } from '../firestore-helpers.js';
 import { requireAdmin, puedeActuarComoVendedor, vendedorAjeno } from '../auth.js';
 import { productosPorId } from './vendedores.js';
+import { esFechaIso, fechaMx, sumarDias } from '../fechas.js';
 import { resolveVendedorIds } from './_filters.js';
 
 export const visitasRouter = Router();
 
 const MAX_FOTOS_POR_VISITA = 5;
+const RESULTADO_REAGENDA = 'Se reagenda visita';
 
 // Radio dentro del cual la ubicación GPS capturada en la visita se considera
 // que corresponde al negocio. Solo aplica a prospectos que vienen del DENUE
@@ -36,6 +38,7 @@ interface VisitaDoc {
 }
 
 interface ProspectoDoc {
+  vendedorId?: string;
   nombre: string;
   direccion: string;
   origen?: string;
@@ -217,7 +220,7 @@ function fotoUrlValida(url: string, vendedorId: string): boolean {
 }
 
 visitasRouter.post('/', async (req, res) => {
-  const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy, capturadoEn, fotos: fotosRaw } = req.body as Record<string, string> & { fotos?: unknown };
+  const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy, capturadoEn, reagendarPara, fotos: fotosRaw } = req.body as Record<string, string> & { fotos?: unknown };
   if (!vendedorId || !resultado) return res.status(400).json({ error: 'vendedorId y resultado son requeridos' });
   if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
 
@@ -235,20 +238,32 @@ visitasRouter.post('/', async (req, res) => {
   const hasGps = gpsLat != null && gpsLng != null;
 
   const esNuevo = esNegocioNuevo === 'true' || esNegocioNuevo === '1';
-  const prospectoRef = prospectoId ? db.collection('prospectos').doc(prospectoId) : null;
-  let prospectoDoc = prospectoRef ? await prospectoRef.get() : null;
+  const createdAt = parseCapturadoEn(capturadoEn) ?? Timestamp.now();
+  const prospectoDoc = prospectoId ? await db.collection('prospectos').doc(prospectoId).get() : null;
   let prospecto = prospectoDoc?.exists ? ({ id: prospectoDoc.id, ...(prospectoDoc.data() as ProspectoDoc) }) : null;
+  // Solo puede cerrar negocios de su propia ruta.
+  if (prospecto && prospecto.vendedorId && prospecto.vendedorId !== vendedorId) prospecto = null;
 
   if (esNuevo && !prospecto) {
-    const data: ProspectoDoc & { vendedorId: string; giro?: string; origen: string; estado: string; createdAt: Timestamp } = {
+    const data: ProspectoDoc & { vendedorId: string; giro?: string; origen: string; estado: string; visitadoEn: Timestamp; createdAt: Timestamp } = {
       vendedorId, nombre: nombreNegocio || 'Nuevo negocio', direccion: direccion || 'Ubicación actual',
-      giro: giro || undefined, origen: 'manual', estado: 'visitado',
+      giro: giro || undefined, origen: 'manual', estado: 'visitado', visitadoEn: createdAt,
       lat: hasGps ? gpsLat : null, lng: hasGps ? gpsLng : null, createdAt: Timestamp.now(),
     };
     const ref = await db.collection('prospectos').add(data);
     prospecto = { id: ref.id, ...data };
-  } else if (prospecto && prospectoRef) {
-    await prospectoRef.update({ estado: 'visitado' });
+  } else if (prospecto) {
+    const prospectoRef = db.collection('prospectos').doc(prospecto.id);
+    // "Se reagenda visita" no cierra el negocio: vuelve a su ruta en la
+    // fecha que eligió el vendedor (mañana si no eligió ninguna).
+    if (resultado === RESULTADO_REAGENDA) {
+      const fecha = esFechaIso(reagendarPara) && reagendarPara > fechaMx(createdAt.toDate())
+        ? reagendarPara
+        : sumarDias(fechaMx(createdAt.toDate()), 1);
+      await prospectoRef.update({ estado: 'por_visitar', fechaPlan: fecha, orden: 0, reagendado: true });
+    } else {
+      await prospectoRef.update({ estado: 'visitado', visitadoEn: createdAt, reagendado: false });
+    }
   }
 
   // Valida la ubicación solo cuando el teléfono entregó GPS real (no la
@@ -282,8 +297,8 @@ visitasRouter.post('/', async (req, res) => {
     distanciaValidacionMetros,
     // Una visita registrada sin señal se reenvía después desde la cola local
     // del teléfono; capturadoEn conserva la hora real en que se hizo la visita
-    // para que las metas del día y la racha no se muevan al día del reenvío.
-    createdAt: parseCapturadoEn(capturadoEn) ?? Timestamp.now(),
+    // para que el avance del día y la racha no se muevan al día del reenvío.
+    createdAt,
   };
   const ref = await db.collection('visitas').add(visitaData);
 

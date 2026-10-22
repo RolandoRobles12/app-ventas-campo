@@ -4,59 +4,164 @@
       "collectionGroup": "visitas",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "vendedorId", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "ASCENDING" }
+        {
+          "fieldPath": "vendedorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "visitas",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "vendedorId", "order": "ASCENDING" },
-        { "fieldPath": "resultado", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "ASCENDING" }
+        {
+          "fieldPath": "vendedorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "resultado",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "ubicaciones",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "vendedorId", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "ASCENDING" }
+        {
+          "fieldPath": "vendedorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "prospectos",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "vendedorId", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "ASCENDING" }
+        {
+          "fieldPath": "vendedorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "prospectos",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "estado", "order": "ASCENDING" },
-        { "fieldPath": "distanciaKm", "order": "ASCENDING" }
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "distanciaKm",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "prospectos",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "vendedorId", "order": "ASCENDING" },
-        { "fieldPath": "estado", "order": "ASCENDING" },
-        { "fieldPath": "distanciaKm", "order": "ASCENDING" }
+        {
+          "fieldPath": "vendedorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "distanciaKm",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "prospectos",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "vendedorId", "order": "ASCENDING" },
-        { "fieldPath": "estado", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "ASCENDING" }
+        {
+          "fieldPath": "vendedorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "prospectos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "vendedorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "fechaPlan",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "prospectos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "vendedorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "fechaPlan",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "prospectos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "vendedorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "visitadoEn",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],

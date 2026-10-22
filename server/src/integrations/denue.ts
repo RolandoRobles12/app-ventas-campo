@@ -9,7 +9,7 @@
  * El DENUE también tiene un modo "por entidad federativa" (código de estado, sin
  * radio real), pero eso obligaba a mantener a mano una tabla ciudad->entidad que
  * solo cubría un puñado de municipios de la ZMG y truena en cualquier otro lugar
- * del país. Como ahora hay vendedores en todo México (import de aviva-hr), el
+ * del país. Como hay vendedores en todo México (base de colaboradores), el
  * llamador (server/src/routes/denue.ts) geocodifica "ciudad/colonia/C.P." con
  * Google Maps antes de llegar aquí, así que este módulo solo necesita el modo GPS.
  */
@@ -30,6 +30,11 @@ const KEYWORD_POR_GIRO: Record<string, string> = {
   'Estéticas y belleza': 'estetica',
   'Farmacias': 'farmacia',
 };
+
+// Giros que el planeador de rutas ofrece de entrada (los que tienen palabra
+// clave probada contra el DENUE). Un giro fuera de esta lista también
+// funciona: se busca con su propio nombre normalizado.
+export const GIROS_DENUE = Object.keys(KEYWORD_POR_GIRO);
 
 export interface DenueRawResult {
   Id: string;
@@ -285,7 +290,9 @@ export async function consultarDenue(opts: {
   }
 
   const giros = opts.giros.length ? opts.giros : ['Comercio de abarrotes'];
-  const cantidad = Math.max(1, Math.min(200, opts.cantidad || 10));
+  // Hasta 600: una ruta mensual de un vendedor (≈12 visitas × 24 días) se
+  // arma con una sola consulta.
+  const cantidad = Math.max(1, Math.min(600, opts.cantidad || 10));
   const ubicacion = opts.ubicacion;
   const centro = { lat: ubicacion.lat, lng: ubicacion.lng };
 

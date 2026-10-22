@@ -1,39 +1,42 @@
 import { NavLink } from 'react-router-dom';
+import { IconHistorial, IconMapa, IconRuta } from '../icons';
 
 const items = [
-  { to: '/', label: 'Inicio', icon: (c: string) => (
-    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-  ) },
-  { to: '/visitas', label: 'Visitas', icon: (c: string) => (
-    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-  ) },
+  { to: '/', label: 'Mi ruta', Icon: IconRuta },
+  { to: '/mapa', label: 'Mapa', Icon: IconMapa },
+  { to: '/historial', label: 'Historial', Icon: IconHistorial },
 ];
 
 export function BottomNav() {
   return (
-    <div style={{
-      flex: 'none', height: 66, background: '#fff', borderTop: '1px solid #ebeae4', display: 'flex',
-      alignItems: 'stretch', boxShadow: '0 -4px 20px rgba(20,60,40,.06)',
+    <nav style={{
+      flex: 'none', height: 70, background: '#fff', borderTop: '1px solid #dfe9e2', display: 'flex',
+      alignItems: 'stretch', paddingBottom: 'env(safe-area-inset-bottom)',
     }}>
-      {items.map((item) => (
+      {items.map(({ to, label, Icon }) => (
         <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.to === '/'}
+          key={to}
+          to={to}
+          end={to === '/'}
+          className="tap"
           style={({ isActive }) => ({
-            flex: 1, border: 'none', background: 'none', textDecoration: 'none', display: 'flex',
-            flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, paddingTop: 4,
-            color: isActive ? 'var(--aviva-green-700)' : 'var(--ink-100)',
+            flex: 1, textDecoration: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
+            color: isActive ? 'var(--aviva-green-700)' : '#8a978f',
           })}
         >
           {({ isActive }) => (
             <>
-              {item.icon(isActive ? 'var(--aviva-green-700)' : 'var(--ink-100)')}
-              <span style={{ fontSize: 11, fontWeight: 700 }}>{item.label}</span>
+              <span style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', width: 58, height: 32, borderRadius: 16,
+                background: isActive ? 'var(--aviva-green-100)' : 'transparent',
+              }}>
+                <Icon size={24} stroke={isActive ? 2.4 : 2} />
+              </span>
+              <span style={{ fontSize: 13, fontWeight: isActive ? 800 : 600 }}>{label}</span>
             </>
           )}
         </NavLink>
       ))}
-    </div>
+    </nav>
   );
 }

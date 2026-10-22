@@ -13,9 +13,11 @@ const dateInputStyle: React.CSSProperties = {
 };
 
 export function FilterBar({
-  extra, extraActivo, onLimpiarExtra,
+  extra, extraActivo, onLimpiarExtra, sinFechas = false,
 }: {
   extra?: React.ReactNode;
+  // Pantallas de "ahora mismo" (En vivo, Rutas) no usan el rango de fechas.
+  sinFechas?: boolean;
   // Filtro propio de la página (p.ej. "Resultado" en Visitas), que vive fuera
   // del FiltersContext compartido: sin esto, "Limpiar filtros" no sabría que
   // hay algo ahí que limpiar ni cómo hacerlo.
@@ -46,18 +48,20 @@ export function FilterBar({
       />
       <MultiSelectDropdown
         label="Vendedor"
-        options={vendedoresFiltrados.map((v) => ({ value: v.id, label: v.nombre }))}
+        options={[...vendedoresFiltrados]
+          .sort((a, b) => Number(a.estado === 'Baja') - Number(b.estado === 'Baja'))
+          .map((v) => ({ value: v.id, label: v.estado === 'Baja' ? `${v.nombre} (baja)` : v.nombre }))}
         selected={fVendedores}
         onChange={setFVendedores}
         placeholder="Todos los vendedores"
       />
-      <div style={{ position: 'relative' }}>
+      {!sinFechas && <div style={{ position: 'relative' }}>
         <select className="fsel" value={fRango} onChange={(e) => setFRango(e.target.value as RangoPreset)}>
           {(Object.keys(RANGO_LABELS) as RangoPreset[]).map((r) => <option key={r} value={r}>{RANGO_LABELS[r]}</option>)}
         </select>
         <SelectChevron />
-      </div>
-      {fRango === 'personalizado' && (
+      </div>}
+      {!sinFechas && fRango === 'personalizado' && (
         <>
           <input type="date" value={fDesdePersonalizado ?? ''} onChange={(e) => setFDesdePersonalizado(e.target.value || null)} style={dateInputStyle} />
           <span style={{ color: '#8a978f', fontSize: 12.5 }}>a</span>

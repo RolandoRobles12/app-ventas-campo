@@ -5,11 +5,11 @@ Implementación real (no prototipo) de una **app web para vendedores de campo** 
 ## Estructura
 
 ```
-apps/seller   → App web del vendedor (React + Vite). Inicio (metas y avance del día), Visitas.
-apps/admin    → Admin web (React + Vite). Rutas por vendedor, Dashboard, Mapa, Seguimiento, Reportes, CRM.
-server        → API (Express + TypeScript + Firestore). Integraciones reales de DENUE (INEGI) y HubSpot.
-packages/ui   → Tokens de diseño compartidos (colores, tipografía) usados por ambas apps.
-functions     → Cloud Function que envuelve `server` para desplegarlo en Firebase.
+apps/seller   → App del vendedor (React + Vite, pensada para tablets Android). Mi ruta, Mapa, Historial y el registro de visita.
+apps/admin    → Admin web (React + Vite, para laptop/PC). Resumen, En vivo, Visitas, Rutas (planeador), Equipo, Administradores.
+server        → API (Express + TypeScript + Firestore). Integraciones reales de DENUE (INEGI), Google Maps y la base de colaboradores de aviva-recruiting.
+packages/ui   → Tokens de diseño compartidos (colores, tipografía), login y cargador de Google Maps usados por ambas apps.
+functions     → Cloud Functions: `api` (envuelve `server`) y la sincronización programada del equipo.
 ```
 
 ## Antes de arrancar: crea tu proyecto de Firebase
@@ -29,7 +29,7 @@ todavía no existe, créalo una vez:
    npx firebase-tools login
    npx firebase-tools deploy --only firestore:indexes,firestore:rules,storage
    ```
-   Sin las reglas/índices de Firestore, las rutas de dashboard/reportes/mapa fallan con un error de "missing index" la primera vez que las uses. Sin las reglas de Storage, subir fotos de visita falla con un error de permisos aunque el login sea correcto.
+   Sin las reglas/índices de Firestore, el Resumen, las Rutas y la lista del vendedor fallan con un error de "missing index" la primera vez que las uses (este cambio agregó índices nuevos para `prospectos`: vuelve a desplegarlos). Sin las reglas de Storage, subir fotos de visita falla con un error de permisos aunque el login sea correcto.
 
 ## Arrancar en desarrollo
 
@@ -43,7 +43,7 @@ guardaste el JSON de la cuenta de servicio del paso anterior. Con eso:
 
 ```bash
 npm run dev            # API + app del vendedor + admin, una sola terminal
-npm run db:seed        # una vez: productos, vendedores, giros, deals de ejemplo
+npm run db:seed        # una vez: productos, vendedores, giros y una ruta de ejemplo
 ```
 
 `npm run dev` no instala nada extra (todo es Node/npm). Como usas el mismo
@@ -83,7 +83,8 @@ correo de la cuenta de Google contra Firestore vía `GET /api/auth/me`:
 
 - **App del vendedor**: se busca contra el campo `email` de los documentos de
   `vendedores` — si no hay un vendedor con ese correo, la app lo indica en vez
-  de dejar pasar a nadie.
+  de dejar pasar a nadie. Un vendedor con `estado: 'Baja'` (ver "Equipo"
+  abajo) tampoco entra, y el servidor le rechaza cualquier registro.
 - **Panel de admin**: se busca contra la colección `usuarios` (doc id = email
   en minúsculas, `rol: 'admin'`). Sin un doc ahí, la cuenta entra a la app
   (pasa el login de Google) pero ve "Sin acceso al panel" en vez del panel —
@@ -103,29 +104,99 @@ correo de la cuenta de Google contra Firestore vía `GET /api/auth/me`:
 
 Copia `.env.example` a `server/.env` y completa:
 
-- **DENUE (INEGI)** — `DENUE_TOKEN`. Sin él, "Rutas por vendedor → Generar ruta" muestra un aviso claro en vez de inventar prospectos; con el token, consulta el API real de INEGI (`Buscar` por giro, siempre con coordenadas+radio) y ordena los resultados por cercanía real (haversine).
-- **Google Maps (Geocoding)** — `GOOGLE_MAPS_API_KEY` en `server/.env` (Geocoding API habilitada en Google Cloud). El DENUE no acepta texto libre de ubicación (solo entidad federativa o coordenadas+radio), así que la pestaña "Por municipio / colonia / C.P." de "Configurar ruta" geocodifica ese texto con Google antes de consultar el DENUE — funciona con cualquier combinación (solo C.P., solo colonia, solo ciudad, o varias) en cualquier parte del país. Sin esta variable, esa pestaña muestra un aviso y solo queda disponible "Por ubicación (GPS)" (lat/lng directo, sin geocodificar).
-- **Google Maps (mapas visuales)** — `VITE_GOOGLE_MAPS_API_KEY` en `apps/admin/.env` **y** en `apps/seller/.env` (copia el `.env.example` de cada app; habilita **"Maps JavaScript API"** y **"Places API"** en el mismo proyecto de Google Cloud — puede ser la misma clave en ambas apps o una distinta por app, ambas restringidas por HTTP referrer a sus propios dominios). El loader (`loadGoogleMaps`) vive en `packages/ui` y lo comparten las dos apps; cada una lee su propia env var en tiempo de build. Es una clave expuesta en el navegador (normal para este uso) — protégela restringiéndola por HTTP referrer en Google Cloud Console a los dominios donde corre cada app, no ocultándola. Sin esta variable, las pantallas de mapa muestran un aviso en vez de un mapa en blanco. En el admin se usa en tres lugares:
-  - El Mapa de Leads y el mapa de calor de Reportes (`GeoMap.tsx`) — mapas reales de Google en vez del lienzo de OpenStreetMap/Leaflet que traía el prototipo.
-  - "Configurar ruta" → "Ciudad/Municipio" y "Colonia o C.P." son autocomplete real de Google Places (`PlaceAutocompleteInput.tsx`): hay que elegir una sugerencia de la lista, no solo escribir texto libre, así se manda la ubicación exacta en vez de volver a adivinarla en el servidor.
-  - "Configurar ruta" → "Por ubicación (GPS)" y "Dibujar zona en el mapa" (`LocationPickerMap.tsx`) son mapas reales donde se hace clic para colocar el punto o dibujar el contorno — antes el modo GPS pedía lat/lng a mano y "dibujar zona" era una cuadrícula ilustrativa que ni siquiera se guardaba. La zona dibujada ahora sí se guarda (`zonaPoligono` en el vendedor), aunque por ahora es informativa: la búsqueda del DENUE sigue usando el punto+radio, no recorta por el polígono — avísame si quieres que también filtre por ahí.
-- **HubSpot** — `HUBSPOT_TOKEN` (Private App con scopes `crm.objects.deals.read/write`, `crm.objects.companies.read`, `crm.objects.owners.read`, y **`crm.schemas.deals.read/write`** — estos dos últimos son indispensables para el campo "Service owner": sin ellos la propiedad personalizada `aviva_service_owner` no se puede crear en HubSpot y el campo nunca se guarda allá, aunque el token funcione para todo lo demás) y `HUBSPOT_PORTAL_ID`. Sin configurar, el CRM funciona con los deals locales y lo indica con un banner; con ellos, "Sincronizar" trae solo los deals reales del pipeline de "Nuevas visitas" (paginando todos los que haya, no solo los primeros 100) y los cambios en el drawer se escriben de vuelta a HubSpot.
-  - El pipeline a sincronizar ya no se elige con una env var: `loadDealPipeline()` en `server/src/integrations/hubspot.ts` detecta automáticamente cuál pipeline de la cuenta tiene el stage "Aprobado" con el id fijado en `FUNNEL_STAGE_IDS`, y solo trae deals de ese pipeline (`GET /api/crm/pipelines` sigue existiendo para consultar ids si la pipeline se recrea en HubSpot y hay que actualizar esos ids).
-  - Ese pipeline debe tener etapas (`stages`) llamadas exactamente (sin distinguir mayúsculas): `Documentos subidos`, `Documentos verificados`, `Aprobado`, `Contrato enviado`, `Desembolso`, `Rechazado`. Si no existen con esos nombres, los cambios de etapa hechos en el admin se guardan localmente pero **no se reflejan en HubSpot**. El resumen del funnel en la UI solo muestra 4 de esas 6 etapas (`Aprobado`, `Contrato enviado`, `Desembolso`, `Rechazado` — ver `FUNNEL_STAGE_LABELS`); las otras 2 siguen existiendo como pasos intermedios del deal.
-- **aviva-hr** (directorio real de empleados) — `AVIVA_HR_PROJECT_ID`. Es otro proyecto de Firebase (no de este equipo), así que el servidor no tiene cuenta de servicio para él: lee su colección `users` vía la REST API pública de Firestore (`firestore.googleapis.com`), igual que hace [Ro-Bot-Web](https://github.com/RolandoRobles12/Ro-Bot-Web) contra el mismo proyecto — esto requiere que las reglas de Firestore de aviva-hr permitan lectura no autenticada de esa colección. Sin el project id, "Rutas por vendedor" muestra "No configurado" en vez de intentar sincronizar.
-  - El botón **"Sincronizar desde aviva-hr"** en Rutas por vendedor trae usuarios con `status` `active` o `invited`, los empareja por email contra `vendedores` (crea los que falten con los giros por defecto de su producto; a los que ya existen les actualiza nombre/estado/producto sin tocar ciudad/colonia/giros, que siguen siendo manuales vía "Configurar ruta") y asigna el producto según su posición (`role`): `Promotor Aviva Tu Negocio` → Aviva Tu Negocio, `Promotor Aviva Tu Casa` → Aviva Construrama, cualquier posición que contenga "Marchand" → Aviva Casa Marchand. No requiere haber corrido `db:seed` antes: si el producto correspondiente no existe todavía en `productos`, la sincronización lo crea (mismo nombre/giros que usa el seed). Una posición que no matchee ninguna de esas reglas se omite (se reporta en la respuesta) en vez de crear un vendedor sin producto.
+- **Base de colaboradores de aviva-recruiting** (altas y bajas del equipo) — ver la sección "Equipo: base de colaboradores" abajo.
+- **DENUE (INEGI)** — `DENUE_TOKEN`. Es de donde salen los negocios de cada ruta. Sin él, el planeador de "Rutas" muestra un aviso claro en vez de inventar prospectos; con el token, consulta el API real de INEGI (`Buscar` por giro, siempre con coordenadas+radio, máximo 5 km).
+- **Google Maps (Geocoding)** — `GOOGLE_MAPS_API_KEY` en `server/.env` (Geocoding API habilitada en Google Cloud). Solo hace falta si el admin escribe una zona sin elegir una sugerencia del buscador: el servidor geocodifica ese texto antes de consultar el DENUE (el DENUE no acepta texto libre de ubicación). Elegir una sugerencia o hacer clic en el mapa no la necesita.
+- **Google Maps (mapas visuales)** — `VITE_GOOGLE_MAPS_API_KEY` en `apps/admin/.env` **y** en `apps/seller/.env` (copia el `.env.example` de cada app; habilita **"Maps JavaScript API"** y **"Places API"**; puede ser la misma clave, restringida por HTTP referrer a los dominios de cada app). El loader (`loadGoogleMaps`) vive en `packages/ui`. Sin esta variable, las pantallas de mapa muestran un aviso en vez de un mapa en blanco. Se usa en:
+  - Admin: el mapa del planeador de rutas (`PlannerMap.tsx`: centro y radio de búsqueda, zonas dibujadas a mano, vista previa por día), el buscador de zona (`PlaceAutocompleteInput.tsx`), "En vivo" y el mapa de calor/rutas GPS de "Visitas" (`GeoMap.tsx`).
+  - App del vendedor: solo la pestaña "Mapa" (se carga al abrirla; es lo más pesado para una tablet de gama baja). "Cómo llegar" abre Google Maps con la dirección o coordenadas del negocio y no necesita la clave.
 
 Ninguna de las integraciones genera datos falsos: si no están configuradas, la UI lo dice explícitamente en vez de simular.
 
-## Decisiones fuera del mockup original
+### Equipo: base de colaboradores (aviva-recruiting)
 
-- **Login en la app móvil**: el diseño no incluía pantalla de login. Se agregó autenticación real con Google (`@avivacredito.com`); la app resuelve automáticamente qué vendedor eres por tu correo en vez de pedirte elegirlo de una lista.
-- **Racha, metas y km recorridos** se calculan de datos reales (visitas capturadas y GPS registrado), no son valores fijos como en el prototipo.
-- **Se quitó "Jornada" (registro de entrada/comida/salida)**: casi nadie la usaba y le restaba foco a lo que sí importa (Metas y Visitas). La app del vendedor ahora solo tiene 2 pestañas (Inicio, Visitas); Inicio muestra el avance del día y un botón directo a la lista de visitas. El rastreo GPS (`LocationTracker.tsx`) ya no depende de "iniciar jornada" — corre mientras la app esté abierta. En el admin, "Seguimiento en vivo" (`server/src/routes/seguimiento.ts`) y el estado de vendedor en el Dashboard (`server/src/routes/dashboard.ts`) ya no leen la colección `jornadas` (que se eliminó): "En ruta" ahora se infiere de un ping de ubicación de los últimos 20 minutos, y la racha de días consecutivos con al menos una visita registrada (antes era de jornadas con hora de entrada).
-- **Mapa de Leads / mapa de calor**: mapas reales de Google (`GeoMap.tsx`, ver "Integraciones reales" arriba). El Mapa de Leads coloca pines en sus coordenadas geográficas reales, y el mapa de calor de Reportes se alimenta de `/api/mapa/calor`: la ubicación GPS que la app del vendedor captura al registrar cada visita (con respaldo a las coordenadas DENUE del prospecto para visitas sin GPS).
-- **Cómo llegar** abre Google Maps con la dirección o coordenadas reales del prospecto; el mini-mapa del formulario de visita (`apps/seller/src/components/MapPreview.tsx`) también es un mapa real de Google (Maps JavaScript API vía `@aviva/ui`, compartido con el admin) en vez del iframe de OpenStreetMap que traía el prototipo — requiere `VITE_GOOGLE_MAPS_API_KEY` en `apps/seller/.env` (copia `apps/seller/.env.example`), puede ser la misma clave que usa el admin.
-- **Fotografía(s) de evidencia obligatorias y solo-cámara real**: el prototipo tenía un botón "Tomar foto con la cámara" que en realidad era un `<input type="file" capture="environment">` — ese atributo es solo una sugerencia de UI, así que en varios navegadores/dispositivos igual ofrecía "elegir archivo" o la galería. Se reemplazó por una cámara en vivo dentro de la propia app (`getUserMedia` + `<video>` + captura a `<canvas>`, `apps/seller/src/components/CameraCapture.tsx`, con una vista previa para "Volver a tomar" o "Usar foto" antes de aceptarla): nunca existe un selector de archivos, solo el stream de la cámara. Una visita admite hasta 5 fotos (constante `MAX_FOTOS`/`MAX_FOTOS_POR_VISITA`, repetida a propósito en `VisitForm.tsx` y `server/src/routes/visitas.ts` — una para la UI, otra para el límite real del servidor), con miniaturas removibles y un tile "Añadir foto". Al menos una foto y el resultado de la visita son obligatorios para guardar — se valida en el formulario (botón deshabilitado sin ambos) y también en el servidor (`POST /api/visitas` rechaza con 400 si no llega ninguna foto, aunque alguien le pegue directo a la API). El overlay de la cámara usa `position: absolute` dentro de `PhoneShell` (no `fixed` contra el viewport real) para no salirse del marco de 460px con el que se previsualiza la app en pantallas anchas.
-- **Barra de estado falsa eliminada**: el mockup incluía una barra superior con hora/señal/batería simulados (`StatusBar` en `PhoneShell.tsx`) para emular un teléfono — no aporta nada en la app real y se quitó junto con el componente.
+Los vendedores ya no salen de aviva-hr: salen de la **base de colaboradores de
+Aviva Comercial Hub** ([aviva-recruiting](https://github.com/RolandoRobles12/aviva-recruiting)).
+Allá, la colección `colaboradores` del proyecto de Firebase `aviva-recruiting`
+es una copia de la hoja "Colaboradores" que su función `syncColaboradores`
+actualiza a las 12:00 y 19:00 (id del documento = correo corporativo). Nunca
+borra a nadie: una baja queda con `estatusApp: 'Baja'` (o `'Baja programada'`
+con `fechaBajaIso`), y quien deja de aparecer en la hoja queda con
+`presente: false`. El producto no se guarda: se calcula del puesto con
+`productoDePuesto()` (`src/utils/productoDePuesto.ts` allá); la copia de esa
+función está en `server/src/integrations/recruiting.ts` y **hay que mantenerla
+igual** si allá cambian las reglas.
+
+Cómo se refleja aquí (`server/src/equipo.ts`):
+
+- Cada colaborador activo cuyo producto está marcado "de campo" en **Equipo →
+  Productos de campo** (por defecto Aviva tu Negocio, Construrama y Casa
+  Marchand) es un vendedor. Si no existe, se crea (alta); si existe, se le
+  actualizan nombre, producto, puesto, zona, tienda y hub manager.
+- Un vendedor cuyo colaborador ya no está activo (baja, fecha de baja
+  cumplida, o ya no aparece) o que se cambió a un puesto que no es de campo
+  queda con `estado: 'Baja'`: ya no entra a la app y deja de aparecer en
+  Rutas/En vivo. No se borra nada; sus negocios pendientes se pueden pasar a
+  otro vendedor desde **Equipo → Bajas → Reasignar**. Si vuelve a estar
+  activo, se reactiva solo.
+- Una "Baja programada" sigue activa hasta su fecha. Un puesto vacío en la
+  hoja no basta para dar de baja a nadie. Un vendedor sin colaborador en la
+  base (alta manual o de prueba) no se toca.
+- Freno de seguridad: si una corrida daría de baja a más del 30% de los
+  activos (mínimo 5), se detiene sin escribir nada y el admin decide en
+  "Equipo" si la aplica de todos modos.
+- Corre sola a las 7:30, 12:30 y 19:30 (hora de México; función
+  `sincronizarEquipoProgramado` en `functions/src/index.ts`) y con el botón
+  **Sincronizar ahora** de "Equipo".
+
+Configuración (en `server/.env` y `functions/.env`):
+
+- `RECRUITING_PROJECT_ID=aviva-recruiting`. Sin él, "Equipo" muestra "No configurado".
+- Permiso de lectura: las reglas de Firestore de aviva-recruiting no dejan
+  leer `colaboradores` desde fuera, así que el servidor lee con el Admin SDK y
+  necesita el rol **Cloud Datastore Viewer** (`roles/datastore.viewer`) en el
+  proyecto `aviva-recruiting`. Lo tiene que otorgar alguien con permisos de
+  IAM en ese proyecto:
+  ```bash
+  # Cuenta de servicio con la que corre la Cloud Function `api` (por defecto,
+  # la de Compute Engine del proyecto app-campo-aviva; confírmala en la consola
+  # de Cloud Functions → api → Detalles → Cuenta de servicio):
+  gcloud projects add-iam-policy-binding aviva-recruiting \
+    --member="serviceAccount:816682987350-compute@developer.gserviceaccount.com" \
+    --role="roles/datastore.viewer"
+  ```
+  En desarrollo local se usa la cuenta de `GOOGLE_APPLICATION_CREDENTIALS`,
+  que necesita el mismo rol. Como alternativa a otorgar IAM, se puede poner en
+  `RECRUITING_SERVICE_ACCOUNT` el JSON (o su base64) de una cuenta de servicio
+  del propio proyecto aviva-recruiting que tenga ese rol.
+
+## Cómo está pensada cada app
+
+### App del vendedor (tablets Android de gama baja, todo el día en campo)
+
+- **Solo visitas y rutas.** Se quitaron las metas de solicitudes y colocación (venían de HubSpot); el avance del día se mide en visitas contra las paradas que el admin le planeó para hoy.
+- **Tres pestañas**: *Mi ruta* (pantalla principal), *Mapa* e *Historial*. Al registrar una visita la barra de abajo se oculta: es una tarea de pantalla completa.
+- **Mi ruta**: avance del día (visitas de hoy contra la meta, racha de días seguidos), la **siguiente parada** (la más cercana según su GPS, con "Cómo llegar" y "Registrar visita" a un toque), el resto de las paradas de hoy ordenadas por cercanía (las atrasadas marcadas), las visitadas hoy y los próximos días plegados por si termina antes. En una tablet acostada se reparte en dos columnas.
+- **Registrar visita** en una sola pantalla con botón fijo abajo: resultado con botones grandes y texto corto ("Hizo solicitud", "Volver otro día"…; se guarda el mismo valor de siempre), foto obligatoria con la cámara en vivo, notas con frases rápidas. Avisa si el vendedor está a más de 50 m del negocio (la visita no quedaría "verificada" en el admin). "Volver otro día" pide la fecha y regresa el negocio a su ruta ese día en vez de cerrarlo.
+- Después de guardar, la pantalla de éxito ofrece **"Ir a la siguiente"** (la parada más cercana que queda), para encadenar visitas sin volver a la lista.
+- **Sin señal** funciona igual: la ruta y el avance se guardan en la tablet, las visitas (con fotos) se encolan en IndexedDB y se envían solas; la cabecera muestra "Al día" o "N por enviar". La sesión también se recuerda para abrir la app sin señal.
+- **Rendimiento**: colores sólidos y sombras chicas, Google Maps solo en la pestaña Mapa, fotos reducidas a 1280 px antes de subir y una sola lectura de GPS compartida (cada minuto con la app visible; el punto del recorrido se manda cada 5 min, como antes).
+
+### Admin (laptop/PC)
+
+- **Resumen**: indicadores del periodo (visitas vs periodo anterior, cumplimiento de ruta, visitas por vendedor al día, % de visitas verificadas por GPS, vendedores con visitas), visitas por día, resultado de las visitas, un bloque de **"Requiere atención"** (sin ruta, ruta por acabarse, paradas atrasadas, sin visitas, pocas verificadas) y el desempeño por vendedor ordenable.
+- **En vivo**: dónde está cada vendedor hoy, visitas contra lo planeado, última visita y quién no ha empezado; al elegir a uno se ve su recorrido GPS del día. Se actualiza cada minuto.
+- **Visitas**: el registro de cada visita con fotos, mapa de calor y rutas GPS, y **exportación a CSV** (Excel).
+- **Rutas**: estado de la ruta de cada vendedor (sin ruta / se acaba pronto / con ruta) y el **planeador**: zona (buscador, clic en el mapa o zonas dibujadas), giros y ritmo (visitas por día, días de trabajo, duración) → **Generar ruta**. El servidor trae los negocios del DENUE, quita los que ya trae otro vendedor del mismo producto o que se visitaron en los últimos 90 días, los ordena en un recorrido corto (vecino más cercano + 2-opt) y los reparte por día (`fechaPlan` + número de parada). La vista previa se puede editar antes de publicar. La configuración se guarda, así que **Renovar** (uno o varios vendedores a la vez) arma el siguiente periodo con un clic.
+- **Equipo**: conexión con la base de colaboradores, productos de campo (y qué giros busca cada uno) y vendedores activos/bajas.
+- Se quitaron *Dashboard*, *Mapa de Leads*, *Seguimiento* y *Reportes* (su contenido quedó en Resumen, En vivo y Visitas) y *CRM · Prospectos* junto con la integración de HubSpot (ya estaba apagada por costos). La colección `crmDeals` se queda en Firestore tal cual.
+
+### Decisiones que se conservan
+
+- **Login con Google** (`@avivacredito.com`); la app resuelve qué vendedor eres por tu correo.
+- **Foto de evidencia obligatoria y solo-cámara real** (`getUserMedia`, nunca un selector de archivos), hasta 5 por visita (`MAX_FOTOS` en la app y `MAX_FOTOS_POR_VISITA` en `server/src/routes/visitas.ts`, que es quien lo hace cumplir). Las fotos se suben directo a Firebase Storage (ver "Despliegue").
+- **"En ruta"** se infiere de un ping de ubicación de los últimos 20 minutos (no hay "jornada" que iniciar).
+- **Fechas en hora de México**: "hoy", los rangos del admin y las fechas de plan se calculan en `America/Mexico_City` (`server/src/fechas.ts`), no en la hora del servidor (UTC en Cloud Functions).
 
 ## Producción
 
@@ -155,6 +226,8 @@ El proyecto está pensado para desplegarse como **dos sitios de Firebase Hosting
    npm run firebase:deploy   # build de server, apps y functions + firebase deploy
    ```
    O por partes: `npm run build`, `npm run build:functions`, luego `firebase deploy`.
+
+   El primer deploy después de quitar HubSpot va a avisar que la función programada `syncHubspotDealsScheduled` ya no está en el código y preguntar si se borra: sí (o `firebase functions:delete syncHubspotDealsScheduled`). Despliega también los índices nuevos de `firestore.indexes.json` (`--only firestore:indexes`) antes de usar Rutas y la app del vendedor.
 
 `firebase.json` ya reescribe `/api/**` hacia la función `api` en ambos sitios de Hosting, y todo lo demás cae a `index.html` (SPA). Como el frontend llama a rutas relativas (`/api/...`), no hace falta configurar CORS entre Hosting y la función; `CORS_ORIGINS` solo importa si llamas a la API desde otro dominio. Las fotos de visitas **no** pasan por ese rewrite: la app del vendedor las sube directo a Firebase Storage con el SDK cliente (`apps/seller/src/uploadFotos.ts`, reglas en `storage.rules`) y la función solo recibe las URLs resultantes — esto evita el límite fijo de 10 MB por request que Firebase Hosting impone a cualquier request reescrita hacia una función, sin importar el límite que configure el propio servidor.
 

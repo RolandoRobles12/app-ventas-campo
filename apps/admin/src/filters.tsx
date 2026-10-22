@@ -22,7 +22,7 @@ interface FiltersState {
   fDesde: string | null;
   fHasta: string | null;
   reload: () => void;
-  // true si producto, vendedor o rango de fecha tienen algo distinto de "todos"/"todo".
+  // true si producto, vendedor o rango de fecha tienen algo distinto de lo predeterminado.
   hayFiltrosActivos: boolean;
   limpiarFiltros: () => void;
 }
@@ -34,7 +34,7 @@ export function FiltersProvider({ children }: { children: ReactNode }) {
   const [vendedores, setVendedores] = useState<Vendedor[]>([]);
   const [fProductos, setFProductosState] = useState<string[]>([]);
   const [fVendedores, setFVendedoresState] = useState<string[]>([]);
-  const [fRango, setFRango] = useState<RangoPreset>('todo');
+  const [fRango, setFRango] = useState<RangoPreset>('7d');
   const [fDesdePersonalizado, setFDesdePersonalizado] = useState<string | null>(null);
   const [fHastaPersonalizado, setFHastaPersonalizado] = useState<string | null>(null);
 
@@ -60,12 +60,12 @@ export function FiltersProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const hayFiltrosActivos = fProductos.length > 0 || fVendedores.length > 0 || fRango !== 'todo';
+  const hayFiltrosActivos = fProductos.length > 0 || fVendedores.length > 0 || fRango !== '7d';
 
   const limpiarFiltros = () => {
     setFProductosState([]);
     setFVendedoresState([]);
-    setFRango('todo');
+    setFRango('7d');
     setFDesdePersonalizado(null);
     setFHastaPersonalizado(null);
   };

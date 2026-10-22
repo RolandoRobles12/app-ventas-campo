@@ -18,7 +18,9 @@ function loadApp() {
   return import('./_server/app.js').then((m) => m.app);
 }
 
-export const api = onRequest(async (req, res) => {
+// 120s: "Generar ruta" consulta el DENUE (hasta 20s por giro) además de
+// Firestore; con el default de 60s una zona lenta podía cortarse a medias.
+export const api = onRequest({ timeoutSeconds: 120 }, async (req, res) => {
   try {
     if (!appPromise) appPromise = loadApp();
     const app = await appPromise;
@@ -30,25 +32,26 @@ export const api = onRequest(async (req, res) => {
   }
 });
 
-// Trae deals de HubSpot a Firestore cada 30 min, sin que nadie tenga que
-// entrar a la página de CRM del admin y darle a "Sincronizar" a mano — de
-// eso dependen "solicitudes hoy" y "colocación del mes" del home del
-// vendedor (GET /metas/:vendedorId/hoy en _server/routes/metas.ts), que
-// leen de la copia local en `crmDeals`, no de HubSpot en vivo.
-// timeoutSeconds más alto que el default (60s): la sincronización hace un
-// read+write de Firestore por cada deal, uno por uno, así que una cuenta con
-// varios cientos de deals puede tardar más de un minuto.
-export const syncHubspotDealsScheduled = onSchedule({ schedule: '*/30 * * * *', timeoutSeconds: 300 }, async () => {
-  const { syncHubspotDeals } = await import('./_server/routes/crm.js');
-  const { isHubspotConfigured } = await import('./_server/integrations/hubspot.js');
-  if (!isHubspotConfigured()) {
-    console.log('HubSpot no configurado (falta HUBSPOT_TOKEN) — se omite la sincronización programada.');
-    return;
-  }
-  try {
-    const result = await syncHubspotDeals();
-    console.log(`Sincronización de HubSpot (cron): ${result.created} creados, ${result.updated} actualizados, ${result.total} totales.`);
-  } catch (err) {
-    console.error('Sincronización de HubSpot (cron) falló:', err);
-  }
-});
+// Altas y bajas del equipo de campo desde la base de colaboradores de
+// aviva-recruiting (ver _server/equipo.ts), sin que nadie tenga que entrar al
+// admin a darle "Sincronizar". Corre media hora después de las dos
+// sincronizaciones diarias de aviva-recruiting (12:00 y 19:00) y una vez
+// antes de que empiece el día en campo.
+export const sincronizarEquipoProgramado = onSchedule(
+  { schedule: '30 7,12,19 * * *', timeZone: 'America/Mexico_City', timeoutSeconds: 300 },
+  async () => {
+    const { isRecruitingConfigured } = await import('./_server/integrations/recruiting.js');
+    if (!isRecruitingConfigured()) {
+      console.log('Base de colaboradores no configurada (falta RECRUITING_PROJECT_ID) — se omite la sincronización.');
+      return;
+    }
+    const { sincronizarEquipo } = await import('./_server/equipo.js');
+    try {
+      const r = await sincronizarEquipo({ origen: 'programada' });
+      if (r.detenido) console.warn(`Sincronización de equipo detenida: ${r.detenido}`);
+      else console.log(`Sincronización de equipo: ${r.altas.length} altas, ${r.bajas.length} bajas, ${r.reactivados.length} reingresos, ${r.actualizados} actualizados.`);
+    } catch (err) {
+      console.error('Sincronización de equipo (programada) falló:', err);
+    }
+  },
+);

@@ -5,13 +5,12 @@ import { FiltersProvider } from './filters';
 import { ToastProvider } from './toast';
 import { Chrome } from './components/Chrome';
 import { NoAdmin } from './pages/NoAdmin';
-import { Rutas } from './pages/Rutas';
-import { Dashboard } from './pages/Dashboard';
-import { Mapa } from './pages/Mapa';
-import { Seguimiento } from './pages/Seguimiento';
-import { Reportes } from './pages/Reportes';
+import { Resumen } from './pages/Resumen';
+import { EnVivo } from './pages/EnVivo';
 import { Visitas } from './pages/Visitas';
-import { Crm } from './pages/Crm';
+import { Rutas } from './pages/Rutas';
+import { Planeador } from './pages/Planeador';
+import { Equipo } from './pages/Equipo';
 import { Usuarios } from './pages/Usuarios';
 
 function AppShell() {
@@ -25,15 +24,15 @@ function AppShell() {
       <FiltersProvider>
         <Chrome>
           <Routes>
-            <Route path="/" element={<Navigate to="/rutas" replace />} />
-            <Route path="/rutas" element={<Rutas />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/mapa" element={<Mapa />} />
-            <Route path="/seguimiento" element={<Seguimiento />} />
+            <Route path="/" element={<Navigate to="/resumen" replace />} />
+            <Route path="/resumen" element={<Resumen />} />
+            <Route path="/en-vivo" element={<EnVivo />} />
             <Route path="/visitas" element={<Visitas />} />
-            <Route path="/reportes" element={<Reportes />} />
-            <Route path="/crm" element={<Crm />} />
+            <Route path="/rutas" element={<Rutas />} />
+            <Route path="/rutas/:vendedorId" element={<Planeador />} />
+            <Route path="/equipo" element={<Equipo />} />
             <Route path="/usuarios" element={<Usuarios />} />
+            <Route path="*" element={<Navigate to="/resumen" replace />} />
           </Routes>
         </Chrome>
       </FiltersProvider>

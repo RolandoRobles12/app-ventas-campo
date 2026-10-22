@@ -1,13 +1,13 @@
 {
   "name": "Aviva · Visitas de Campo",
   "short_name": "Visitas Aviva",
-  "description": "Registra tus visitas de campo y da seguimiento a tus metas del día.",
+  "description": "Tu ruta del día: a quién visitar, cómo llegar y el registro de cada visita, con o sin señal.",
   "lang": "es-MX",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#e9f4ee",
+  "orientation": "any",
+  "background_color": "#eef5f0",
   "theme_color": "#0f5132",
   "icons": [
     {
