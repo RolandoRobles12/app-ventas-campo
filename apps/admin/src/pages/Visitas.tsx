@@ -8,9 +8,19 @@ import { prodBadgeStyle, resultadoBadgeStyle } from '../badges';
 
 const PAGE_SIZE = 20;
 const RESULTADOS = [
-  'Se realizó solicitud', 'Se dejó información', 'Cliente no interesado',
-  'No es un negocio válido o existente', 'Se reagenda visita',
+  'Se realizó solicitud', 'Se dejó información', 'Se reagenda visita',
+  'Cliente no interesado', 'No es un negocio válido o existente',
 ];
+
+// Hasta cuántas visitas se exportan de una vez (páginas de 100).
+const MAX_EXPORTAR = 5000;
+
+function celdaCsv(v: unknown): string {
+  const t = String(v ?? '');
+  // Una celda que empieza con = + - @ se abriría como fórmula en Excel.
+  const segura = /^[=+\-@]/.test(t) ? `'${t}` : t;
+  return /[",\n]/.test(segura) ? `"${segura.replace(/"/g, '""')}"` : segura;
+}
 
 const gridCols = '54px 2fr 1.2fr 1.1fr 1.5fr 1fr .95fr';
 
@@ -32,7 +42,7 @@ export function Visitas() {
 
   useEffect(() => {
     if (!showCalor) return;
-    api.mapaCalor(fProductos, fVendedores, fDesde ?? undefined, fHasta ?? undefined).then(setCalor).catch(() => {});
+    api.mapaCalor({ productoIds: fProductos, vendedorIds: fVendedores, desde: fDesde, hasta: fHasta }).then(setCalor).catch(() => {});
   }, [showCalor, fProductos, fVendedores, fDesde, fHasta]);
 
   useEffect(() => {
@@ -45,7 +55,7 @@ export function Visitas() {
     api.recorridos({
       vendedorIds: fVendedores.length ? fVendedores : undefined,
       productoIds: fVendedores.length ? undefined : fProductos,
-      desde: fDesde ?? undefined, hasta: fHasta ?? undefined,
+      desde: fDesde, hasta: fHasta,
     }).then((r) => { setRutas(r); setRutasError(''); }).catch((err) => {
       setRutas([]);
       setRutasError(err.message || 'No se pudieron cargar las rutas.');
@@ -61,7 +71,7 @@ export function Visitas() {
       vendedorIds: fVendedores.length ? fVendedores : undefined,
       productoIds: fVendedores.length ? undefined : fProductos,
       resultados: selResultados,
-      desde: fDesde ?? undefined, hasta: fHasta ?? undefined,
+      desde: fDesde, hasta: fHasta,
       cursor, limit: PAGE_SIZE,
     }).then((r) => {
       setItems((prev) => primeraPagina ? r.items : [...prev, ...r.items]);
@@ -73,11 +83,53 @@ export function Visitas() {
 
   useEffect(() => { cargar(); }, [cargar]);
 
+  const [exportando, setExportando] = useState(false);
+  const exportar = async () => {
+    setExportando(true);
+    try {
+      const filas: VisitaListItem[] = [];
+      let cursor: string | undefined;
+      do {
+        const r = await api.visitas({
+          vendedorIds: fVendedores.length ? fVendedores : undefined,
+          productoIds: fVendedores.length ? undefined : fProductos,
+          resultados: selResultados, desde: fDesde, hasta: fHasta, cursor, limit: 100,
+        });
+        filas.push(...r.items);
+        cursor = r.nextCursor ?? undefined;
+      } while (cursor && filas.length < MAX_EXPORTAR);
+      const encabezado = ['Fecha', 'Hora', 'Vendedor', 'Producto', 'Negocio', 'Dirección', 'Negocio nuevo', 'Resultado', 'Notas', 'Fotos', 'Ubicación verificada', 'Distancia al negocio (m)', 'Latitud', 'Longitud'];
+      const lineas = filas.map((v) => {
+        const d = new Date(v.createdAt);
+        return [
+          d.toLocaleDateString('es-MX'), d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }), v.vendedorNombre, v.producto,
+          v.nombreNegocio, v.direccion, v.esNegocioNuevo ? 'Sí' : 'No', v.resultado, v.notas ?? '', (v.fotos ?? []).length,
+          v.ubicacionValida == null ? '' : v.ubicacionValida ? 'Sí' : 'No', v.distanciaValidacionMetros ?? '', v.lat ?? '', v.lng ?? '',
+        ].map(celdaCsv).join(',');
+      });
+      // BOM para que Excel abra bien los acentos.
+      const blob = new Blob(['\ufeff' + [encabezado.join(','), ...lineas].join('\n')], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `visitas_${fDesde ?? 'todo'}_${fHasta ?? ''}.csv`.replace(/_\.csv$/, '.csv');
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } finally {
+      setExportando(false);
+    }
+  };
+
   return (
     <div className="screen">
       <PageHeader
         icon={<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#157347" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg>}
-        title="Visitas" subtitle="Consulta visitas de campo por vendedor, producto, resultado o fecha"
+        title="Visitas" subtitle="Cada visita registrada en campo, con su evidencia y ubicación"
+        right={
+          <button onClick={exportar} disabled={exportando} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#157347', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 600, opacity: exportando ? 0.7 : 1 }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+            {exportando ? 'Exportando…' : 'Exportar a Excel (CSV)'}
+          </button>
+        }
       />
       <FilterBar
         extra={

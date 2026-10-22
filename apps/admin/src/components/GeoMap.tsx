@@ -191,7 +191,10 @@ function pinIconUrl(color: string): string {
   return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
 
-export function GeoMap({ heatPoints, pins, recorridos, height }: { heatPoints?: HeatPoint[]; pins?: MapPin[]; recorridos?: Recorrido[]; height: number | string }) {
+// `encuadre`: si se da, el mapa solo se reencuadra cuando cambia ese valor
+// (para pantallas que refrescan datos solos y no deben mover el mapa que el
+// usuario ya acomodó); sin él, se reencuadra cada vez que cambian los datos.
+export function GeoMap({ heatPoints, pins, recorridos, height, encuadre }: { heatPoints?: HeatPoint[]; pins?: MapPin[]; recorridos?: Recorrido[]; height: number | string; encuadre?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const heatRef = useRef<HeatmapOverlay | null>(null);
@@ -279,16 +282,27 @@ export function GeoMap({ heatPoints, pins, recorridos, height }: { heatPoints?: 
     });
   }, [recorridos, ready]);
 
-  // Encuadra todos los puntos cada vez que cambian los datos.
+  // Encuadra todos los puntos cada vez que cambian los datos (o solo cuando
+  // cambia `encuadre`, si se dio).
+  const ultimoEncuadre = useRef<string | undefined>(undefined);
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
     const coords = [...(heatPoints ?? []), ...(pins ?? []), ...(recorridos ?? []).flatMap((r) => r.puntos)];
     if (!coords.length) return;
+    if (encuadre !== undefined) {
+      if (ultimoEncuadre.current === encuadre) return;
+      ultimoEncuadre.current = encuadre;
+    }
+    if (coords.length === 1) {
+      map.setCenter({ lat: coords[0].lat, lng: coords[0].lng });
+      map.setZoom(15);
+      return;
+    }
     const bounds = new google.maps.LatLngBounds();
     coords.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
     map.fitBounds(bounds, 40);
-  }, [heatPoints, pins, recorridos, ready]);
+  }, [heatPoints, pins, recorridos, ready, encuadre]);
 
   if (error) {
     return (

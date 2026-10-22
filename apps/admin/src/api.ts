@@ -2,50 +2,105 @@ import { getIdToken } from '@aviva/ui';
 
 export interface Producto { id: string; nombre: string; esDeCampo: boolean; giros: string[]; }
 export interface ZonaPunto { lat: number; lng: number }
-export interface Vendedor {
-  id: string; nombre: string; iniciales: string; color: string; email: string | null; estado: string;
-  ciudad: string; colonia: string | null; drawZone: boolean; zonaPoligonos: ZonaPunto[][] | null;
-  producto: string; productoId: string;
-  giros: string[]; prospectosCount?: number;
-  metaSolicitudesDia: number; metaVentaMes: number;
+
+export interface ZonaRuta {
+  etiqueta: string;
+  lat: number | null;
+  lng: number | null;
+  radioMetros: number;
+  poligonos: ZonaPunto[][] | null;
 }
+export interface RutaConfig {
+  zona: ZonaRuta;
+  giros: string[];
+  visitasPorDia: number;
+  dias: number[];
+  semanas: number;
+}
+
+export interface Vendedor {
+  id: string; nombre: string; iniciales: string; color: string; email: string | null;
+  estado: 'Activo' | 'Baja';
+  producto: string; productoId: string; giros: string[];
+  puesto: string | null; zona: string | null; tienda: string | null;
+  hubManagerNombre: string | null; headNombre: string | null;
+  fuente: string | null; bajaEn: string | null; bajaMotivo: string | null;
+  rutaConfig: RutaConfig | null;
+  rutaAnterior: { etiqueta: string; poligonos: ZonaPunto[][] | null } | null;
+}
+
 export interface Prospecto {
   id: string; vendedorId: string; nombre: string; direccion: string; giro?: string | null;
   distanciaKm?: number | null; telefono?: string | null; origen: string; estado: string;
   lat?: number | null; lng?: number | null;
-  // Ventana de visita planeada (ruta semanal/quincenal/mensual): YYYY-MM-DD,
-  // ambos inclusive. null = sin programar (se puede visitar en cualquier momento).
+  fechaPlan?: string | null; orden?: number | null; reagendado?: boolean;
   semanaInicio?: string | null; semanaHasta?: string | null;
 }
-export interface DashboardSummary {
-  visitasHoy: number; visitasAyerPct: number | null; porVisitar: number; conversion: number;
-  vendedoresTotal: number; vendedoresActivos: number;
+
+export interface EstadoRuta {
+  vendedorId: string; pendientes: number; conFecha: number; sinFecha: number; atrasadas: number; hoy: number;
+  hasta: string | null; diasRestantes: number | null; tieneConfig: boolean; zona: string | null; visitasPorDia: number | null;
 }
-export interface WeekBar { day: string; val: number; }
-export interface ResultadosDonut { total: number; items: { resultado: string; count: number; pct: number; color: string }[]; }
-export interface ActividadVendedor { id: string; nombre: string; iniciales: string; color: string; producto: string; ciudad: string; hoy: number; estado: string; }
-export interface MapaLeadsResponse {
-  totales: { total: number; porVisitar: number; visitados: number; sincronizadosCrm: number };
-  leads: { id: string; nombre: string; direccion: string; estado: string; lat: number; lng: number; vendedor: string; color: string }[];
+
+export interface ItemRuta {
+  nombre: string; direccion: string; giro?: string | null; telefono?: string | null;
+  lat?: number | null; lng?: number | null; distanciaKm?: number | null;
+  fechaPlan: string; orden: number; manual?: boolean;
 }
+export interface RutaGenerada {
+  items: ItemRuta[]; fechas: string[]; necesarios: number; encontrados: number;
+  centro: ZonaPunto; radioMetros: number;
+}
+
+export interface ReporteSync {
+  ok: boolean; fecha: string; origen: 'manual' | 'programada'; actor: string | null;
+  totalColaboradores: number; enProductosCampo: number;
+  altas: { nombre: string; producto: string }[];
+  bajas: { nombre: string; motivo: string }[];
+  reactivados: { nombre: string }[];
+  actualizados: number; sinColaborador: number; detenido: string | null;
+}
+export interface EstadoEquipo {
+  configurado: boolean;
+  productos: { id: string; nombre: string; esDeCampo: boolean; giros: string[] }[];
+  girosDisponibles: string[];
+  ultimo: ReporteSync | null;
+}
+
+export interface MetricasResumen {
+  desde: string; hasta: string; porSemana: boolean; limitePlan: string;
+  totales: {
+    visitas: number; visitasPrev: number; cambioPct: number | null;
+    planeados: number; cumplidos: number; cumplimiento: number | null;
+    promedioDia: number; ubicacionValida: number | null; validables: number;
+    negociosNuevos: number; vendedoresActivos: number; vendedoresConVisitas: number;
+  };
+  serie: { fecha: string; visitas: number }[];
+  resultados: { resultado: string; count: number }[];
+  vendedores: {
+    id: string; nombre: string; iniciales: string; color: string; producto: string; estado: string;
+    visitas: number; diasActivos: number; promedioDia: number; planeados: number; cumplidos: number;
+    cumplimiento: number | null; ubicacionValida: number | null; negociosNuevos: number; ultimaVisita: string | null;
+  }[];
+}
+
+export interface EnVivoItem {
+  id: string; nombre: string; iniciales: string; color: string; producto: string; zona: string | null;
+  estado: 'en_ruta' | 'inactivo' | 'sin_actividad';
+  ultimaSenal: string | null; posicion: ZonaPunto | null;
+  visitasHoy: number; planHoy: number; planHoyVisitados: number;
+  primeraVisita: string | null;
+  ultimaVisita: { nombre: string; resultado: string; hora: string } | null;
+}
+
 export interface MapaCalorResponse {
   puntos: { lat: number; lng: number; peso: number }[];
   visitasTotales: number;
   visitasConUbicacion: number;
 }
-export interface SeguimientoItem {
-  id: string; nombre: string; iniciales: string; color: string; producto: string; ciudad: string;
-  inicio: string | null; estado: string; realizadas: number; pendientes: number; pct: number; km: number; ubicacionActual: string;
-}
 export interface RecorridoVendedor {
   vendedorId: string; nombre: string; color: string;
   puntos: { lat: number; lng: number; createdAt: string }[];
-}
-export interface ReportesSummary { visitasTotales: number; solicitudes: number; conversion: number; kmRecorridos: number; }
-export interface ReporteVendedor { id: string; nombre: string; total: number; solicitudes: number; km: number; w1: string; w2: string; }
-export interface Evidencia {
-  id: string; nombre: string; resultado: string; fotoUrl: string; createdAt: string;
-  ubicacionValida: boolean | null; distanciaValidacionMetros: number | null;
 }
 export interface VisitaListItem {
   id: string; vendedorId: string; vendedorNombre: string; producto: string;
@@ -54,15 +109,6 @@ export interface VisitaListItem {
   ubicacionValida: boolean | null; distanciaValidacionMetros: number | null; createdAt: string;
 }
 export interface VisitasResponse { items: VisitaListItem[]; nextCursor: string | null }
-export interface CrmDeal {
-  id: string; hubspotDealId: string | null; cliente: string; negocio: string; producto?: string;
-  etapa: string; amount: number | null; dealOwner: string | null; dealOwnerId: string | null;
-  serviceOwner: string | null; source: string; lastSyncedAt: string | null; hubspotUrl: string | null;
-}
-export interface AvivaHrImportResult {
-  ok: boolean; creados: number; actualizados: number; total: number;
-  omitidos: { email: string; nombre: string; motivo: string }[];
-}
 export interface Usuario { email: string; nombre: string | null; createdAt: string }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -79,15 +125,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-function qs(params: Record<string, string | undefined>): string {
-  const filtered = Object.entries(params).filter(([, v]) => v);
-  if (!filtered.length) return '';
-  return '?' + new URLSearchParams(filtered as [string, string][]).toString();
-}
-
-// Como qs(), pero además admite arreglos (selección múltiple de
-// producto/vendedor/resultado): se mandan separados por coma.
-function qsMulti(params: Record<string, string | string[] | undefined>): string {
+// Admite arreglos (selección múltiple de producto/vendedor/resultado): se
+// mandan separados por coma.
+function qs(params: Record<string, string | string[] | undefined | null>): string {
   const sp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (Array.isArray(value)) { if (value.length) sp.set(key, value.join(',')); }
@@ -97,74 +137,48 @@ function qsMulti(params: Record<string, string | string[] | undefined>): string 
   return str ? `?${str}` : '';
 }
 
+const post = (body?: unknown): RequestInit => ({ method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
+
+export interface Filtro { productoIds?: string[]; vendedorIds?: string[]; desde?: string | null; hasta?: string | null }
+
 export const api = {
-  me: () => req<{ email: string; vendedor: Vendedor | null; isAdmin: boolean }>('/auth/me'),
+  me: () => req<{ email: string; isAdmin: boolean }>('/auth/me'),
 
   usuarios: () => req<Usuario[]>('/usuarios'),
-  agregarUsuario: (data: { email: string; nombre?: string }) =>
-    req<Usuario>('/usuarios', { method: 'POST', body: JSON.stringify(data) }),
+  agregarUsuario: (data: { email: string; nombre?: string }) => req<Usuario>('/usuarios', post(data)),
   eliminarUsuario: (email: string) => req<void>(`/usuarios/${encodeURIComponent(email)}`, { method: 'DELETE' }),
 
   productos: () => req<Producto[]>('/productos/de-campo'),
-  vendedores: (producto?: string) => req<Vendedor[]>(`/vendedores${qs({ producto })}`),
-  actualizarRuta: (id: string, data: { productoId?: string; ciudad?: string; colonia?: string; giros?: string[]; drawZone?: boolean; zonaPoligonos?: ZonaPunto[][] | null }) =>
-    req<Vendedor>(`/vendedores/${id}/ruta`, { method: 'PUT', body: JSON.stringify(data) }),
-  actualizarMetas: (id: string, data: { metaSolicitudesDia?: number; metaVentaMes?: number }) =>
-    req<{ id: string; metaSolicitudesDia: number; metaVentaMes: number }>(`/metas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  avivaHrStatus: () => req<{ configured: boolean }>('/vendedores/externos/status'),
-  avivaHrImportar: () => req<AvivaHrImportResult>('/vendedores/importar', { method: 'POST' }),
+  vendedores: () => req<Vendedor[]>('/vendedores'),
+  vendedor: (id: string) => req<Vendedor>(`/vendedores/${id}`),
+
+  equipo: () => req<EstadoEquipo>('/equipo'),
+  sincronizarEquipo: (forzar = false) => req<ReporteSync>('/equipo/sincronizar', post({ forzar })),
+  guardarProductosEquipo: (data: { productosCampo?: string[]; giros?: Record<string, string[]> }) =>
+    req<EstadoEquipo>('/equipo/productos', { method: 'PUT', body: JSON.stringify(data) }),
+
+  rutasStatus: () => req<{ denue: boolean; googleMaps: boolean }>('/rutas/status'),
+  rutasEstado: (f: { productoIds?: string[]; vendedorIds?: string[] } = {}) =>
+    req<{ hoy: string; items: EstadoRuta[] }>(`/rutas/estado${qs(f)}`),
+  generarRuta: (vendedorId: string, data: { config: RutaConfig; inicio: string; reemplazarPendientes: boolean }) =>
+    req<RutaGenerada>(`/rutas/${vendedorId}/generar`, post(data)),
+  publicarRuta: (vendedorId: string, data: { config: RutaConfig; inicio: string; items: ItemRuta[]; reemplazarPendientes: boolean; centro?: ZonaPunto }) =>
+    req<{ creados: number; eliminados: number; desde: string | null; hasta: string | null }>(`/rutas/${vendedorId}/publicar`, post(data)),
+  renovarRuta: (vendedorId: string) =>
+    req<{ creados: number; desde: string | null; hasta: string | null; necesarios: number; encontrados: number }>(`/rutas/${vendedorId}/renovar`, post()),
+  reasignarPendientes: (vendedorId: string, aVendedorId: string) =>
+    req<{ movidos: number }>(`/rutas/${vendedorId}/reasignar`, post({ aVendedorId })),
 
   prospectos: (vendedorId: string) => req<Prospecto[]>(`/prospectos/vendedor/${vendedorId}`),
-  bulkProspectos: (vendedorId: string, items: Partial<Prospecto>[]) =>
-    req<{ creados: number; prospectos: Prospecto[] }>('/prospectos/bulk', { method: 'POST', body: JSON.stringify({ vendedorId, items }) }),
-  eliminarProspecto: (id: string) => req<void>(`/prospectos/${id}`, { method: 'DELETE' }),
 
-  visitas: (params: {
-    vendedorIds?: string[]; productoIds?: string[]; resultados?: string[];
-    desde?: string; hasta?: string; cursor?: string; limit?: number;
-  }) => req<VisitasResponse>(`/visitas${qsMulti({
-    vendedorIds: params.vendedorIds, productoIds: params.productoIds, resultados: params.resultados,
-    desde: params.desde, hasta: params.hasta, cursor: params.cursor, limit: params.limit ? String(params.limit) : undefined,
-  })}`),
+  metricas: (f: Filtro) => req<MetricasResumen>(`/metricas/resumen${qs({ ...f })}`),
+  enVivo: (f: { productoIds?: string[]; vendedorIds?: string[] }) => req<{ hoy: string; items: EnVivoItem[] }>(`/seguimiento${qs(f)}`),
+  mapaCalor: (f: Filtro) => req<MapaCalorResponse>(`/mapa/calor${qs({ ...f })}`),
+  recorridos: (f: Filtro) => req<RecorridoVendedor[]>(`/ubicaciones/recorrido${qs({ ...f })}`),
 
-  denueStatus: () => req<{ configured: boolean; googleMapsConfigured: boolean }>('/denue/status'),
-  consultarDenue: (data: {
-    giros: string[]; cantidad: number;
-    ciudad?: string; colonia?: string;
-    lat?: number; lng?: number; radioMetros?: number;
-    poligonos?: ZonaPunto[][];
-    excluir?: string[];
-  }) => req<{ resultados: any[] }>('/denue/consulta', { method: 'POST', body: JSON.stringify(data) }),
-
-  dashboardSummary: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
-    req<DashboardSummary>(`/dashboard/summary${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
-  dashboardSemana: (productoIds?: string[], vendedorIds?: string[]) =>
-    req<WeekBar[]>(`/dashboard/semana${qsMulti({ productoIds, vendedorIds })}`),
-  dashboardResultados: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
-    req<ResultadosDonut>(`/dashboard/resultados${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
-  dashboardActividad: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
-    req<ActividadVendedor[]>(`/dashboard/actividad${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
-
-  mapaLeads: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
-    req<MapaLeadsResponse>(`/mapa/leads${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
-  mapaCalor: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
-    req<MapaCalorResponse>(`/mapa/calor${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
-  seguimiento: (productoIds?: string[], vendedorIds?: string[]) =>
-    req<SeguimientoItem[]>(`/seguimiento${qsMulti({ productoIds, vendedorIds })}`),
-  recorridos: (params: { vendedorIds?: string[]; productoIds?: string[]; desde?: string; hasta?: string }) =>
-    req<RecorridoVendedor[]>(`/ubicaciones/recorrido${qsMulti(params)}`),
-
-  reportesSummary: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
-    req<ReportesSummary>(`/reportes/summary${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
-  reportesVendedores: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
-    req<ReporteVendedor[]>(`/reportes/vendedores${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
-  reportesEvidencias: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
-    req<Evidencia[]>(`/reportes/evidencias${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
-
-  crmStatus: () => req<{ configured: boolean; stages: string[]; funnelStages: string[] }>('/crm/status'),
-  crmDeals: (productoIds?: string[], vendedorIds?: string[], desde?: string, hasta?: string) =>
-    req<CrmDeal[]>(`/crm/deals${qsMulti({ productoIds, vendedorIds, desde, hasta })}`),
-  crmSync: () => req<{ ok: boolean; created: number; updated: number; total: number }>('/crm/sync', { method: 'POST' }),
-  crmUpdate: (id: string, data: Partial<{ cliente: string; negocio: string; etapa: string; amount: number; dealOwnerId: string; serviceOwner: string }>) =>
-    req<CrmDeal & { hubspotWarning?: string }>(`/crm/deals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  visitas: (params: Filtro & { resultados?: string[]; cursor?: string; limit?: number }) =>
+    req<VisitasResponse>(`/visitas${qs({
+      vendedorIds: params.vendedorIds, productoIds: params.productoIds, resultados: params.resultados,
+      desde: params.desde, hasta: params.hasta, cursor: params.cursor, limit: params.limit ? String(params.limit) : undefined,
+    })}`),
 };

@@ -80,14 +80,14 @@ export function LocationGate({ children }: { children: ReactNode }) {
       ) : (
         <>
           <h2 style={{ margin: '22px 0 0', fontSize: 22, fontWeight: 800, color: 'var(--ink-900)' }}>{estado.titulo}</h2>
-          <p style={{ margin: '10px 0 0', fontSize: 14, fontWeight: 500, color: 'var(--ink-300)', lineHeight: 1.55, maxWidth: 300 }}>
+          <p style={{ margin: '10px 0 0', fontSize: 16, fontWeight: 500, color: 'var(--ink-300)', lineHeight: 1.55, maxWidth: 420 }}>
             {estado.detalle}
           </p>
           <button
             onClick={verificar}
             style={{
-              marginTop: 24, width: '100%', maxWidth: 300, border: 'none', background: 'var(--aviva-green-700)',
-              color: '#fff', fontSize: 15, fontWeight: 700, padding: 15, borderRadius: 16,
+              marginTop: 24, width: '100%', maxWidth: 420, minHeight: 58, border: 'none', background: 'var(--aviva-green-700)',
+              color: '#fff', fontSize: 17, fontWeight: 800, padding: 15, borderRadius: 16,
               boxShadow: '0 10px 24px rgba(15,81,50,.3)',
             }}
           >

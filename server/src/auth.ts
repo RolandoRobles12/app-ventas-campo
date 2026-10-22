@@ -56,8 +56,10 @@ export async function puedeActuarComoVendedor(email: string, vendedorId: string)
   ]);
   if (esAdmin) return true;
   if (!vendedorDoc.exists) return false;
-  const vEmail = (vendedorDoc.data() as { email?: string | null }).email;
-  return !!vEmail && vEmail.toLowerCase() === email.toLowerCase();
+  const v = vendedorDoc.data() as { email?: string | null; estado?: string };
+  // Un vendedor dado de baja (ver equipo.ts) ya no puede registrar nada.
+  if (v.estado === 'Baja') return false;
+  return !!v.email && v.email.toLowerCase() === email.toLowerCase();
 }
 
 export function vendedorAjeno(res: Response) {

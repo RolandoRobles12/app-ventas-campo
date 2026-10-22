@@ -34,8 +34,8 @@ function parseCoord(raw: unknown, min: number, max: number): number | null {
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
 }
 
-// Un punto de GPS del recorrido del vendedor (ver LocationTracker en la app
-// del vendedor: manda uno cada ~5 min mientras la jornada está activa).
+// Un punto de GPS del recorrido del vendedor (ver ubicacion.tsx en la app
+// del vendedor: manda uno cada ~5 min mientras la app está abierta).
 // `capturadoEn` viene solo en los puntos que se guardaron sin señal y se
 // reenvían después, para que el recorrido conserve la hora real de captura.
 ubicacionesRouter.post('/', async (req, res) => {

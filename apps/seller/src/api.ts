@@ -6,7 +6,8 @@ export interface Vendedor {
   iniciales: string;
   color: string;
   producto: string;
-  ciudad: string;
+  zona: string | null;
+  rutaConfig: { visitasPorDia: number; dias: number[]; zona: { etiqueta: string } } | null;
 }
 
 export interface Prospecto {
@@ -21,16 +22,37 @@ export interface Prospecto {
   estado: 'por_visitar' | 'visitado';
   lat?: number | null;
   lng?: number | null;
-  // Ventana de visita planeada por el admin (ruta semanal/quincenal/mensual):
-  // YYYY-MM-DD, ambos inclusive. null = sin programar (se puede visitar ya).
+  // Día en que le toca (YYYY-MM-DD) y número de parada ese día; los pone el
+  // planeador de rutas del admin. null en listas viejas sin fecha.
+  fechaPlan?: string | null;
+  orden?: number | null;
+  reagendado?: boolean;
+  visitadoEn?: string | null;
+  // Ventana semanal de rutas viejas (antes de fechaPlan).
   semanaInicio?: string | null;
   semanaHasta?: string | null;
 }
 
-export interface Metas {
-  solicitudesHoy: { actual: number; meta: number };
-  colocacionMes: { actual: number; meta: number };
+export interface VisitaReciente {
+  id: string;
+  prospectoId: string | null;
+  nombreNegocio: string;
+  direccion: string;
+  resultado: string;
+  notas: string | null;
+  fotos: number;
+  esNegocioNuevo: boolean;
+  ubicacionValida: boolean | null;
+  createdAt: string;
+}
+
+export interface Progreso {
+  hoy: string;
+  visitasHoy: number;
+  visitasPorDia: number | null;
   racha: number;
+  semana: { fecha: string; visitas: number }[];
+  recientes: VisitaReciente[];
 }
 
 // El servidor SÍ respondió pero rechazó la petición. Cualquier otro error de
@@ -49,9 +71,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const res = await fetch(`/api${path}`, {
     ...init,
-    headers: init?.body instanceof FormData
-      ? { ...authHeader, ...init.headers }
-      : { 'Content-Type': 'application/json', ...authHeader, ...init?.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeader, ...init?.headers },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -62,11 +82,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  me: () => req<{ email: string; vendedor: Vendedor | null }>('/auth/me'),
+  me: () => req<{ email: string; vendedor: Vendedor | null; baja: boolean }>('/auth/me'),
   prospectos: (vendedorId: string) => req<Prospecto[]>(`/prospectos/vendedor/${vendedorId}`),
-  crearProspectoManual: (data: { vendedorId: string; nombre: string; direccion: string; giro?: string }) =>
-    req<Prospecto>('/prospectos', { method: 'POST', body: JSON.stringify(data) }),
-  metasHoy: (vendedorId: string) => req<Metas>(`/metas/${vendedorId}/hoy`),
+  progreso: (vendedorId: string) => req<Progreso>(`/progreso/${vendedorId}`),
   registrarVisita: (data: Record<string, unknown>) =>
     req<{ id: string }>('/visitas', { method: 'POST', body: JSON.stringify(data) }),
   registrarUbicacion: (data: { vendedorId: string; lat: number; lng: number; accuracy?: number; capturadoEn?: number }) =>

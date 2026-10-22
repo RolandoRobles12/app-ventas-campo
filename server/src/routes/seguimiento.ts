@@ -1,30 +1,30 @@
 import { Router } from 'express';
-import { AggregateField } from 'firebase-admin/firestore';
 import { db, Timestamp } from '../db.js';
 import { resolveVendedorIds, getVendedoresDocs } from './_filters.js';
-import { isEmptyRestriction, parseCsvParam } from '../firestore-helpers.js';
+import { isEmptyRestriction, parseCsvParam, toIso } from '../firestore-helpers.js';
+import { hoyMx, inicioDiaMx } from '../fechas.js';
+import { productosPorId, type VendedorDoc } from './vendedores.js';
 
+// "En vivo": cómo va hoy cada vendedor activo — dónde está, cuántas visitas
+// lleva contra las que le tocan hoy y cuál fue la última. Incluye a quienes
+// no han empezado, para que el admin vea de un vistazo quién falta.
 export const seguimientoRouter = Router();
 
-interface VendedorDoc {
-  nombre: string;
-  iniciales: string;
-  color: string;
-  productoId: string;
-  ciudad: string;
-}
-
 interface UbicacionDoc {
+  lat: number;
+  lng: number;
   createdAt: Timestamp;
 }
 
 interface VisitaDoc {
   nombreNegocio: string;
+  resultado: string;
+  createdAt: Timestamp;
 }
 
 // Sin una jornada que "iniciar" a mano, "en ruta" se infiere de actividad
 // real: el vendedor manda un ping de ubicación cada 5 min mientras la app
-// está abierta (LocationTracker), así que un ping reciente equivale a
+// está abierta (apps/seller/src/ubicacion.tsx), así que un ping reciente equivale a
 // "trabajando ahora mismo". La ventana es más ancha que el intervalo de
 // ping para tolerar que se salte un ciclo (pantalla apagada, sin señal, etc).
 const VENTANA_EN_RUTA_MIN = 20;
@@ -32,59 +32,47 @@ const VENTANA_EN_RUTA_MIN = 20;
 seguimientoRouter.get('/', async (req, res) => {
   const { productoIds, vendedorIds } = req.query as { productoIds?: string; vendedorIds?: string };
   const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
-  if (isEmptyRestriction(ids)) return res.json([]);
+  const hoy = hoyMx();
+  if (isEmptyRestriction(ids)) return res.json({ hoy, items: [] });
 
-  const vendedoresDocs = await getVendedoresDocs(ids);
-  const vendedores = vendedoresDocs.map((d) => ({ id: d.id, ...(d.data() as VendedorDoc) }));
+  const vendedores = (await getVendedoresDocs(ids))
+    .map((d) => ({ id: d.id, ...(d.data() as VendedorDoc) }))
+    .filter((v) => v.estado !== 'Baja');
+  const productos = await productosPorId(vendedores.map((v) => v.productoId));
 
-  const productos = new Map<string, string>();
-  await Promise.all([...new Set(vendedores.map((v) => v.productoId))].map(async (pid) => {
-    const doc = await db.collection('productos').doc(pid).get();
-    if (doc.exists) productos.set(pid, (doc.data() as { nombre: string }).nombre);
-  }));
+  const inicioHoy = Timestamp.fromDate(inicioDiaMx(hoy));
+  const umbralActivo = Date.now() - VENTANA_EN_RUTA_MIN * 60 * 1000;
 
-  const start = new Date(); start.setHours(0, 0, 0, 0);
-  const end = new Date(start); end.setDate(end.getDate() + 1);
-  const umbralActivo = new Date(Date.now() - VENTANA_EN_RUTA_MIN * 60 * 1000);
-
-  const out = await Promise.all(vendedores.map(async (v) => {
-    const [realizadasSnap, primeraUbicacionHoySnap, ultimaUbicacionSnap, pendientesSnap, ultimaVisitaSnap, kmSnap] = await Promise.all([
-      db.collection('visitas').where('vendedorId', '==', v.id)
-        .where('createdAt', '>=', Timestamp.fromDate(start)).where('createdAt', '<', Timestamp.fromDate(end)).count().get(),
-      db.collection('ubicaciones').where('vendedorId', '==', v.id)
-        .where('createdAt', '>=', Timestamp.fromDate(start)).where('createdAt', '<', Timestamp.fromDate(end))
-        .orderBy('createdAt', 'asc').limit(1).get(),
+  const items = await Promise.all(vendedores.map(async (v) => {
+    const plan = db.collection('prospectos').where('vendedorId', '==', v.id).where('fechaPlan', '==', hoy);
+    const [ubicacionSnap, visitasSnap, planHoy, planHoyVisitados] = await Promise.all([
       db.collection('ubicaciones').where('vendedorId', '==', v.id).orderBy('createdAt', 'desc').limit(1).get(),
-      db.collection('prospectos').where('vendedorId', '==', v.id).where('estado', '==', 'por_visitar').count().get(),
-      db.collection('visitas').where('vendedorId', '==', v.id).orderBy('createdAt', 'desc').limit(1).get(),
-      db.collection('prospectos').where('vendedorId', '==', v.id).where('estado', '==', 'visitado')
-        .aggregate({ sum: AggregateField.sum('distanciaKm') }).get(),
+      db.collection('visitas').where('vendedorId', '==', v.id).where('createdAt', '>=', inicioHoy)
+        .select('nombreNegocio', 'resultado', 'createdAt').get(),
+      plan.count().get(),
+      plan.where('estado', '==', 'visitado').count().get(),
     ]);
-
-    const realizadas = realizadasSnap.data().count;
-    const primeraUbicacionHoy = primeraUbicacionHoySnap.docs[0]?.data() as UbicacionDoc | undefined;
-    if (realizadas === 0 && !primeraUbicacionHoy) return null; // sin actividad hoy: no aparece "en vivo"
-
-    const ultimaUbicacion = ultimaUbicacionSnap.docs[0]?.data() as UbicacionDoc | undefined;
-    const activo = !!ultimaUbicacion && ultimaUbicacion.createdAt.toDate() >= umbralActivo;
-
-    const pendientes = pendientesSnap.data().count;
-    const totalLista = realizadas + pendientes;
-    const pct = totalLista > 0 ? Math.round((realizadas / totalLista) * 100) : 0;
-    const ultimaVisita = ultimaVisitaSnap.docs[0]?.data() as VisitaDoc | undefined;
-    const km = (kmSnap.data().sum as number | null) || 0;
-
+    const ubicacion = ubicacionSnap.docs[0]?.data() as UbicacionDoc | undefined;
+    const visitas = visitasSnap.docs.map((d) => d.data() as VisitaDoc).sort((a, b) => a.createdAt.toMillis() - b.createdAt.toMillis());
+    const ultimaVisita = visitas[visitas.length - 1];
+    const senal = ubicacion?.createdAt.toMillis() ?? 0;
+    const actividadHoy = visitas.length > 0 || senal >= inicioHoy.toMillis();
     return {
-      id: v.id, nombre: v.nombre, iniciales: v.iniciales, color: v.color, producto: productos.get(v.productoId), ciudad: v.ciudad,
-      inicio: primeraUbicacionHoy
-        ? primeraUbicacionHoy.createdAt.toDate().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
-        : null,
-      estado: activo ? 'En ruta' : 'Inactivo',
-      realizadas, pendientes, pct,
-      km: Math.round(km * 10) / 10,
-      ubicacionActual: ultimaVisita?.nombreNegocio || 'Sin registrar',
+      id: v.id, nombre: v.nombre, iniciales: v.iniciales, color: v.color,
+      producto: productos.get(v.productoId) ?? '—', zona: v.rutaConfig?.zona.etiqueta || v.zona || v.ciudad || null,
+      estado: senal >= umbralActivo ? 'en_ruta' : actividadHoy ? 'inactivo' : 'sin_actividad',
+      ultimaSenal: ubicacion ? toIso(ubicacion.createdAt) : null,
+      // La posición solo si es de hoy: la de ayer confunde en el mapa en vivo.
+      posicion: ubicacion && senal >= inicioHoy.toMillis() ? { lat: ubicacion.lat, lng: ubicacion.lng } : null,
+      visitasHoy: visitas.length,
+      planHoy: planHoy.data().count,
+      planHoyVisitados: planHoyVisitados.data().count,
+      primeraVisita: visitas[0] ? toIso(visitas[0].createdAt) : null,
+      ultimaVisita: ultimaVisita ? { nombre: ultimaVisita.nombreNegocio, resultado: ultimaVisita.resultado, hora: toIso(ultimaVisita.createdAt) } : null,
     };
   }));
 
-  res.json(out.filter(Boolean));
+  const rango = { en_ruta: 0, inactivo: 1, sin_actividad: 2 } as const;
+  items.sort((a, b) => rango[a.estado as keyof typeof rango] - rango[b.estado as keyof typeof rango] || b.visitasHoy - a.visitasHoy || a.nombre.localeCompare(b.nombre));
+  res.json({ hoy, items });
 });

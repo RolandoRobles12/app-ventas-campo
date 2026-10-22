@@ -1,4 +1,5 @@
 import { Timestamp } from './db.js';
+import { esFechaIso, rangoMx } from './fechas.js';
 
 export function withId<T extends FirebaseFirestore.DocumentData>(
   snap: FirebaseFirestore.DocumentSnapshot<T> | FirebaseFirestore.QueryDocumentSnapshot<T>,
@@ -33,15 +34,12 @@ export function isEmptyRestriction(ids: string[] | null): ids is [] {
 }
 
 // Convierte "desde"/"hasta" (YYYY-MM-DD, ambos inclusive, del filtro de
-// fechas del admin) en un rango [start, end) listo para .where('createdAt').
+// fechas del admin) en un rango [start, end) listo para .where('createdAt'),
+// con los días contados en hora de México (ver fechas.ts).
 // null = sin filtro de fecha ("Todo").
 export function parseDateRangeQuery(desde?: string, hasta?: string): { start: Date; end: Date } | null {
-  if (!desde || !hasta) return null;
-  const start = new Date(`${desde}T00:00:00`);
-  const end = new Date(`${hasta}T00:00:00`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
-  end.setDate(end.getDate() + 1);
-  return { start, end };
+  if (!esFechaIso(desde) || !esFechaIso(hasta)) return null;
+  return rangoMx(desde, hasta);
 }
 
 // Firestore's `in` operator acepta como máximo 30 valores; esto parte un

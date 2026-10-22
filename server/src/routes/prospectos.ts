@@ -16,10 +16,16 @@ interface ProspectoDoc {
   estado: string;
   lat?: number | null;
   lng?: number | null;
-  // Ventana de visita planeada por el admin (ruta semanal/quincenal/mensual
-  // con varias zonas): YYYY-MM-DD, ambos inclusive. null = sin programar,
-  // que es como se comportaban todos los prospectos antes de esta función —
-  // se puede visitar en cualquier momento.
+  // Día en que le toca la visita (YYYY-MM-DD, hora de México) y su número de
+  // parada ese día — los pone el planeador de rutas (routes/rutas.ts).
+  fechaPlan?: string | null;
+  orden?: number | null;
+  // Una visita con resultado "Se reagenda visita" lo devuelve a pendiente
+  // con una fechaPlan nueva (ver POST /visitas).
+  reagendado?: boolean;
+  visitadoEn?: Timestamp | null;
+  // Ventana semanal del asistente de rutas anterior (antes de fechaPlan):
+  // YYYY-MM-DD, ambos inclusive. Solo la traen prospectos viejos.
   semanaInicio?: string | null;
   semanaHasta?: string | null;
   createdAt: Timestamp;
@@ -38,95 +44,50 @@ function shape(id: string, p: ProspectoDoc) {
     estado: p.estado,
     lat: p.lat ?? null,
     lng: p.lng ?? null,
+    fechaPlan: p.fechaPlan ?? null,
+    orden: p.orden ?? null,
+    reagendado: !!p.reagendado,
+    visitadoEn: toIso(p.visitadoEn ?? null),
     semanaInicio: p.semanaInicio ?? null,
     semanaHasta: p.semanaHasta ?? null,
     createdAt: toIso(p.createdAt),
   };
 }
 
-// Sin programar (null) primero — se puede visitar en cualquier momento — y
-// luego por fecha de inicio programada; dentro de cada grupo, por cercanía.
-function porEstadoYSemanaYDistancia(
-  a: { estado: string; semanaInicio: string | null; distanciaKm: number | null },
-  b: { estado: string; semanaInicio: string | null; distanciaKm: number | null },
-) {
-  if (a.estado !== b.estado) return a.estado.localeCompare(b.estado);
-  if (a.semanaInicio !== b.semanaInicio) {
-    if (a.semanaInicio == null) return -1;
-    if (b.semanaInicio == null) return 1;
-    return a.semanaInicio < b.semanaInicio ? -1 : 1;
-  }
-  return (a.distanciaKm ?? Infinity) - (b.distanciaKm ?? Infinity);
+// Pendientes primero; luego por día planeado (los viejos sin fecha, por su
+// ventana semanal) y número de parada.
+function porEstadoYPlan(a: ReturnType<typeof shape>, b: ReturnType<typeof shape>) {
+  if (a.estado !== b.estado) return a.estado === 'por_visitar' ? -1 : 1;
+  const fa = a.fechaPlan ?? a.semanaInicio ?? '';
+  const fb = b.fechaPlan ?? b.semanaInicio ?? '';
+  if (fa !== fb) return fa < fb ? -1 : 1;
+  return (a.orden ?? a.distanciaKm ?? Infinity) - (b.orden ?? b.distanciaKm ?? Infinity);
 }
 
-// Lista de prospectos de un vendedor (usada por la app del vendedor y por el
-// admin). Los leads traen datos de contacto: un vendedor solo puede ver los suyos.
+const DIAS_VISITADOS_EN_LISTA = 7;
+
+// Ruta de un vendedor (usada por la app del vendedor y por el planeador del
+// admin): todo lo pendiente más lo visitado en la última semana — el
+// historial completo crece sin límite y la app no lo necesita. Los leads
+// traen datos de contacto: un vendedor solo puede ver los suyos.
 prospectosRouter.get('/vendedor/:vendedorId', async (req, res) => {
   if (!(await puedeActuarComoVendedor(req.user!.email, req.params.vendedorId))) return vendedorAjeno(res);
-  const snap = await db.collection('prospectos').where('vendedorId', '==', req.params.vendedorId).get();
-  const prospectos = snap.docs
-    .map((d) => shape(d.id, d.data() as ProspectoDoc))
-    .sort(porEstadoYSemanaYDistancia);
-  res.json(prospectos);
+  const base = db.collection('prospectos').where('vendedorId', '==', req.params.vendedorId);
+  const [pendientes, visitados] = await Promise.all([
+    base.where('estado', '==', 'por_visitar').get(),
+    // Lo visitado es solo de referencia: si esta consulta falla (p. ej. el
+    // índice todavía se está creando), la ruta pendiente se entrega igual.
+    base.where('estado', '==', 'visitado')
+      .where('visitadoEn', '>=', Timestamp.fromMillis(Date.now() - DIAS_VISITADOS_EN_LISTA * 86_400_000)).get()
+      .catch((err) => {
+        console.error('prospectos visitados recientes:', err?.message || err);
+        return { docs: [] as FirebaseFirestore.QueryDocumentSnapshot[] };
+      }),
+  ]);
+  res.json([...pendientes.docs, ...visitados.docs].map((d) => shape(d.id, d.data() as ProspectoDoc)).sort(porEstadoYPlan));
 });
 
-// Alta manual de un negocio (fuera de lista, o agregado a mano en el wizard de admin)
-prospectosRouter.post('/', async (req, res) => {
-  const { vendedorId, nombre, direccion, giro, telefono, distanciaKm, lat, lng, origen } = req.body as {
-    vendedorId: string; nombre: string; direccion: string; giro?: string; telefono?: string;
-    distanciaKm?: number; lat?: number; lng?: number; origen?: string;
-  };
-  if (!vendedorId || !nombre) return res.status(400).json({ error: 'vendedorId y nombre son requeridos' });
-  if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
-
-  const data: ProspectoDoc = {
-    vendedorId, nombre, direccion: direccion || '', giro: giro ?? null, telefono: telefono ?? null,
-    distanciaKm: distanciaKm ?? null, lat: lat ?? null, lng: lng ?? null,
-    origen: origen || 'manual', estado: 'por_visitar', createdAt: Timestamp.now(),
-  };
-  const ref = await db.collection('prospectos').add(data);
-  res.status(201).json(shape(ref.id, data));
-});
-
-// Alta masiva (resultado del wizard: consulta DENUE + manuales agregados en esa sesión) — solo admin
-prospectosRouter.post('/bulk', requireAdmin, async (req, res) => {
-  const { vendedorId, items } = req.body as {
-    vendedorId: string;
-    items: {
-      nombre: string; direccion: string; giro?: string; telefono?: string; distanciaKm?: number; lat?: number; lng?: number; origen?: string;
-      semanaInicio?: string | null; semanaHasta?: string | null;
-    }[];
-  };
-  if (!vendedorId || !Array.isArray(items)) return res.status(400).json({ error: 'vendedorId e items son requeridos' });
-
-  const existingSnap = await db.collection('prospectos').where('vendedorId', '==', vendedorId).get();
-  const existingKeys = new Set(existingSnap.docs.map((d) => {
-    const p = d.data() as ProspectoDoc;
-    return `${p.nombre}::${p.direccion}`;
-  }));
-  const nuevos = items.filter((i) => !existingKeys.has(`${i.nombre}::${i.direccion}`));
-
-  if (nuevos.length) {
-    const batch = db.batch();
-    for (const i of nuevos) {
-      const ref = db.collection('prospectos').doc();
-      const data: ProspectoDoc = {
-        vendedorId, nombre: i.nombre, direccion: i.direccion || '', giro: i.giro ?? null, telefono: i.telefono ?? null,
-        distanciaKm: i.distanciaKm ?? null, lat: i.lat ?? null, lng: i.lng ?? null,
-        semanaInicio: i.semanaInicio ?? null, semanaHasta: i.semanaHasta ?? null,
-        origen: i.origen || 'denue', estado: 'por_visitar', createdAt: Timestamp.now(),
-      };
-      batch.set(ref, data);
-    }
-    await batch.commit();
-  }
-
-  const snap = await db.collection('prospectos').where('vendedorId', '==', vendedorId).get();
-  const prospectos = snap.docs.map((d) => shape(d.id, d.data() as ProspectoDoc)).sort(porEstadoYSemanaYDistancia);
-  res.status(201).json({ creados: nuevos.length, prospectos });
-});
-
-// Solo admin (el wizard de rutas quita prospectos que ya no aplican a la ruta generada)
+// Solo admin: quitar un negocio de la ruta de un vendedor.
 prospectosRouter.delete('/:id', requireAdmin, async (req, res) => {
   await db.collection('prospectos').doc(req.params.id).delete().catch(() => null);
   res.status(204).end();

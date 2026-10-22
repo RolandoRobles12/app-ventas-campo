@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
-import { resolveVendedorIds, countChunked, getRecientesPorVendedor } from './_filters.js';
+import { resolveVendedorIds, getRecientesPorVendedor } from './_filters.js';
 import { isEmptyRestriction, parseDateRangeQuery, parseCsvParam } from '../firestore-helpers.js';
 
 export const mapaRouter = Router();
@@ -20,49 +20,6 @@ interface VisitaGeoDoc {
   lat?: number | null;
   lng?: number | null;
 }
-
-const countProspectos = (ids: string[] | null, extra: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query) =>
-  countChunked('prospectos', 'vendedorId', ids, extra);
-
-mapaRouter.get('/leads', async (req, res) => {
-  const { productoIds, vendedorIds, desde, hasta } = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
-  const ids = await resolveVendedorIds(parseCsvParam(vendedorIds), parseCsvParam(productoIds));
-  const rango = parseDateRangeQuery(desde, hasta);
-
-  // Se pide de más porque filtramos lat/lng en memoria (Firestore no permite
-  // combinar dos filtros "!= null" en la misma consulta).
-  const leadDocs = await getRecientesPorVendedor('prospectos', ids, 600, (q) =>
-    rango ? q.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end)) : q);
-  const leads = leadDocs
-    .map((d) => ({ id: d.id, data: d.data() as ProspectoDoc }))
-    .filter((l) => l.data.lat != null && l.data.lng != null)
-    .slice(0, 300);
-
-  const leadVendedorIds = [...new Set(leads.map((l) => l.data.vendedorId))];
-  const vendedores = new Map<string, string>();
-  await Promise.all(leadVendedorIds.map(async (id) => {
-    const doc = await db.collection('vendedores').doc(id).get();
-    if (doc.exists) vendedores.set(id, (doc.data() as { nombre: string }).nombre);
-  }));
-
-  const conRango = (q: FirebaseFirestore.Query) => rango
-    ? q.where('createdAt', '>=', Timestamp.fromDate(rango.start)).where('createdAt', '<', Timestamp.fromDate(rango.end))
-    : q;
-  const [total, porVisitar, visitados] = await Promise.all([
-    countProspectos(ids, conRango),
-    countProspectos(ids, (q) => conRango(q.where('estado', '==', 'por_visitar'))),
-    countProspectos(ids, (q) => conRango(q.where('estado', '==', 'visitado'))),
-  ]);
-  const sincronizadosCrm = (await db.collection('crmDeals').where('source', '==', 'hubspot').count().get()).data().count;
-
-  res.json({
-    totales: { total, porVisitar, visitados, sincronizadosCrm },
-    leads: leads.map(({ id, data: p }) => ({
-      id, nombre: p.nombre, direccion: p.direccion, estado: p.estado, lat: p.lat, lng: p.lng,
-      vendedor: vendedores.get(p.vendedorId) || '', color: p.estado === 'visitado' ? '#22a36c' : '#ef8b3e',
-    })),
-  });
-});
 
 // Puntos para el mapa de calor: la ubicación GPS de cada visita registrada.
 // Las visitas antiguas (sin GPS propio) heredan las coordenadas de su prospecto.
