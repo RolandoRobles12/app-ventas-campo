@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { api, ApiError, type Prospecto } from '../../api';
+import { api, ApiError, type Antecedente, type Prospecto } from '../../api';
 import { useSession } from '../../session';
 import { CameraCapture } from '../../components/CameraCapture';
-import { guardarVisitaPendiente, marcarVisitaLocal, prospectosConCache, rutaEnCache } from '../../offline';
+import { antecedentesEnCache, cargarAntecedentes, guardarVisitaPendiente, marcarVisitaLocal, prospectosConCache, rutaEnCache } from '../../offline';
 import { subirFotos } from '../../uploadFotos';
 import { comoLlegarUrl, distanciaMetros, textoDistancia } from '../../ruta';
 import { etiquetaDia, fechaLocal, sumarDias } from '../../fechas';
-import { RESULTADOS_UI } from '../../resultados';
+import { RESULTADOS_UI, resultadoUI } from '../../resultados';
 import { IconAtras, IconCamara, IconCheck, IconMas, IconNavegar, IconPin, IconTelefono, IconX } from '../../icons';
 
 const GIROS = ['Abarrotes', 'Ferretería', 'Papelería', 'Alimentos', 'Belleza', 'Taller', 'Servicios', 'Otro'];
@@ -15,7 +15,7 @@ const GIROS = ['Abarrotes', 'Ferretería', 'Papelería', 'Alimentos', 'Belleza',
 // servidor es quien lo hace cumplir; este solo es para la interfaz).
 const MAX_FOTOS = 5;
 // Mismo radio que RADIO_UBICACION_VALIDA_METROS del servidor: dentro de él,
-// la visita queda "verificada" en el admin.
+// la visita cuenta en el admin como "hecha en el negocio".
 const RADIO_VERIFICADA_M = 50;
 const REAGENDA = 'Se reagenda visita';
 const NOTAS_RAPIDAS = ['No estaba el dueño', 'Pidió que regrese', 'Ya tiene crédito', 'Lo va a pensar', 'Negocio cerrado hoy'];
@@ -67,6 +67,16 @@ export function RegistrarVisita({ nueva = false }: { nueva?: boolean }) {
       .catch(() => {})
       .finally(() => setBuscando(false));
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Qué pasó las veces anteriores en este negocio (de la copia local; si no
+  // está, se pide al servidor).
+  const [antecedentes, setAntecedentes] = useState<Antecedente[] | null>(null);
+  useEffect(() => {
+    if (!vendedor || !prospecto) return;
+    const enCache = antecedentesEnCache(vendedor.id, prospecto.id);
+    setAntecedentes(enCache);
+    if (!enCache) cargarAntecedentes(vendedor.id, prospecto.id).then(setAntecedentes);
+  }, [vendedor?.id, prospecto?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [nombre, setNombre] = useState('');
   const [direccion, setDireccion] = useState('');
   const [giro, setGiro] = useState('');
@@ -220,6 +230,8 @@ export function RegistrarVisita({ nueva = false }: { nueva?: boolean }) {
           </section>
         )}
 
+        {!nueva && antecedentes && antecedentes.length > 0 && <VisitadoAntes antecedentes={antecedentes} />}
+
         {nueva && (
           <section className="card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div ref={refs.nombre}>
@@ -370,7 +382,34 @@ function Etiqueta({ children, falta = false, aviso }: { children: React.ReactNod
 }
 
 // Dónde está el vendedor respecto al negocio: dentro de 50 m la visita
-// queda verificada en el admin; más lejos se le avisa (no se le bloquea).
+// cuenta como hecha en el negocio; más lejos se le avisa (no se le bloquea).
+function VisitadoAntes({ antecedentes }: { antecedentes: Antecedente[] }) {
+  return (
+    <section className="card" style={{ padding: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '1px', color: '#6f7d75', marginBottom: 10 }}>VISITADO ANTES</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {antecedentes.map((a, i) => {
+          const r = resultadoUI(a.resultado);
+          return (
+            <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+              <span style={{ flex: 'none', width: 38, height: 38, borderRadius: 12, background: r.fondo, color: r.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <r.Icon size={20} />
+              </span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: r.color }}>{r.etiqueta}</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#5a665f', marginTop: 1 }}>
+                  {a.fecha ? etiquetaDia(fechaLocal(new Date(a.fecha))) : ''} · {a.propia ? 'Tú' : a.vendedorNombre}
+                </div>
+                {a.notas && <div style={{ fontSize: 14, color: '#3a4a41', marginTop: 4, lineHeight: 1.4 }}>&ldquo;{a.notas}&rdquo;</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function Ubicacion({ gps, distancia }: { gps: GpsState; distancia: number | null }) {
   let fondo = '#eef5f0', color = '#356048', texto: string;
   if (gps.status === 'buscando') {
@@ -380,9 +419,9 @@ function Ubicacion({ gps, distancia }: { gps: GpsState; distancia: number | null
   } else if (distancia == null) {
     texto = `Ubicación capturada · precisión ±${gps.fix.accuracy} m`;
   } else if (distancia <= RADIO_VERIFICADA_M) {
-    fondo = '#dcf1e5'; color = '#15703f'; texto = `Estás en el negocio · visita verificada (${textoDistancia(distancia)})`;
+    fondo = '#dcf1e5'; color = '#15703f'; texto = `Estás en el negocio (a ${textoDistancia(distancia)}) · la visita cuenta como hecha aquí`;
   } else {
-    fondo = '#fdecdb'; color = '#8a4b0f'; texto = `Estás a ${textoDistancia(distancia)} del negocio · acércate para que la visita quede verificada`;
+    fondo = '#fdecdb'; color = '#8a4b0f'; texto = `Estás a ${textoDistancia(distancia)} del negocio · acércate a menos de 50 m para que cuente como hecha en el negocio`;
   }
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: fondo, color, borderRadius: 12, padding: '11px 13px', marginTop: 14, fontSize: 14, fontWeight: 700, lineHeight: 1.35 }}>

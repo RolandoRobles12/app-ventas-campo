@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
-export interface MultiSelectOption { value: string; label: string }
+// `grupo`: las opciones con grupo van al final de la lista, bajo su
+// encabezado y en gris (p. ej. "Ya no activos" en el filtro de vendedores).
+export interface MultiSelectOption { value: string; label: string; grupo?: string }
 
 function ChevronIcon() {
   return (
@@ -50,12 +52,15 @@ export function MultiSelectDropdown({
       ? selectedLabels.join(', ')
       : `${selectedLabels.slice(0, 2).join(', ')} +${selectedLabels.length - 2}`;
 
-  // Las opciones marcadas suben al principio para que, con la lista abierta,
-  // se vea de un vistazo qué está seleccionado sin tener que buscarlo.
+  // Las opciones marcadas suben al principio (dentro de su grupo) para que,
+  // con la lista abierta, se vea de un vistazo qué está seleccionado sin
+  // tener que buscarlo.
+  const grupos = [...new Set(options.map((o) => o.grupo ?? ''))].sort((a, b) => Number(!!a) - Number(!!b));
   const filtered = (search
     ? options.filter((o) => o.label.toLowerCase().includes(search.toLowerCase()))
     : options
-  ).slice().sort((a, b) => Number(selected.includes(b.value)) - Number(selected.includes(a.value)));
+  ).slice().sort((a, b) => grupos.indexOf(a.grupo ?? '') - grupos.indexOf(b.grupo ?? '')
+    || Number(selected.includes(b.value)) - Number(selected.includes(a.value)));
 
   const hasSelection = selected.length > 0;
 
@@ -95,19 +100,27 @@ export function MultiSelectDropdown({
           </div>
           <div style={{ maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
             {filtered.length === 0 && <div style={{ fontSize: 12, color: '#9aa39c', padding: '8px 8px' }}>Sin resultados</div>}
-            {filtered.map((opt) => {
+            {filtered.map((opt, i) => {
               const on = selected.includes(opt.value);
+              const encabezado = opt.grupo && opt.grupo !== filtered[i - 1]?.grupo ? opt.grupo : null;
               return (
-                <label
-                  key={opt.value} className="msel-opt"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 6, fontSize: 13, cursor: 'pointer',
-                    background: on ? '#eef8f1' : 'transparent', color: on ? '#0f5132' : '#3a4a41', fontWeight: on ? 600 : 400,
-                  }}
-                >
-                  <input type="checkbox" checked={on} onChange={() => toggle(opt.value)} style={{ accentColor: '#157347', width: 14, height: 14, flex: 'none' }} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{opt.label}</span>
-                </label>
+                <div key={opt.value}>
+                  {encabezado && (
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#8a978f', textTransform: 'uppercase', letterSpacing: '.04em', padding: '10px 8px 4px', borderTop: i > 0 ? '1px solid #eef2ee' : undefined, marginTop: i > 0 ? 4 : 0 }}>
+                      {encabezado}
+                    </div>
+                  )}
+                  <label
+                    className="msel-opt"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 6, fontSize: 13, cursor: 'pointer',
+                      background: on ? '#eef8f1' : 'transparent', color: on ? '#0f5132' : opt.grupo ? '#7d8a82' : '#3a4a41', fontWeight: on ? 600 : 400,
+                    }}
+                  >
+                    <input type="checkbox" checked={on} onChange={() => toggle(opt.value)} style={{ accentColor: '#157347', width: 14, height: 14, flex: 'none' }} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{opt.label}</span>
+                  </label>
+                </div>
               );
             })}
           </div>

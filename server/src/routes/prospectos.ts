@@ -1,12 +1,16 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
-import { toIso } from '../firestore-helpers.js';
+import { parseCsvParam, toIso } from '../firestore-helpers.js';
 import { requireAdmin, puedeActuarComoVendedor, vendedorAjeno } from '../auth.js';
+import { negocioIdDe } from '../negocios.js';
+import { visitasDeNegocio } from './visitas.js';
 
 export const prospectosRouter = Router();
 
 interface ProspectoDoc {
   vendedorId: string;
+  // Ver negocios.ts. Prospectos viejos pueden no tenerlo (se calcula al vuelo).
+  negocioId?: string;
   nombre: string;
   direccion: string;
   giro?: string | null;
@@ -35,6 +39,7 @@ function shape(id: string, p: ProspectoDoc) {
   return {
     id,
     vendedorId: p.vendedorId,
+    negocioId: p.negocioId || negocioIdDe(p),
     nombre: p.nombre,
     direccion: p.direccion,
     giro: p.giro ?? null,
@@ -85,6 +90,42 @@ prospectosRouter.get('/vendedor/:vendedorId', async (req, res) => {
       }),
   ]);
   res.json([...pendientes.docs, ...visitados.docs].map((d) => shape(d.id, d.data() as ProspectoDoc)).sort(porEstadoYPlan));
+});
+
+// "Visitado antes": las últimas visitas a cada negocio de la ruta del
+// vendedor, de él o de cualquier otro vendedor (también de quien ya no está
+// activo), para que llegue sabiendo qué pasó la última vez. Solo de negocios
+// que están en su propia ruta, y solo lo necesario: fecha, resultado, nota y
+// quién fue — sin fotos ni ubicación.
+const MAX_ANTECEDENTES_POR_LLAMADA = 60;
+const ANTECEDENTES_POR_NEGOCIO = 3;
+
+prospectosRouter.get('/vendedor/:vendedorId/antecedentes', async (req, res) => {
+  const { vendedorId } = req.params;
+  if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
+  const ids = [...new Set(parseCsvParam((req.query as { ids?: string }).ids))]
+    .filter((id) => /^[A-Za-z0-9_-]{1,64}$/.test(id))
+    .slice(0, MAX_ANTECEDENTES_POR_LLAMADA);
+  if (!ids.length) return res.json({});
+  const docs = await db.getAll(...ids.map((id) => db.collection('prospectos').doc(id)));
+  const propios = docs.filter((d) => d.exists && d.get('vendedorId') === vendedorId);
+
+  const porProspecto = await Promise.all(propios.map(async (d) => [
+    d.id,
+    await visitasDeNegocio((d.get('negocioId') as string | undefined) || negocioIdDe(d.data() as ProspectoDoc), ANTECEDENTES_POR_NEGOCIO),
+  ] as const));
+  // Visitas de antes de guardar el nombre del vendedor en la visita.
+  const sinNombre = [...new Set(porProspecto.flatMap(([, vs]) => vs.filter((v) => !v.vendedorNombre).map((v) => v.vendedorId)))];
+  const nombres = new Map(sinNombre.length
+    ? (await db.getAll(...sinNombre.map((id) => db.collection('vendedores').doc(id)))).map((v) => [v.id, v.get('nombre') as string | undefined])
+    : []);
+  res.json(Object.fromEntries(porProspecto.map(([id, visitas]) => [id, visitas.map((v) => ({
+    fecha: toIso(v.createdAt),
+    resultado: v.resultado,
+    notas: v.notas ?? null,
+    vendedorNombre: v.vendedorNombre || nombres.get(v.vendedorId) || '—',
+    propia: v.vendedorId === vendedorId,
+  }))])));
 });
 
 // Solo admin: quitar un negocio de la ruta de un vendedor.

@@ -16,7 +16,9 @@ export function FilterBar({
   extra, extraActivo, onLimpiarExtra, sinFechas = false,
 }: {
   extra?: React.ReactNode;
-  // Pantallas de "ahora mismo" (En vivo, Rutas) no usan el rango de fechas.
+  // Pantallas de "ahora mismo" (En vivo, Rutas, Equipo) no usan el rango de
+  // fechas y solo trabajan con el equipo activo; las de un periodo (Resumen,
+  // Visitas) también ofrecen a quien ya no está activo, para ver su historia.
   sinFechas?: boolean;
   // Filtro propio de la página (p.ej. "Resultado" en Visitas), que vive fuera
   // del FiltersContext compartido: sin esto, "Limpiar filtros" no sabría que
@@ -48,9 +50,9 @@ export function FilterBar({
       />
       <MultiSelectDropdown
         label="Vendedor"
-        options={[...vendedoresFiltrados]
-          .sort((a, b) => Number(a.estado === 'Baja') - Number(b.estado === 'Baja'))
-          .map((v) => ({ value: v.id, label: v.estado === 'Baja' ? `${v.nombre} (baja)` : v.nombre }))}
+        options={vendedoresFiltrados
+          .filter((v) => v.estado !== 'Baja' || !sinFechas || fVendedores.includes(v.id))
+          .map((v) => ({ value: v.id, label: v.nombre, grupo: v.estado === 'Baja' ? 'Ya no activos' : undefined }))}
         selected={fVendedores}
         onChange={setFVendedores}
         placeholder="Todos los vendedores"

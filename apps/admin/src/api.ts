@@ -30,7 +30,7 @@ export interface Vendedor {
 }
 
 export interface Prospecto {
-  id: string; vendedorId: string; nombre: string; direccion: string; giro?: string | null;
+  id: string; vendedorId: string; negocioId: string; nombre: string; direccion: string; giro?: string | null;
   distanciaKm?: number | null; telefono?: string | null; origen: string; estado: string;
   lat?: number | null; lng?: number | null;
   fechaPlan?: string | null; orden?: number | null; reagendado?: boolean;
@@ -43,6 +43,7 @@ export interface EstadoRuta {
 }
 
 export interface ItemRuta {
+  negocioId?: string | null; denueId?: string | null;
   nombre: string; direccion: string; giro?: string | null; telefono?: string | null;
   lat?: number | null; lng?: number | null; distanciaKm?: number | null;
   fechaPlan: string; orden: number; manual?: boolean;
@@ -72,13 +73,13 @@ export interface MetricasResumen {
   totales: {
     visitas: number; visitasPrev: number; cambioPct: number | null;
     planeados: number; cumplidos: number; cumplimiento: number | null;
-    promedioDia: number; ubicacionValida: number | null; validables: number;
-    negociosNuevos: number; vendedoresActivos: number; vendedoresConVisitas: number;
+    promedioDia: number; ubicacionValida: number | null; validables: number; validas: number;
+    negociosNuevos: number; vendedoresActivos: number; vendedoresConVisitas: number; vendedoresYaNoActivos: number;
   };
   serie: { fecha: string; visitas: number }[];
   resultados: { resultado: string; count: number }[];
   vendedores: {
-    id: string; nombre: string; iniciales: string; color: string; producto: string; estado: string;
+    id: string; nombre: string; iniciales: string; color: string; producto: string; estado: 'Activo' | 'Baja';
     visitas: number; diasActivos: number; promedioDia: number; planeados: number; cumplidos: number;
     cumplimiento: number | null; ubicacionValida: number | null; negociosNuevos: number; ultimaVisita: string | null;
   }[];
@@ -103,12 +104,18 @@ export interface RecorridoVendedor {
   puntos: { lat: number; lng: number; createdAt: string }[];
 }
 export interface VisitaListItem {
-  id: string; vendedorId: string; vendedorNombre: string; producto: string;
+  id: string; vendedorId: string; vendedorNombre: string; vendedorActivo: boolean; producto: string;
+  negocioId: string | null; prospectoId: string | null;
   esNegocioNuevo: boolean; nombreNegocio: string; direccion: string; resultado: string;
   notas: string | null; fotos: string[]; lat: number | null; lng: number | null;
   ubicacionValida: boolean | null; distanciaValidacionMetros: number | null; createdAt: string;
 }
 export interface VisitasResponse { items: VisitaListItem[]; nextCursor: string | null }
+export interface HistorialNegocio {
+  negocioId: string; nombre: string; direccion: string; giro: string | null; telefono: string | null;
+  enRuta: { vendedorNombre: string; fechaPlan: string | null } | null;
+  visitas: VisitaListItem[];
+}
 export interface Usuario { email: string; nombre: string | null; createdAt: string }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -166,12 +173,10 @@ export const api = {
     req<{ creados: number; eliminados: number; desde: string | null; hasta: string | null }>(`/rutas/${vendedorId}/publicar`, post(data)),
   renovarRuta: (vendedorId: string) =>
     req<{ creados: number; desde: string | null; hasta: string | null; necesarios: number; encontrados: number }>(`/rutas/${vendedorId}/renovar`, post()),
-  reasignarPendientes: (vendedorId: string, aVendedorId: string) =>
-    req<{ movidos: number }>(`/rutas/${vendedorId}/reasignar`, post({ aVendedorId })),
 
   prospectos: (vendedorId: string) => req<Prospecto[]>(`/prospectos/vendedor/${vendedorId}`),
 
-  metricas: (f: Filtro) => req<MetricasResumen>(`/metricas/resumen${qs({ ...f })}`),
+  metricas: (f: Filtro & { todo?: boolean }) => req<MetricasResumen>(`/metricas/resumen${qs({ ...f, todo: f.todo ? '1' : undefined })}`),
   enVivo: (f: { productoIds?: string[]; vendedorIds?: string[] }) => req<{ hoy: string; items: EnVivoItem[] }>(`/seguimiento${qs(f)}`),
   mapaCalor: (f: Filtro) => req<MapaCalorResponse>(`/mapa/calor${qs({ ...f })}`),
   recorridos: (f: Filtro) => req<RecorridoVendedor[]>(`/ubicaciones/recorrido${qs({ ...f })}`),
@@ -181,4 +186,5 @@ export const api = {
       vendedorIds: params.vendedorIds, productoIds: params.productoIds, resultados: params.resultados,
       desde: params.desde, hasta: params.hasta, cursor: params.cursor, limit: params.limit ? String(params.limit) : undefined,
     })}`),
+  historialNegocio: (negocioId: string) => req<HistorialNegocio>(`/visitas/negocio/${encodeURIComponent(negocioId)}`),
 };

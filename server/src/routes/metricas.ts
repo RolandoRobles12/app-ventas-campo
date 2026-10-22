@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
-import { chunkArray, isEmptyRestriction, parseCsvParam } from '../firestore-helpers.js';
+import { chunkArray, parseCsvParam } from '../firestore-helpers.js';
 import { diasEntre, esFechaIso, fechaMx, hoyMx, rangoMx, sumarDias } from '../fechas.js';
 import { countChunked, getVendedoresDocs, resolveVendedorIds } from './_filters.js';
 import { productosPorId, type VendedorDoc } from './vendedores.js';
@@ -10,7 +10,8 @@ import { productosPorId, type VendedorDoc } from './vendedores.js';
 export const metricasRouter = Router();
 
 const RESULTADOS = ['Se realizó solicitud', 'Se dejó información', 'Se reagenda visita', 'Cliente no interesado', 'No es un negocio válido o existente'];
-const MAX_DIAS = 92;
+// Hasta un año por consulta: más que eso ya son miles de lecturas por carga.
+const MAX_DIAS = 366;
 // Hasta este largo la serie va por día; más largo, por semana.
 const MAX_DIAS_SERIE_DIARIA = 45;
 
@@ -30,23 +31,26 @@ interface PlaneadoMetrica {
 
 const CAMPOS_VISITA = ['vendedorId', 'resultado', 'createdAt', 'ubicacionValida', 'esNegocioNuevo'];
 
+// ids null = sin filtro de vendedor (una sola consulta por fecha, en vez de
+// bloques de 30 sobre un equipo que con el tiempo acumula a todos los que ya
+// no están activos).
 async function visitasEnRango(ids: string[] | null, start: Date, end: Date): Promise<VisitaMetrica[]> {
   const conRango = (q: FirebaseFirestore.Query) => q
     .where('createdAt', '>=', Timestamp.fromDate(start)).where('createdAt', '<', Timestamp.fromDate(end))
     .select(...CAMPOS_VISITA);
-  if (!ids) return (await conRango(db.collection('visitas')).get()).docs.map((d) => d.data() as VisitaMetrica);
-  const snaps = await Promise.all(chunkArray(ids).map((c) => conRango(db.collection('visitas').where('vendedorId', 'in', c)).get()));
+  const consultas = ids ? chunkArray(ids).map((c) => db.collection('visitas').where('vendedorId', 'in', c)) : [db.collection('visitas')];
+  const snaps = await Promise.all(consultas.map((q) => conRango(q).get()));
   return snaps.flatMap((s) => s.docs.map((d) => d.data() as VisitaMetrica));
 }
 
 // Negocios que la ruta planeó para el periodo. Se lee por fecha (un solo
 // rango) y se filtra el vendedor en memoria.
-async function planeadosEnRango(desde: string, hasta: string, ids: Set<string> | null): Promise<PlaneadoMetrica[]> {
+async function planeadosEnRango(desde: string, hasta: string, ids: Set<string>): Promise<PlaneadoMetrica[]> {
   if (desde > hasta) return [];
   const snap = await db.collection('prospectos')
     .where('fechaPlan', '>=', desde).where('fechaPlan', '<=', hasta)
     .select('vendedorId', 'estado', 'fechaPlan').get();
-  return snap.docs.map((d) => d.data() as PlaneadoMetrica).filter((p) => !ids || ids.has(p.vendedorId));
+  return snap.docs.map((d) => d.data() as PlaneadoMetrica).filter((p) => ids.has(p.vendedorId));
 }
 
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : null);
@@ -58,16 +62,29 @@ function lunesDe(iso: string): string {
 }
 
 metricasRouter.get('/resumen', async (req, res) => {
-  const q = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string };
+  const q = req.query as { productoIds?: string; vendedorIds?: string; desde?: string; hasta?: string; todo?: string };
   const hoy = hoyMx();
   let hasta = esFechaIso(q.hasta) ? q.hasta : hoy;
   let desde = esFechaIso(q.desde) ? q.desde : sumarDias(hasta, -6);
+  // "Todo": desde la primera visita registrada (hasta un año atrás).
+  if (q.todo === '1') {
+    hasta = hoy;
+    const primera = await db.collection('visitas').orderBy('createdAt', 'asc').limit(1).select('createdAt').get();
+    const ts = primera.docs[0]?.get('createdAt') as Timestamp | undefined;
+    desde = ts ? fechaMx(ts.toDate()) : sumarDias(hoy, -6);
+  }
   if (desde > hasta) [desde, hasta] = [hasta, desde];
   if (diasEntre(desde, hasta) >= MAX_DIAS) desde = sumarDias(hasta, -(MAX_DIAS - 1));
   const largo = diasEntre(desde, hasta) + 1;
 
-  const ids = await resolveVendedorIds(parseCsvParam(q.vendedorIds), parseCsvParam(q.productoIds));
-  const vacio = isEmptyRestriction(ids);
+  // La historia no se pierde cuando alguien deja de estar activo (ver
+  // equipo.ts): sus visitas del periodo cuentan en los totales y aparece en
+  // la tabla, marcado. El equipo actual (vendedoresActivos, quién no ha
+  // visitado) es solo el activo.
+  const filtro = await resolveVendedorIds(parseCsvParam(q.vendedorIds), parseCsvParam(q.productoIds));
+  const vendedoresDocs = await getVendedoresDocs(filtro);
+  const ids = vendedoresDocs.map((d) => d.id);
+  const idsSet = new Set(ids);
   const { start, end } = rangoMx(desde, hasta);
   const prev = rangoMx(sumarDias(desde, -largo), sumarDias(desde, -1));
 
@@ -75,15 +92,15 @@ metricasRouter.get('/resumen', async (req, res) => {
   // trabajando (salvo que el periodo sea solo hoy).
   const limitePlan = hasta < hoy ? hasta : desde === hoy ? hoy : sumarDias(hoy, -1);
 
-  const [vendedoresDocs, visitas, visitasPrev, planeados] = vacio
-    ? [[], [], 0, []] as [FirebaseFirestore.QueryDocumentSnapshot[], VisitaMetrica[], number, PlaneadoMetrica[]]
+  const [visitasTodas, visitasPrev, planeados] = ids.length === 0
+    ? [[], 0, []] as [VisitaMetrica[], number, PlaneadoMetrica[]]
     : await Promise.all([
-      getVendedoresDocs(ids),
-      visitasEnRango(ids, start, end),
-      countChunked('visitas', 'vendedorId', ids, (qq) => qq
+      visitasEnRango(filtro, start, end),
+      countChunked('visitas', 'vendedorId', filtro, (qq) => qq
         .where('createdAt', '>=', Timestamp.fromDate(prev.start)).where('createdAt', '<', Timestamp.fromDate(prev.end))),
-      planeadosEnRango(desde, limitePlan, ids ? new Set(ids) : null),
+      planeadosEnRango(desde, limitePlan, idsSet),
     ]);
+  const visitas = visitasTodas.filter((v) => idsSet.has(v.vendedorId));
 
   const vendedores = vendedoresDocs.map((d) => ({ id: d.id, ...(d.data() as VendedorDoc) }));
   const productos = await productosPorId(vendedores.map((v) => v.productoId));
@@ -126,7 +143,6 @@ metricasRouter.get('/resumen', async (req, res) => {
   const totalCumplidos = planeados.filter((p) => p.estado === 'visitado').length;
 
   const filas = vendedores
-    // Los dados de baja solo aparecen si trabajaron en el periodo.
     .filter((v) => v.estado !== 'Baja' || porVendedor.has(v.id))
     .map((v) => {
       const pv = porVendedor.get(v.id);
@@ -163,9 +179,11 @@ metricasRouter.get('/resumen', async (req, res) => {
       promedioDia: diasVendedor ? Math.round((visitas.length / diasVendedor) * 10) / 10 : 0,
       ubicacionValida: pct(validas, validables),
       validables,
+      validas,
       negociosNuevos: nuevos,
       vendedoresActivos: activos,
-      vendedoresConVisitas: filas.filter((f) => f.visitas > 0).length,
+      vendedoresConVisitas: filas.filter((f) => f.estado === 'Activo' && f.visitas > 0).length,
+      vendedoresYaNoActivos: filas.filter((f) => f.estado === 'Baja').length,
     },
     serie: [...serieMap.entries()].map(([fecha, visitas]) => ({ fecha, visitas })),
     resultados: RESULTADOS.map((r) => ({ resultado: r, count: resultados.get(r) ?? 0 })),

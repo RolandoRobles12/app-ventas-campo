@@ -17,7 +17,7 @@ function situacion(e: EstadoRuta | undefined): { filtro: Exclude<Filtro, 'todos'
   if (e.diasRestantes != null && e.diasRestantes <= 2) {
     return { filtro: 'por_vencer', texto: e.diasRestantes < 0 ? 'Vencida' : `Hasta ${etiquetaDia(e.hasta).toLowerCase()}`, color: '#94500f', fondo: '#fdecdb' };
   }
-  return { filtro: 'con_ruta', texto: `Hasta ${etiquetaDia(e.hasta)}`, color: '#1c7a4f', fondo: '#dcf1e5' };
+  return { filtro: 'con_ruta', texto: `Hasta ${etiquetaDia(e.hasta).toLowerCase()}`, color: '#1c7a4f', fondo: '#dcf1e5' };
 }
 
 export function Rutas() {

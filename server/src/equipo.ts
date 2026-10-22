@@ -7,8 +7,10 @@
 // Reglas, pensadas para que un dato raro no deje a nadie sin trabajar:
 //   - Alta: colaborador activo de un producto de campo sin vendedor → se crea.
 //   - Baja: el vendedor existe pero su colaborador ya no está activo (o se
-//     cambió a un puesto que no es de campo) → estado 'Baja'. No se borra
-//     nada: sus visitas quedan y sus pendientes se pueden reasignar.
+//     cambió a un puesto que no es de campo) → estado 'Baja': ya no entra a
+//     la app ni aparece en el admin. No se borra nada (sus visitas siguen
+//     contando en el historial) y sus pendientes dejan de bloquear esos
+//     negocios para el planeador (ver exclusiones en routes/rutas.ts).
 //   - Reingreso: un vendedor dado de baja que vuelve a estar activo se reactiva.
 //   - Un vendedor sin colaborador en la base (alta manual o de prueba) no se toca.
 //   - Si una corrida daría de baja a demasiada gente de golpe, se detiene sin
