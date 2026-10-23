@@ -33,6 +33,7 @@ export function Rutas() {
   const [busqueda, setBusqueda] = useState('');
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
   const [renovando, setRenovando] = useState<{ hechos: number; total: number } | null>(null);
+  const [reprogramando, setReprogramando] = useState<string | null>(null);
 
   const cargar = () => {
     api.rutasEstado()
@@ -78,6 +79,21 @@ export function Rutas() {
     cargar();
     if (errores.length) showToast(`${ids.length - errores.length} rutas renovadas; ${errores.length} con problema — ${errores[0]}`, 'error');
     else showToast(`${ids.length === 1 ? 'Ruta renovada' : `${ids.length} rutas renovadas`} · ${creados} negocios nuevos`);
+  };
+
+  const reprogramar = async (id: string) => {
+    setReprogramando(id);
+    try {
+      const r = await api.reprogramarAtrasadas(id);
+      cargar();
+      showToast(r.movidos
+        ? `${r.movidos} ${r.movidos === 1 ? 'parada atrasada pasó' : 'paradas atrasadas pasaron'} al final de su ruta (${etiquetaDia(r.desde!).toLowerCase()} a ${etiquetaDia(r.hasta!).toLowerCase()})`
+        : 'Ya no tenía paradas atrasadas');
+    } catch (err: any) {
+      showToast(err.message || 'No se pudieron reprogramar', 'error');
+    } finally {
+      setReprogramando(null);
+    }
   };
 
   const toggle = (id: string) => setSeleccion((s) => {
@@ -178,7 +194,20 @@ export function Rutas() {
               <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{e?.hoy ?? 0}</div>
               <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                 <b>{e?.pendientes ?? 0}</b>
-                {e?.atrasadas ? <div style={{ fontSize: 11.5, color: '#a8322a' }}>{e.atrasadas} atrasadas</div> : null}
+                {e?.atrasadas ? (
+                  <div style={{ fontSize: 11.5, color: '#a8322a' }}>
+                    {e.atrasadas} atrasadas
+                    <div>
+                      <button
+                        className="link-negocio" style={{ fontSize: 11.5, color: '#157347', fontWeight: 600 }}
+                        disabled={reprogramando === v.id} onClick={() => reprogramar(v.id)}
+                        title="Las pasa a los días siguientes al final de su ruta, para que no se le amontonen hoy"
+                      >
+                        {reprogramando === v.id ? 'Moviendo…' : 'Pasar al final'}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
               <div><span style={{ fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 20, color: s.color, background: s.fondo, whiteSpace: 'nowrap' }}>{s.texto}</span></div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>

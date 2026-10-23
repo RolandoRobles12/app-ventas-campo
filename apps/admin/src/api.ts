@@ -171,6 +171,8 @@ export const api = {
     req<RutaGenerada>(`/rutas/${vendedorId}/generar`, post(data)),
   publicarRuta: (vendedorId: string, data: { config: RutaConfig; inicio: string; items: ItemRuta[]; reemplazarPendientes: boolean; centro?: ZonaPunto }) =>
     req<{ creados: number; eliminados: number; desde: string | null; hasta: string | null }>(`/rutas/${vendedorId}/publicar`, post(data)),
+  reprogramarAtrasadas: (vendedorId: string) =>
+    req<{ movidos: number; desde: string | null; hasta: string | null }>(`/rutas/${vendedorId}/reprogramar-atrasadas`, post()),
   renovarRuta: (vendedorId: string) =>
     req<{ creados: number; desde: string | null; hasta: string | null; necesarios: number; encontrados: number }>(`/rutas/${vendedorId}/renovar`, post()),
 

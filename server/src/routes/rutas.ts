@@ -5,7 +5,7 @@ import { diasEntre, esFechaIso, hoyMx, sumarDias } from '../fechas.js';
 import { centroYRadioDePoligonos, consultarDenue, isDenueConfigured, type UbicacionGps } from '../integrations/denue.js';
 import { geocodificar, isGoogleMapsConfigured } from '../integrations/googleMaps.js';
 import {
-  fechasDeTrabajo, normalizarConfig, ordenarRuta, repartirPorDias, siguienteDiaDeTrabajo, type RutaConfig,
+  DIAS_POR_DEFECTO, fechasDeTrabajo, normalizarConfig, ordenarRuta, repartirPorDias, siguienteDiaDeTrabajo, type RutaConfig,
 } from '../rutas/planificador.js';
 import type { VendedorDoc } from './vendedores.js';
 import { negocioIdDe } from '../negocios.js';
@@ -19,6 +19,7 @@ import { negocioIdDe } from '../negocios.js';
 //                            configuración para poder renovarla después.
 //   - POST /:id/renovar   → genera y publica el siguiente periodo con la
 //                            configuración guardada, sin pasar por la vista previa.
+//   - POST /:id/reprogramar-atrasadas → pasa lo atrasado al final de su ruta.
 //   - GET  /estado        → hasta cuándo tiene ruta cada vendedor.
 export const rutasRouter = Router();
 
@@ -32,6 +33,8 @@ interface ProspectoExclusion {
   nombre: string;
   direccion: string;
   estado: string;
+  fechaPlan?: string | null;
+  reagendado?: boolean;
   createdAt?: Timestamp;
   visitadoEn?: Timestamp | null;
 }
@@ -74,15 +77,22 @@ async function exclusiones(productoId: string, vendedorId: string, reemplazar: b
   const ids = [...new Set([...companeros, vendedorId])];
   const limiteVisitado = Date.now() - DIAS_SIN_REPETIR_VISITADO * 86_400_000;
   const snaps = await Promise.all(chunkArray(ids).map((c) => db.collection('prospectos')
-    .where('vendedorId', 'in', c).select('vendedorId', 'negocioId', 'nombre', 'direccion', 'estado', 'createdAt', 'visitadoEn').get()));
+    .where('vendedorId', 'in', c).select('vendedorId', 'negocioId', 'nombre', 'direccion', 'estado', 'fechaPlan', 'reagendado', 'createdAt', 'visitadoEn').get()));
   const out = new Set<string>();
   for (const d of snaps.flatMap((s) => s.docs)) {
     const p = d.data() as ProspectoExclusion;
-    if (reemplazar && p.estado === POR_VISITAR && d.get('vendedorId') === vendedorId) continue;
+    if (reemplazar && p.estado === POR_VISITAR && d.get('vendedorId') === vendedorId && !seConserva(p, hoyMx())) continue;
     const cuando = (p.visitadoEn ?? p.createdAt)?.toMillis() ?? 0;
     if (p.estado === POR_VISITAR || cuando >= limiteVisitado) out.add(claveProspecto(p));
   }
   return out;
+}
+
+// Una visita que el vendedor reagendó con el cliente es un compromiso: al
+// reemplazar la ruta pendiente no se borra (salvo que ya se le haya pasado
+// la fecha, entonces es una atrasada más).
+function seConserva(p: { estado: string; reagendado?: boolean; fechaPlan?: string | null }, hoy: string): boolean {
+  return p.estado === POR_VISITAR && !!p.reagendado && !!p.fechaPlan && p.fechaPlan >= hoy;
 }
 
 // Prospectos guardados antes de existir negocioId (ver backfill-historial.ts)
@@ -146,14 +156,20 @@ function itemValido(i: unknown): i is ItemRuta {
   return !!x && typeof x.nombre === 'string' && !!x.nombre.trim() && esFechaIso(x.fechaPlan) && Number.isFinite(Number(x.orden));
 }
 
-async function borrarPendientes(vendedorId: string): Promise<number> {
-  const snap = await db.collection('prospectos').where('vendedorId', '==', vendedorId).where('estado', '==', POR_VISITAR).select().get();
-  for (const lote of chunkArray(snap.docs, ESCRITURAS_POR_LOTE)) {
+// Borra lo pendiente del vendedor salvo sus reagendados vigentes, y regresa
+// cuántos borró y las claves de los que se quedaron.
+async function borrarPendientes(vendedorId: string): Promise<{ eliminados: number; conservados: Set<string> }> {
+  const hoy = hoyMx();
+  const snap = await db.collection('prospectos').where('vendedorId', '==', vendedorId).where('estado', '==', POR_VISITAR)
+    .select('negocioId', 'nombre', 'direccion', 'lat', 'lng', 'estado', 'fechaPlan', 'reagendado').get();
+  const quedan = snap.docs.filter((d) => seConserva(d.data() as ProspectoExclusion, hoy));
+  const borrar = snap.docs.filter((d) => !seConserva(d.data() as ProspectoExclusion, hoy));
+  for (const lote of chunkArray(borrar, ESCRITURAS_POR_LOTE)) {
     const batch = db.batch();
     lote.forEach((d) => batch.delete(d.ref));
     await batch.commit();
   }
-  return snap.size;
+  return { eliminados: borrar.length, conservados: new Set(quedan.map((d) => claveProspecto(d.data() as ProspectoExclusion))) };
 }
 
 async function publicar(vendedorId: string, config: RutaConfig, items: ItemRuta[], reemplazar: boolean, centro?: { lat: number; lng: number }) {
@@ -164,8 +180,9 @@ async function publicar(vendedorId: string, config: RutaConfig, items: ItemRuta[
     : config;
   await db.collection('vendedores').doc(vendedorId).update({ rutaConfig: configGuardada, giros: config.giros });
 
-  const eliminados = reemplazar ? await borrarPendientes(vendedorId) : 0;
-  const existentes = reemplazar ? new Set<string>() : new Set(
+  const borrado = reemplazar ? await borrarPendientes(vendedorId) : null;
+  const eliminados = borrado?.eliminados ?? 0;
+  const existentes = borrado ? borrado.conservados : new Set(
     (await db.collection('prospectos').where('vendedorId', '==', vendedorId).select('negocioId', 'nombre', 'direccion', 'lat', 'lng').get())
       .docs.map((d) => claveProspecto(d.data() as ProspectoExclusion)),
   );
@@ -231,6 +248,7 @@ rutasRouter.get('/estado', async (req, res) => {
 
   const vendedores = (await db.collection('vendedores').get()).docs
     .map((d) => ({ id: d.id, ...(d.data() as VendedorDoc) }))
+    .filter((v) => v.estado !== 'Baja')
     .filter((v) => (!fProductos.length || fProductos.includes(v.productoId)) && (!fVendedores.length || fVendedores.includes(v.id)));
 
   const pend = (id: string) => db.collection('prospectos').where('vendedorId', '==', id).where('estado', '==', POR_VISITAR);
@@ -284,6 +302,49 @@ rutasRouter.post('/:vendedorId/publicar', async (req, res) => {
     if (vendedor.estado === 'Baja') return res.status(400).json({ error: 'VENDEDOR_BAJA', message: 'Ese vendedor está dado de baja.' });
     const centro = req.body?.centro && Number.isFinite(req.body.centro.lat) && Number.isFinite(req.body.centro.lng) ? req.body.centro : undefined;
     res.json(await publicar(vendedor.id, config, items, req.body?.reemplazarPendientes === true, centro));
+  } catch (err) {
+    return responderError(res, err);
+  }
+});
+
+// Lo atrasado (pendiente con fecha anterior a hoy) se acumula si el vendedor
+// faltó o no le alcanzó el día, y le infla la lista de hoy. Esto lo pasa a
+// los días de trabajo siguientes al final de su ruta, a su ritmo de visitas
+// por día y en un recorrido corto, sin pedirle nada nuevo al DENUE.
+rutasRouter.post('/:vendedorId/reprogramar-atrasadas', async (req, res) => {
+  try {
+    const vendedor = await leerVendedor(req.params.vendedorId);
+    if (vendedor.estado === 'Baja') return res.status(400).json({ error: 'VENDEDOR_BAJA', message: 'Ese vendedor está dado de baja.' });
+    const config = vendedor.rutaConfig ? normalizarConfig(vendedor.rutaConfig) : null;
+    const dias = config && typeof config !== 'string' ? config.dias : DIAS_POR_DEFECTO;
+    const porDia = config && typeof config !== 'string' ? config.visitasPorDia : 10;
+    const hoy = hoyMx();
+
+    const snap = await db.collection('prospectos').where('vendedorId', '==', vendedor.id).where('estado', '==', POR_VISITAR)
+      .where('fechaPlan', '<', hoy).get();
+    if (snap.empty) return res.json({ movidos: 0, desde: null, hasta: null });
+
+    // Lo que ya está planeado de hoy en adelante no se mueve: lo atrasado va después.
+    const futuro = await db.collection('prospectos').where('vendedorId', '==', vendedor.id).where('estado', '==', POR_VISITAR)
+      .where('fechaPlan', '>=', hoy).orderBy('fechaPlan', 'desc').limit(1).get();
+    const ultimo = futuro.docs[0]?.get('fechaPlan') as string | undefined;
+    const inicio = siguienteDiaDeTrabajo(ultimo ? sumarDias(ultimo, 1) : hoy, dias);
+    const diasNecesarios = Math.ceil(snap.size / porDia);
+    const fechas = fechasDeTrabajo(inicio, Math.ceil(diasNecesarios / dias.length) + 1, dias).slice(0, diasNecesarios);
+
+    const items = snap.docs.map((d) => ({ ref: d.ref, lat: d.get('lat') as number | null, lng: d.get('lng') as number | null }));
+    const zona = config && typeof config !== 'string' ? config.zona : null;
+    const origen = zona?.lat != null && zona.lng != null ? { lat: zona.lat, lng: zona.lng } : items.find((i) => i.lat != null && i.lng != null);
+    const ordenados = origen ? ordenarRuta(items, { lat: origen.lat!, lng: origen.lng! }) : items;
+    const plan = repartirPorDias(ordenados, fechas, porDia);
+
+    for (const lote of chunkArray(plan, ESCRITURAS_POR_LOTE)) {
+      const batch = db.batch();
+      // Un reagendado vencido ya no es la fecha que se pactó con el cliente.
+      lote.forEach((i) => batch.update(i.ref, { fechaPlan: i.fechaPlan, orden: i.orden, reagendado: false }));
+      await batch.commit();
+    }
+    res.json({ movidos: plan.length, desde: fechas[0] ?? null, hasta: fechas[fechas.length - 1] ?? null });
   } catch (err) {
     return responderError(res, err);
   }

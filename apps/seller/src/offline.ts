@@ -219,7 +219,9 @@ export async function prospectosConCache(vendedorId: string): Promise<Prospecto[
 // atrasado) se bajan con la ruta, para tenerlas a la mano sin señal.
 const llaveAntecedentes = (vendedorId: string) => `aviva.antecedentes.${vendedorId}`;
 interface CacheAntecedentes { en: number; datos: Record<string, Antecedente[]> }
-const ANTECEDENTES_VIGENCIA_MS = 15 * 60 * 1000;
+// Las visitas de otros a un negocio cambian poco: la copia completa se
+// renueva cada pocas horas y, mientras, solo se piden los negocios nuevos.
+const ANTECEDENTES_VIGENCIA_MS = 4 * 60 * 60 * 1000;
 const MAX_ANTECEDENTES = 60;
 
 function precargarAntecedentes(vendedorId: string, lista: Prospecto[]) {
@@ -230,9 +232,15 @@ function precargarAntecedentes(vendedorId: string, lista: Prospecto[]) {
     .slice(0, MAX_ANTECEDENTES);
   if (!ids.length) return;
   const cache = leerJson<CacheAntecedentes>(llaveAntecedentes(vendedorId), { en: 0, datos: {} });
-  if (Date.now() - cache.en < ANTECEDENTES_VIGENCIA_MS && ids.every((id) => id in cache.datos)) return;
-  api.antecedentes(vendedorId, ids)
-    .then((datos) => escribirJson(llaveAntecedentes(vendedorId), { en: Date.now(), datos }))
+  const vigente = Date.now() - cache.en < ANTECEDENTES_VIGENCIA_MS;
+  const pedir = vigente ? ids.filter((id) => !(id in cache.datos)) : ids;
+  if (!pedir.length) return;
+  api.antecedentes(vendedorId, pedir)
+    .then((datos) => {
+      // Solo se guardan los negocios de la ruta actual: la copia no crece sin fin.
+      const base = vigente ? Object.fromEntries(ids.filter((id) => id in cache.datos).map((id) => [id, cache.datos[id]])) : {};
+      escribirJson(llaveAntecedentes(vendedorId), { en: vigente ? cache.en : Date.now(), datos: { ...base, ...datos } });
+    })
     .catch(() => { /* sin señal: se queda la copia anterior */ });
 }
 

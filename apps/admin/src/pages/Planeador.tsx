@@ -360,7 +360,7 @@ export function Planeador() {
                 <input type="checkbox" checked={c.reemplazar} onChange={(e) => set({ reemplazar: e.target.checked })} style={{ accentColor: '#157347', width: 15, height: 15, marginTop: 2 }} />
                 <span>
                   Quitar sus <b>{estado!.pendientes} pendientes</b> actuales y empezar de cero.
-                  <span style={{ display: 'block', color: '#8a978f', fontSize: 12 }}>{c.reemplazar ? 'Se borran al publicar; pueden volver a salir en la ruta nueva.' : 'Si no, la ruta nueva se suma a lo que ya tiene.'}</span>
+                  <span style={{ display: 'block', color: '#8a978f', fontSize: 12 }}>{c.reemplazar ? 'Se borran al publicar (menos las visitas que reagendó con el cliente); pueden volver a salir en la ruta nueva.' : 'Si no, la ruta nueva se suma a lo que ya tiene.'}</span>
                 </span>
               </label>
             )}
