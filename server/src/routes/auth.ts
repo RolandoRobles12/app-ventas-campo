@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { db, Timestamp } from '../db.js';
 import { isAdminEmail } from '../auth.js';
 import { productosPorId, shapeVendedor, type VendedorDoc } from './vendedores.js';
 
@@ -24,4 +24,13 @@ authRouter.get('/me', async (req, res) => {
   if (v.estado === 'Baja') return res.json({ email, vendedor: null, baja: true, isAdmin });
   const productos = await productosPorId([v.productoId]);
   res.json({ email, vendedor: shapeVendedor(doc.id, v, productos.get(v.productoId)), baja: false, isAdmin });
+});
+
+// La app del vendedor avisa que ya vio el recorrido de bienvenida: así no se
+// le vuelve a mostrar solo, aunque entre desde otra tablet.
+authRouter.post('/onboarding', async (req, res) => {
+  const snap = await db.collection('vendedores').where('email', '==', req.user!.email.toLowerCase()).limit(1).get();
+  if (snap.empty) return res.status(404).json({ error: 'no_es_vendedor' });
+  if (!snap.docs[0].get('onboardingVisto')) await snap.docs[0].ref.update({ onboardingVisto: Timestamp.now() });
+  res.status(204).end();
 });

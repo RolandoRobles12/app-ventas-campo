@@ -6,6 +6,7 @@ import { productosPorId } from './vendedores.js';
 import { esFechaIso, fechaMx, sumarDias } from '../fechas.js';
 import { resolveVendedorIds } from './_filters.js';
 import { esNegocioIdValido, negocioIdDe } from '../negocios.js';
+import { llamadasDeNegocio, normalizarTelefono } from './llamadas.js';
 
 export const visitasRouter = Router();
 
@@ -225,11 +226,16 @@ const MAX_HISTORIAL_NEGOCIO = 200;
 visitasRouter.get('/negocio/:negocioId', requireAdmin, async (req, res) => {
   const { negocioId } = req.params;
   if (!esNegocioIdValido(negocioId)) return res.status(400).json({ error: 'negocio_invalido' });
-  const [visitas, prospectosSnap] = await Promise.all([
+  const [visitas, prospectosSnap, llamadas] = await Promise.all([
     visitasDeNegocio(negocioId, MAX_HISTORIAL_NEGOCIO),
     db.collection('prospectos').where('negocioId', '==', negocioId).get(),
+    // Si el índice de llamadas aún se está creando, el historial sale igual.
+    llamadasDeNegocio(negocioId, MAX_HISTORIAL_NEGOCIO).catch((err) => {
+      console.error('llamadas del negocio:', err?.message || err);
+      return [];
+    }),
   ]);
-  const prospectos = prospectosSnap.docs.map((d) => d.data() as ProspectoDoc & { giro?: string | null; telefono?: string | null; estado?: string; fechaPlan?: string | null });
+  const prospectos = prospectosSnap.docs.map((d) => d.data() as ProspectoDoc & { giro?: string | null; telefono?: string | null; estado?: string; fechaPlan?: string | null; citaFecha?: string | null; citaHora?: string | null });
   const ficha = prospectos[0];
   const enRuta = prospectos.find((p) => p.estado === 'por_visitar' && p.vendedorId);
   const vendedorEnRuta = enRuta ? (await vendedoresPorId([enRuta.vendedorId!])).get(enRuta.vendedorId!) : undefined;
@@ -239,8 +245,12 @@ visitasRouter.get('/negocio/:negocioId', requireAdmin, async (req, res) => {
     direccion: ficha?.direccion ?? visitas[0]?.direccion ?? '',
     giro: ficha?.giro ?? null,
     telefono: ficha?.telefono ?? null,
-    enRuta: enRuta ? { vendedorNombre: vendedorEnRuta?.nombre ?? '—', fechaPlan: enRuta.fechaPlan ?? null } : null,
+    enRuta: enRuta ? {
+      vendedorNombre: vendedorEnRuta?.nombre ?? '—', fechaPlan: enRuta.fechaPlan ?? null,
+      citaHora: enRuta.citaFecha && enRuta.citaFecha === enRuta.fechaPlan ? enRuta.citaHora ?? null : null,
+    } : null,
     visitas: await conVendedor(visitas),
+    llamadas,
   });
 });
 
@@ -276,7 +286,7 @@ function fotoUrlValida(url: string, vendedorId: string): boolean {
 }
 
 visitasRouter.post('/', async (req, res) => {
-  const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy, capturadoEn, reagendarPara, fotos: fotosRaw } = req.body as Record<string, string> & { fotos?: unknown };
+  const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy, capturadoEn, reagendarPara, telefono, fotos: fotosRaw } = req.body as Record<string, string> & { fotos?: unknown };
   if (!vendedorId || !resultado) return res.status(400).json({ error: 'vendedorId y resultado son requeridos' });
   if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
 
@@ -294,6 +304,8 @@ visitasRouter.post('/', async (req, res) => {
   const hasGps = gpsLat != null && gpsLng != null;
 
   const esNuevo = esNegocioNuevo === 'true' || esNegocioNuevo === '1';
+  // El vendedor puede capturar o corregir el teléfono del negocio en la visita.
+  const telefonoCapturado = normalizarTelefono(telefono);
   const createdAt = parseCapturadoEn(capturadoEn) ?? Timestamp.now();
   const [prospectoDoc, vendedorDoc] = await Promise.all([
     prospectoId ? db.collection('prospectos').doc(prospectoId).get() : null,
@@ -306,10 +318,10 @@ visitasRouter.post('/', async (req, res) => {
   if (esNuevo && !prospecto) {
     const nombre = nombreNegocio || 'Nuevo negocio';
     const dir = direccion || 'Ubicación actual';
-    const data: ProspectoDoc & { vendedorId: string; negocioId: string; giro?: string; origen: string; estado: string; visitadoEn: Timestamp; createdAt: Timestamp } = {
+    const data: ProspectoDoc & { vendedorId: string; negocioId: string; giro?: string; telefono: string | null; origen: string; estado: string; visitadoEn: Timestamp; createdAt: Timestamp } = {
       vendedorId, negocioId: negocioIdDe({ nombre, direccion: dir, lat: gpsLat, lng: gpsLng }),
       nombre, direccion: dir,
-      giro: giro || undefined, origen: 'manual', estado: 'visitado', visitadoEn: createdAt,
+      giro: giro || undefined, telefono: telefonoCapturado, origen: 'manual', estado: 'visitado', visitadoEn: createdAt,
       lat: hasGps ? gpsLat : null, lng: hasGps ? gpsLng : null, createdAt: Timestamp.now(),
     };
     const ref = await db.collection('prospectos').add(data);
@@ -322,14 +334,16 @@ visitasRouter.post('/', async (req, res) => {
       await prospectoRef.update({ negocioId: prospecto.negocioId });
     }
     // "Se reagenda visita" no cierra el negocio: vuelve a su ruta en la
-    // fecha que eligió el vendedor (mañana si no eligió ninguna).
+    // fecha que eligió el vendedor (mañana si no eligió ninguna). En los dos
+    // casos, la cita que tuviera agendada por teléfono ya se cumplió.
+    const tel = telefonoCapturado ? { telefono: telefonoCapturado, telefonoInvalido: false } : {};
     if (resultado === RESULTADO_REAGENDA) {
       const fecha = esFechaIso(reagendarPara) && reagendarPara > fechaMx(createdAt.toDate())
         ? reagendarPara
         : sumarDias(fechaMx(createdAt.toDate()), 1);
-      await prospectoRef.update({ estado: 'por_visitar', fechaPlan: fecha, orden: 0, reagendado: true });
+      await prospectoRef.update({ estado: 'por_visitar', fechaPlan: fecha, orden: 0, reagendado: true, citaFecha: null, citaHora: null, ...tel });
     } else {
-      await prospectoRef.update({ estado: 'visitado', visitadoEn: createdAt, reagendado: false });
+      await prospectoRef.update({ estado: 'visitado', visitadoEn: createdAt, reagendado: false, citaFecha: null, citaHora: null, ...tel });
     }
   }
 

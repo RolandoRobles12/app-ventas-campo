@@ -27,6 +27,14 @@ interface ProspectoDoc {
   // Una visita con resultado "Se reagenda visita" lo devuelve a pendiente
   // con una fechaPlan nueva (ver POST /visitas).
   reagendado?: boolean;
+  // Cita que el vendedor agendó por teléfono (ver routes/llamadas.ts): solo
+  // vale mientras citaFecha === fechaPlan (si el negocio se movió de día, la
+  // hora ya no aplica).
+  citaFecha?: string | null;
+  citaHora?: string | null;
+  ultimaLlamada?: { resultado: string; en: Timestamp } | null;
+  // El vendedor reportó que el número no es del negocio.
+  telefonoInvalido?: boolean;
   visitadoEn?: Timestamp | null;
   // Ventana semanal del asistente de rutas anterior (antes de fechaPlan):
   // YYYY-MM-DD, ambos inclusive. Solo la traen prospectos viejos.
@@ -52,6 +60,10 @@ function shape(id: string, p: ProspectoDoc) {
     fechaPlan: p.fechaPlan ?? null,
     orden: p.orden ?? null,
     reagendado: !!p.reagendado,
+    citaFecha: p.citaFecha ?? null,
+    citaHora: p.citaHora ?? null,
+    ultimaLlamada: p.ultimaLlamada ? { resultado: p.ultimaLlamada.resultado, en: toIso(p.ultimaLlamada.en) } : null,
+    telefonoInvalido: !!p.telefonoInvalido,
     visitadoEn: toIso(p.visitadoEn ?? null),
     semanaInicio: p.semanaInicio ?? null,
     semanaHasta: p.semanaHasta ?? null,

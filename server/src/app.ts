@@ -22,6 +22,7 @@ import { progresoRouter } from './routes/progreso.js';
 import { metricasRouter } from './routes/metricas.js';
 import { mapaRouter } from './routes/mapa.js';
 import { seguimientoRouter } from './routes/seguimiento.js';
+import { llamadasRouter } from './routes/llamadas.js';
 
 export const app = express();
 const origins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -47,11 +48,13 @@ app.use('/api/seguimiento', requireAdmin, seguimientoRouter);
 // Mixtos: la app del vendedor también usa algunas rutas de estos routers
 // (ver comentarios dentro de cada archivo); requireAdmin se aplica ahí
 // ruta por ruta, no a nivel router. `progreso` solo lo usa la app del
-// vendedor (cada quien el suyo, igual que prospectos/visitas).
+// vendedor (cada quien el suyo, igual que prospectos/visitas). En `llamadas`
+// el vendedor registra las suyas y el admin las consulta.
 app.use('/api/prospectos', prospectosRouter);
 app.use('/api/visitas', visitasRouter);
 app.use('/api/ubicaciones', ubicacionesRouter);
 app.use('/api/progreso', progresoRouter);
+app.use('/api/llamadas', llamadasRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);

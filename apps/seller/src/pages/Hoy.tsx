@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { Progreso, Prospecto } from '../api';
 import { useSession } from '../session';
 import { useUbicacion } from '../ubicacion';
 import {
   listarVisitasPendientes, progresoConCache, progresoEnCache, prospectosConCache, rutaEnCache, useCambiosDeRuta,
 } from '../offline';
-import { agruparRuta, comoLlegarUrl, textoDistancia, type Parada } from '../ruta';
+import { agruparRuta, comoLlegarUrl, horaCita, siguienteParada, textoDistancia, textoHora, type Parada } from '../ruta';
+import { agruparLlamadas } from '../llamadas';
 import { etiquetaDia, fechaLarga, fechaLocal } from '../fechas';
+import { useRecorrido } from '../recorrido';
 import { Pantalla } from '../components/AppShell';
 import { ParadaFila } from '../components/ParadaFila';
 import { EstadoConexion } from '../components/EstadoConexion';
-import { IconAbajo, IconFuego, IconMas, IconNavegar, IconRecargar, IconSalir, IconTienda } from '../icons';
+import { HojaLlamada, VistaLlamadas } from '../components/Llamadas';
+import { IconAbajo, IconCamara, IconCheck, IconFuego, IconInfo, IconMas, IconNavegar, IconRecargar, IconRuta, IconSalir, IconTelefono, IconTienda } from '../icons';
 
 const RECARGA_AL_VOLVER_MS = 2 * 60 * 1000;
 
@@ -20,6 +23,24 @@ export function Hoy() {
   const { posicion, refrescar: refrescarUbicacion } = useUbicacion();
   const navigate = useNavigate();
   const cambios = useCambiosDeRuta();
+  const recorrido = useRecorrido();
+  // La vista va en la URL: al volver de registrar una visita se queda donde estaba.
+  const [params, setParams] = useSearchParams();
+  const vista = params.get('vista') === 'llamar' ? 'llamar' : 'ruta';
+  const pestanas = useRef<HTMLDivElement>(null);
+  const cambiarVista = (v: 'ruta' | 'llamar') => {
+    setParams(v === 'llamar' ? { vista: v } : {}, { replace: true });
+    // En una sola columna (teléfono, tablet vertical) la lista queda abajo
+    // de la siguiente parada: se sube para que se note el cambio.
+    if (window.innerWidth < 900) pestanas.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const [hoja, setHoja] = useState<Parada | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
+  useEffect(() => {
+    if (!aviso) return;
+    const t = setTimeout(() => setAviso(null), 6000);
+    return () => clearTimeout(t);
+  }, [aviso]);
 
   const [lista, setLista] = useState<Prospecto[] | null>(() => (vendedor ? rutaEnCache(vendedor.id) : null));
   const [progreso, setProgreso] = useState<Progreso | null>(() => (vendedor ? progresoEnCache(vendedor.id) : null));
@@ -51,13 +72,16 @@ export function Hoy() {
   }, [cargar]);
 
   const ruta = useMemo(() => agruparRuta(lista ?? [], posicion), [lista, posicion]);
+  const llamadas = useMemo(() => agruparLlamadas(lista ?? [], posicion), [lista, posicion]);
+  const porLlamar = llamadas.grupos.reduce((n, g) => n + g.paradas.length, 0);
 
   if (!vendedor) return null;
 
   const hoyIso = fechaLocal();
   const visitasHoy = (progreso?.hoy === hoyIso ? progreso.visitasHoy : 0) + pendientesHoy;
   const meta = ruta.planeadosHoy || progreso?.visitasPorDia || vendedor.rutaConfig?.visitasPorDia || 0;
-  const siguiente: Parada | undefined = ruta.hoy[0] ?? ruta.sinFecha[0];
+  const siguiente: Parada | undefined = siguienteParada(ruta);
+  const citasHoy = ruta.citasHoy.filter((p) => p !== siguiente);
   const restoHoy = ruta.hoy.filter((p) => p !== siguiente);
   const restoSinFecha = ruta.sinFecha.filter((p) => p !== siguiente);
   const primerNombre = vendedor.nombre.split(' ')[0];
@@ -68,6 +92,7 @@ export function Hoy() {
         <button
           onClick={() => setMenu(true)}
           aria-label="Mi cuenta"
+          data-tour="cuenta"
           className="tap"
           style={{ width: 56, height: 56, borderRadius: '50%', background: vendedor.color, color: '#fff', fontWeight: 800, fontSize: 20, flex: 'none' }}
         >{vendedor.iniciales}</button>
@@ -90,22 +115,41 @@ export function Hoy() {
         <div className="hoy-col-fija" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Avance visitas={visitasHoy} meta={meta} racha={progreso?.racha ?? 0} />
           {siguiente ? <SiguienteParada parada={siguiente} /> : lista && <SinRutaHoy hayProximos={ruta.proximos.length > 0} />}
-          <button className="btn btn-secondary tap" onClick={() => navigate('/visita/nueva')} style={{ width: '100%' }}>
+          <button data-tour="nuevo" className="btn btn-secondary tap" onClick={() => navigate('/visita/nueva')} style={{ width: '100%' }}>
             <IconMas size={22} stroke={2.6} /> Registrar negocio nuevo
           </button>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+          <div ref={pestanas} data-tour="vistas" role="tablist" style={{ display: 'flex', gap: 6, background: '#dde9e1', borderRadius: 18, padding: 5 }}>
+            <BotonVista activa={vista === 'ruta'} onClick={() => cambiarVista('ruta')}><IconRuta size={20} /> Mi ruta</BotonVista>
+            <BotonVista activa={vista === 'llamar'} onClick={() => cambiarVista('llamar')}>
+              <IconTelefono size={19} /> Llamar
+              {porLlamar > 0 && <span style={{ fontSize: 13, fontWeight: 800, background: vista === 'llamar' ? 'var(--aviva-green-700)' : '#b9cfc1', color: '#fff', padding: '2px 8px', borderRadius: 10 }}>{porLlamar}</span>}
+            </BotonVista>
+          </div>
+
           {lista == null && <div style={{ padding: 20, textAlign: 'center', color: '#6f7d75', fontWeight: 600 }}>Cargando tu ruta…</div>}
 
+          {vista === 'llamar' && lista && (
+            <VistaLlamadas grupos={llamadas.grupos} yaLlamaste={llamadas.yaLlamaste} onAbrir={setHoja} />
+          )}
+
+          {vista === 'ruta' && <>
+          {citasHoy.length > 0 && (
+            <Seccion titulo={`Tus citas de hoy · ${citasHoy.length}`} nota="Por hora" tour="lista">
+              {citasHoy.map((p) => <ParadaFila key={p.id} parada={p} />)}
+            </Seccion>
+          )}
+
           {restoHoy.length > 0 && (
-            <Seccion titulo={`Más paradas de hoy · ${restoHoy.length}`} nota={posicion ? 'La más cercana primero' : undefined}>
+            <Seccion titulo={`Más paradas de hoy · ${restoHoy.length}`} nota={posicion ? 'La más cercana primero' : undefined} tour={citasHoy.length ? undefined : 'lista'}>
               {restoHoy.map((p, i) => <ParadaFila key={p.id} parada={p} numero={i + 2} />)}
             </Seccion>
           )}
 
           {restoSinFecha.length > 0 && (
-            <Seccion titulo={`${ruta.hoy.length ? 'Otros pendientes' : 'Tus pendientes'} · ${restoSinFecha.length}`} nota="Sin día asignado">
+            <Seccion titulo={`${ruta.hoy.length ? 'Otros pendientes' : 'Tus pendientes'} · ${restoSinFecha.length}`} nota="Sin día asignado" tour={citasHoy.length || restoHoy.length ? undefined : 'lista'}>
               {restoSinFecha.map((p, i) => <ParadaFila key={p.id} parada={p} numero={ruta.hoy.length ? undefined : i + 2} />)}
             </Seccion>
           )}
@@ -125,8 +169,27 @@ export function Hoy() {
               ))}
             </Seccion>
           )}
+          </>}
         </div>
       </div>
+
+      {hoja && (
+        <HojaLlamada
+          parada={hoja}
+          vendedorId={vendedor.id}
+          onCerrar={() => setHoja(null)}
+          onGuardada={(mensaje) => { setHoja(null); setAviso(mensaje); }}
+        />
+      )}
+
+      {aviso && (
+        <div role="status" className="aparecer" onClick={() => setAviso(null)} style={{ position: 'absolute', left: 16, right: 16, bottom: 86, zIndex: 80, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
+          <div style={{ maxWidth: 560, display: 'flex', alignItems: 'center', gap: 10, background: '#163d2a', color: '#fff', borderRadius: 16, padding: '14px 16px', fontSize: 15, fontWeight: 700, lineHeight: 1.4, boxShadow: '0 8px 24px rgba(0,0,0,.25)', pointerEvents: 'auto' }}>
+            <span style={{ flex: 'none', color: '#8fe3b6', display: 'flex' }}><IconCheck size={22} stroke={3} /></span>
+            {aviso}
+          </div>
+        </div>
+      )}
 
       {menu && (
         <div onClick={() => setMenu(false)} style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(10,25,17,.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
@@ -137,6 +200,17 @@ export function Hoy() {
                 <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--ink-900)' }}>{vendedor.nombre}</div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: '#6f7d75' }}>{[vendedor.producto, vendedor.rutaConfig?.zona.etiqueta || vendedor.zona].filter(Boolean).join(' · ')}</div>
               </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
+              <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start' }} onClick={() => { setMenu(false); recorrido.verBienvenida(); }}>
+                <IconInfo size={20} /> Ver la guía de la app
+              </button>
+              <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start' }} onClick={() => { setMenu(false); recorrido.iniciarRecorrido(); }}>
+                <IconRuta size={20} /> Recorrido por mi pantalla
+              </button>
+              <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start' }} onClick={() => { setMenu(false); recorrido.practicar(); }}>
+                <IconCamara size={20} /> Practicar una visita
+              </button>
             </div>
             <p style={{ margin: '16px 0 0', fontSize: 14, color: '#6f7d75', lineHeight: 1.5 }}>
               Si cierras sesión tendrás que volver a entrar con tu cuenta de Google para registrar visitas.
@@ -160,7 +234,7 @@ function Avance({ visitas, meta, racha }: { visitas: number; meta: number; racha
     : faltan === 0 ? '¡Cumpliste la meta de hoy!'
       : faltan === 1 ? 'Te falta 1 visita para tu meta.' : `Te faltan ${faltan} visitas para tu meta.`;
   return (
-    <section className="card" style={{ padding: '18px 20px' }}>
+    <section data-tour="avance" className="card" style={{ padding: '18px 20px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span className="section-title" style={{ margin: 0 }}>Visitas de hoy</span>
         {racha > 0 && (
@@ -186,11 +260,12 @@ function Avance({ visitas, meta, racha }: { visitas: number; meta: number; racha
 function SiguienteParada({ parada }: { parada: Parada }) {
   const navigate = useNavigate();
   const distancia = textoDistancia(parada.distanciaM);
+  const hora = horaCita(parada);
   return (
-    <section className="aparecer" style={{ background: 'var(--aviva-green-700)', borderRadius: 22, padding: '18px 20px 20px', color: '#fff' }}>
+    <section data-tour="siguiente" className="aparecer" style={{ background: 'var(--aviva-green-700)', borderRadius: 22, padding: '18px 20px 20px', color: '#fff' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
         <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: '1px', color: '#9fd8b8' }}>
-          {parada.atrasada ? 'ATRASADA · SIGUIENTE PARADA' : 'SIGUIENTE PARADA'}
+          {parada.atrasada ? 'ATRASADA · SIGUIENTE PARADA' : hora ? `CITA A LAS ${textoHora(hora).toUpperCase()}` : 'SIGUIENTE PARADA'}
         </span>
         {distancia && <span style={{ fontSize: 15, fontWeight: 800, background: 'rgba(255,255,255,.16)', padding: '5px 11px', borderRadius: 12 }}>a {distancia}</span>}
       </div>
@@ -233,9 +308,22 @@ function SinRutaHoy({ hayProximos }: { hayProximos: boolean }) {
   );
 }
 
-function Seccion({ titulo, nota, children }: { titulo: string; nota?: string; children: React.ReactNode }) {
+function BotonVista({ activa, onClick, children }: { activa: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <section>
+    <button
+      role="tab" aria-selected={activa} onClick={onClick} className="tap"
+      style={{
+        flex: 1, minHeight: 50, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 16, fontWeight: 800,
+        background: activa ? '#fff' : 'transparent', color: activa ? 'var(--aviva-green-700)' : '#4f6157',
+        boxShadow: activa ? '0 1px 4px rgba(20,60,40,.12)' : 'none',
+      }}
+    >{children}</button>
+  );
+}
+
+function Seccion({ titulo, nota, tour, children }: { titulo: string; nota?: string; tour?: string; children: React.ReactNode }) {
+  return (
+    <section data-tour={tour}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}>
         <h2 className="section-title" style={{ margin: 0 }}>{titulo}</h2>
         {nota && <span style={{ fontSize: 13, fontWeight: 600, color: '#8a978f' }}>{nota}</span>}

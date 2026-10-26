@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../../session';
 import { useUbicacion } from '../../ubicacion';
 import { rutaEnCache, useCambiosDeRuta } from '../../offline';
-import { agruparRuta, textoDistancia } from '../../ruta';
+import { agruparRuta, siguienteParada, textoDistancia } from '../../ruta';
 import { etiquetaDia } from '../../fechas';
 import { resultadoUI } from '../../resultados';
 import { IconCheck, IconReloj, IconSiguiente } from '../../icons';
@@ -14,6 +14,8 @@ interface Estado {
   fotos?: number;
   pendiente?: boolean;
   reagendarPara?: string | null;
+  // Visita de práctica del onboarding: no se guardó nada.
+  practica?: boolean;
 }
 
 // Después de guardar, el siguiente paso natural es ir a la próxima parada:
@@ -29,9 +31,8 @@ export function VisitaExito() {
   const r = resultadoUI(s.resultado);
 
   const siguiente = useMemo(() => {
-    if (!vendedor) return null;
-    const ruta = agruparRuta(rutaEnCache(vendedor.id) ?? [], posicion);
-    return ruta.hoy[0] ?? ruta.sinFecha[0] ?? null;
+    if (!vendedor || s.practica) return null;
+    return siguienteParada(agruparRuta(rutaEnCache(vendedor.id) ?? [], posicion)) ?? null;
     // `cambios` recalcula cuando la marca local de esta visita ya se guardó.
   }, [vendedor, posicion, cambios]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -40,7 +41,7 @@ export function VisitaExito() {
       <div className="aparecer" style={{ width: 104, height: 104, borderRadius: '50%', background: 'var(--aviva-green-500)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <IconCheck size={54} stroke={3} />
       </div>
-      <h1 style={{ margin: '22px 0 0', fontSize: 30, fontWeight: 800, color: 'var(--ink-900)' }}>¡Visita registrada!</h1>
+      <h1 style={{ margin: '22px 0 0', fontSize: 30, fontWeight: 800, color: 'var(--ink-900)' }}>{s.practica ? '¡Así se registra una visita!' : '¡Visita registrada!'}</h1>
       <p style={{ margin: '8px 0 0', fontSize: 17, fontWeight: 600, color: '#6f7d75' }}>{s.nombre}</p>
       {s.resultado && (
         <span style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 8, background: r.fondo, color: r.color, fontWeight: 800, fontSize: 15, padding: '8px 14px', borderRadius: 20 }}>
@@ -57,7 +58,14 @@ export function VisitaExito() {
         </div>
       )}
 
-      {siguiente ? (
+      {s.practica && (
+        <div style={{ marginTop: 20, width: '100%', background: '#fff', border: '1px solid #dfe9e2', borderRadius: 16, padding: '16px 18px', textAlign: 'left', fontSize: 16, fontWeight: 600, color: '#3a4a41', lineHeight: 1.5 }}>
+          Esta fue de práctica: no se guardó ni cuenta para tu meta. En una visita real, aquí te mostramos tu siguiente parada para que sigas sin regresar a la lista.
+          <div style={{ fontWeight: 800, color: '#15703f', marginTop: 8 }}>¡Ya estás listo para las de verdad! 💪</div>
+        </div>
+      )}
+
+      {s.practica ? null : siguiente ? (
         <section className="card aparecer" style={{ marginTop: 26, width: '100%', padding: 18, textAlign: 'left' }}>
           <div className="section-title" style={{ marginBottom: 8 }}>Siguiente parada</div>
           <div style={{ fontSize: 21, fontWeight: 800, color: 'var(--ink-900)' }}>{siguiente.nombre}</div>

@@ -2,9 +2,9 @@ import { NavLink } from 'react-router-dom';
 import { IconHistorial, IconMapa, IconRuta } from '../icons';
 
 const items = [
-  { to: '/', label: 'Mi ruta', Icon: IconRuta },
-  { to: '/mapa', label: 'Mapa', Icon: IconMapa },
-  { to: '/historial', label: 'Historial', Icon: IconHistorial },
+  { to: '/', label: 'Mi ruta', Icon: IconRuta, tour: 'nav-ruta' },
+  { to: '/mapa', label: 'Mapa', Icon: IconMapa, tour: 'nav-mapa' },
+  { to: '/historial', label: 'Historial', Icon: IconHistorial, tour: 'nav-historial' },
 ];
 
 export function BottomNav() {
@@ -13,10 +13,11 @@ export function BottomNav() {
       flex: 'none', height: 70, background: '#fff', borderTop: '1px solid #dfe9e2', display: 'flex',
       alignItems: 'stretch', paddingBottom: 'env(safe-area-inset-bottom)',
     }}>
-      {items.map(({ to, label, Icon }) => (
+      {items.map(({ to, label, Icon, tour }) => (
         <NavLink
           key={to}
           to={to}
+          data-tour={tour}
           end={to === '/'}
           className="tap"
           style={({ isActive }) => ({

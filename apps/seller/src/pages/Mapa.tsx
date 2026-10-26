@@ -36,7 +36,7 @@ export function Mapa() {
 
   const ruta = useMemo(() => agruparRuta(lista, posicion), [lista, posicion]);
   const paradas = useMemo(() => {
-    const hoy = [...ruta.hoy, ...ruta.sinFecha];
+    const hoy = [...ruta.citasHoy, ...ruta.hoy, ...ruta.sinFecha];
     return filtro === 'hoy' ? hoy : [...hoy, ...ruta.proximos.flatMap((d) => d.paradas)];
   }, [ruta, filtro]);
 
@@ -109,7 +109,7 @@ export function Mapa() {
 
       <div style={{ position: 'absolute', top: 14, left: 14, right: 14, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button className="chip tap" aria-pressed={filtro === 'hoy'} onClick={() => setFiltro('hoy')} style={{ boxShadow: '0 2px 6px rgba(0,0,0,.12)' }}>
-          Hoy · {ruta.hoy.length + ruta.sinFecha.length}
+          Hoy · {ruta.citasHoy.length + ruta.hoy.length + ruta.sinFecha.length}
         </button>
         <button className="chip tap" aria-pressed={filtro === 'todo'} onClick={() => setFiltro('todo')} style={{ boxShadow: '0 2px 6px rgba(0,0,0,.12)' }}>
           Toda mi ruta

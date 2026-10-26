@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, ApiError, type Antecedente, type Progreso, type Prospecto } from './api';
+import { api, ApiError, type Antecedente, type NuevaLlamada, type Progreso, type Prospecto } from './api';
 import { subirFotos } from './uploadFotos';
 import { fechaLocal, sumarDias } from './fechas';
 
@@ -130,6 +130,60 @@ async function enviarPingsPendientes(): Promise<void> {
   }
 }
 
+// ——— Llamadas guardadas sin señal ———
+
+// Llamar casi siempre hay señal de voz, pero no siempre de datos: el
+// resultado de la llamada se guarda igual y se envía después.
+const LLAMADAS_KEY = 'aviva.llamadasPendientes';
+const EVENTO_LLAMADAS = 'aviva:llamadas-cambiaron';
+
+function escribirLlamadas(ls: NuevaLlamada[]) {
+  escribirJson(LLAMADAS_KEY, ls);
+  window.dispatchEvent(new Event(EVENTO_LLAMADAS));
+}
+
+async function enviarLlamadasPendientes(): Promise<void> {
+  let ls = leerJson<NuevaLlamada[]>(LLAMADAS_KEY, []);
+  while (ls.length) {
+    try {
+      await api.registrarLlamada(ls[0]);
+    } catch (err) {
+      if (!esDescartable(err)) return;
+    }
+    ls = ls.slice(1);
+    escribirLlamadas(ls);
+  }
+}
+
+// Guarda el resultado de una llamada: directo si hay señal, si no a la cola.
+// Un rechazo del servidor (p. ej. el negocio ya no está en su ruta) sí se
+// avisa, para que el vendedor sepa que no quedó.
+export async function guardarLlamada(l: NuevaLlamada): Promise<{ pendiente: boolean }> {
+  let pendiente = !navigator.onLine;
+  if (!pendiente) {
+    try {
+      await api.registrarLlamada(l);
+    } catch (err) {
+      if (err instanceof ApiError && esDescartable(err)) throw err;
+      pendiente = true;
+    }
+  }
+  if (pendiente) escribirLlamadas([...leerJson<NuevaLlamada[]>(LLAMADAS_KEY, []), l]);
+  marcarLlamadaLocal(l);
+  return { pendiente };
+}
+
+export function useLlamadasPendientes(): number {
+  const contar = () => leerJson<NuevaLlamada[]>(LLAMADAS_KEY, []).length;
+  const [n, setN] = useState(contar);
+  useEffect(() => {
+    const refrescar = () => setN(contar());
+    window.addEventListener(EVENTO_LLAMADAS, refrescar);
+    return () => window.removeEventListener(EVENTO_LLAMADAS, refrescar);
+  }, []);
+  return n;
+}
+
 let sincronizando = false;
 
 export async function sincronizarPendientes(): Promise<void> {
@@ -137,6 +191,8 @@ export async function sincronizarPendientes(): Promise<void> {
   sincronizando = true;
   try {
     await enviarPingsPendientes();
+    // Antes que las visitas: casi siempre se llama antes de ir.
+    await enviarLlamadasPendientes();
     for (const { key, visita } of await listarConLlave()) {
       try {
         // Si falla justo después de subir las fotos pero antes de guardar la
@@ -173,16 +229,53 @@ const MARCA_VIGENCIA_MS = 3 * 24 * 60 * 60 * 1000;
 
 function aplicarMarcas(vendedorId: string, lista: Prospecto[]): Prospecto[] {
   const marcas = leerJson<Record<string, MarcaLocal>>(llaveMarcas(vendedorId), {});
-  return lista.map((p) => {
-    const m = marcas[p.id];
-    if (!m) return p;
-    // El servidor ya refleja la visita (o algo más nuevo): la marca sobra.
-    if (p.estado === m.estado && (p.fechaPlan ?? null) === (m.fechaPlan ?? p.fechaPlan ?? null)) return p;
-    return {
-      ...p, estado: m.estado, fechaPlan: m.fechaPlan ?? p.fechaPlan, reagendado: m.reagendado ?? p.reagendado,
-      visitadoEn: m.estado === 'visitado' ? new Date(m.en).toISOString() : p.visitadoEn,
-    };
-  });
+  const llamadas = leerJson<Record<string, LlamadaLocal>>(llaveLlamadas(vendedorId), {});
+  return lista.map((p) => conLlamadaLocal(conMarcaDeVisita(p, marcas[p.id]), llamadas[p.id], marcas[p.id]));
+}
+
+function conMarcaDeVisita(p: Prospecto, m: MarcaLocal | undefined): Prospecto {
+  if (!m) return p;
+  // El servidor ya refleja la visita (o algo más nuevo): la marca sobra.
+  if (p.estado === m.estado && (p.fechaPlan ?? null) === (m.fechaPlan ?? p.fechaPlan ?? null)) return p;
+  return {
+    ...p, estado: m.estado, fechaPlan: m.fechaPlan ?? p.fechaPlan, reagendado: m.reagendado ?? p.reagendado,
+    visitadoEn: m.estado === 'visitado' ? new Date(m.en).toISOString() : p.visitadoEn,
+    ...(m.estado === 'visitado' || m.fechaPlan ? { citaFecha: null, citaHora: null } : {}),
+  };
+}
+
+// Lo mismo para llamadas: el resultado se ve en la lista al instante, aunque
+// siga en la cola o el servidor todavía no lo refleje.
+const llaveLlamadas = (vendedorId: string) => `aviva.llamadas.${vendedorId}`;
+type LlamadaLocal = Pick<NuevaLlamada, 'resultado' | 'citaFecha' | 'citaHora' | 'telefonoNuevo'> & { en: number };
+
+function conLlamadaLocal(p: Prospecto, l: LlamadaLocal | undefined, visita: MarcaLocal | undefined): Prospecto {
+  if (!l) return p;
+  // Una visita registrada después de la llamada manda.
+  if (visita && visita.en > l.en) return p;
+  if (p.ultimaLlamada && Date.parse(p.ultimaLlamada.en) >= l.en) return p;
+  const q: Prospecto = { ...p, ultimaLlamada: { resultado: l.resultado, en: new Date(l.en).toISOString() } };
+  if (l.resultado === 'cita') Object.assign(q, { estado: 'por_visitar', fechaPlan: l.citaFecha, citaFecha: l.citaFecha, citaHora: l.citaHora });
+  if (l.resultado === 'no_interesa') Object.assign(q, { citaFecha: null, citaHora: null });
+  if (l.resultado === 'numero_equivocado') Object.assign(q, l.telefonoNuevo ? { telefono: l.telefonoNuevo, telefonoInvalido: false } : { telefonoInvalido: true });
+  return q;
+}
+
+function marcarLlamadaLocal(l: NuevaLlamada) {
+  const llamadas = leerJson<Record<string, LlamadaLocal>>(llaveLlamadas(l.vendedorId), {});
+  for (const [id, x] of Object.entries(llamadas)) if (l.capturadoEn - x.en > MARCA_VIGENCIA_MS) delete llamadas[id];
+  llamadas[l.prospectoId] = { resultado: l.resultado, citaFecha: l.citaFecha, citaHora: l.citaHora, telefonoNuevo: l.telefonoNuevo, en: l.capturadoEn };
+  escribirJson(llaveLlamadas(l.vendedorId), llamadas);
+  // Una cita vuelve a poner el negocio en la ruta: la marca de una visita
+  // anterior ya no aplica (si no, lo seguiría ocultando como visitado).
+  if (l.resultado === 'cita') {
+    const marcas = leerJson<Record<string, MarcaLocal>>(llaveMarcas(l.vendedorId), {});
+    if (marcas[l.prospectoId]) {
+      delete marcas[l.prospectoId];
+      escribirJson(llaveMarcas(l.vendedorId), marcas);
+    }
+  }
+  notificarRuta();
 }
 
 export function marcarVisitaLocal(vendedorId: string, prospectoId: string, cambio: Omit<MarcaLocal, 'en'>) {

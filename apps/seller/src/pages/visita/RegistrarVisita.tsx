@@ -8,7 +8,8 @@ import { subirFotos } from '../../uploadFotos';
 import { comoLlegarUrl, distanciaMetros, textoDistancia } from '../../ruta';
 import { etiquetaDia, fechaLocal, sumarDias } from '../../fechas';
 import { RESULTADOS_UI, resultadoUI } from '../../resultados';
-import { IconAtras, IconCamara, IconCheck, IconMas, IconNavegar, IconPin, IconTelefono, IconX } from '../../icons';
+import { telHref, textoTelefono } from '../../llamadas';
+import { IconAtras, IconCamara, IconCheck, IconInfo, IconMas, IconNavegar, IconPin, IconTelefono, IconX } from '../../icons';
 
 const GIROS = ['Abarrotes', 'Ferretería', 'Papelería', 'Alimentos', 'Belleza', 'Taller', 'Servicios', 'Otro'];
 // Mismo tope que MAX_FOTOS_POR_VISITA en server/src/routes/visitas.ts (el
@@ -19,6 +20,13 @@ const MAX_FOTOS = 5;
 const RADIO_VERIFICADA_M = 50;
 const REAGENDA = 'Se reagenda visita';
 const NOTAS_RAPIDAS = ['No estaba el dueño', 'Pidió que regrese', 'Ya tiene crédito', 'Lo va a pensar', 'Negocio cerrado hoy'];
+
+// Negocio de mentira para la visita de práctica del onboarding: nada de lo
+// que se capture con él se envía ni se guarda.
+const NEGOCIO_PRACTICA: Prospecto = {
+  id: 'practica', vendedorId: '', nombre: 'Abarrotes La Práctica', direccion: 'Negocio de ejemplo', giro: 'Abarrotes',
+  telefono: null, origen: 'practica', estado: 'por_visitar',
+};
 
 type GpsFix = { lat: number; lng: number; accuracy: number };
 type GpsState = { status: 'buscando' } | { status: 'ok'; fix: GpsFix } | { status: 'error'; message: string };
@@ -45,7 +53,7 @@ function useGps(): GpsState {
   return gps;
 }
 
-export function RegistrarVisita({ nueva = false }: { nueva?: boolean }) {
+export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: boolean; practica?: boolean }) {
   const { vendedor } = useSession();
   const { id } = useParams();
   const navigate = useNavigate();
@@ -55,6 +63,7 @@ export function RegistrarVisita({ nueva = false }: { nueva?: boolean }) {
   // La lista manda el negocio en el estado de navegación: abre al instante y
   // sin depender de la red. El caché es el respaldo si se entra por URL.
   const [prospecto, setProspecto] = useState<Prospecto | null>(() => {
+    if (practica) return NEGOCIO_PRACTICA;
     const desdeLista = (location.state as { prospecto?: Prospecto } | null)?.prospecto;
     if (desdeLista || nueva || !vendedor) return desdeLista ?? null;
     return rutaEnCache(vendedor.id)?.find((p) => p.id === id) ?? null;
@@ -72,7 +81,7 @@ export function RegistrarVisita({ nueva = false }: { nueva?: boolean }) {
   // está, se pide al servidor).
   const [antecedentes, setAntecedentes] = useState<Antecedente[] | null>(null);
   useEffect(() => {
-    if (!vendedor || !prospecto) return;
+    if (!vendedor || !prospecto || practica) return;
     const enCache = antecedentesEnCache(vendedor.id, prospecto.id);
     setAntecedentes(enCache);
     if (!enCache) cargarAntecedentes(vendedor.id, prospecto.id).then(setAntecedentes);
@@ -83,6 +92,9 @@ export function RegistrarVisita({ nueva = false }: { nueva?: boolean }) {
   const [resultado, setResultado] = useState('');
   const [reagendarPara, setReagendarPara] = useState(() => sumarDias(fechaLocal(), 1));
   const [notas, setNotas] = useState('');
+  // Teléfono del negocio: se puede capturar si no tiene o corregir si está mal.
+  const [telefono, setTelefono] = useState('');
+  const [editarTelefono, setEditarTelefono] = useState(false);
   const [fotos, setFotos] = useState<{ file: File; preview: string }[]>([]);
   const [camara, setCamara] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -138,8 +150,14 @@ export function RegistrarVisita({ nueva = false }: { nueva?: boolean }) {
     setError('');
 
     const nombreNegocio = nueva ? nombre.trim() : prospecto!.nombre;
+    if (practica) {
+      setGuardando(false);
+      navigate('/visita/exito', { replace: true, state: { nombre: nombreNegocio, resultado, fotos: fotos.length, practica: true, reagendarPara: resultado === REAGENDA ? reagendarPara : null } });
+      return;
+    }
     const campos: Record<string, string> = { vendedorId: vendedor.id, resultado, nombreNegocio };
     if (notas.trim()) campos.notas = notas.trim();
+    if (telefono.trim()) campos.telefono = telefono.trim();
     if (gps.status === 'ok') {
       campos.lat = String(gps.fix.lat);
       campos.lng = String(gps.fix.lng);
@@ -203,29 +221,52 @@ export function RegistrarVisita({ nueva = false }: { nueva?: boolean }) {
             <IconAtras size={26} stroke={2.6} />
           </button>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '1px', color: '#6f7d75' }}>{nueva ? 'NEGOCIO NUEVO' : 'REGISTRAR VISITA'}</div>
+            <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '1px', color: practica ? '#c96a1e' : '#6f7d75' }}>{practica ? 'VISITA DE PRÁCTICA' : nueva ? 'NEGOCIO NUEVO' : 'REGISTRAR VISITA'}</div>
             <div className="ellipsis" style={{ fontSize: 21, fontWeight: 800, color: 'var(--ink-900)' }}>{nueva ? (nombre.trim() || 'Negocio fuera de ruta') : prospecto!.nombre}</div>
           </div>
         </div>
       </header>
 
       <div style={{ flex: 1, width: '100%', maxWidth: 860, margin: '0 auto', padding: '16px 16px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {practica && (
+          <section style={{ display: 'flex', gap: 12, alignItems: 'flex-start', background: '#fdf4e7', border: '2px solid #f6d6b3', borderRadius: 18, padding: 16 }}>
+            <span style={{ flex: 'none', color: '#c96a1e', display: 'flex', marginTop: 1 }}><IconInfo size={24} /></span>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#6b4413', lineHeight: 1.5 }}>
+              <b>Esto es una práctica:</b> nada se guarda ni cuenta para tu meta. Haz lo mismo que en una visita real:
+              elige cómo te fue, toma una foto (de lo que sea) y toca "Guardar visita".
+            </div>
+          </section>
+        )}
+
         {!nueva && prospecto && (
           <section className="card" style={{ padding: 16 }}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 15, fontWeight: 600, color: '#3a4a41', lineHeight: 1.45 }}>
               <span style={{ color: '#15915c', flex: 'none', marginTop: 1 }}><IconPin size={20} /></span>
               <span>{[prospecto.giro, prospecto.direccion].filter(Boolean).join(' · ')}</span>
             </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+            {!practica && <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
               <a href={comoLlegarUrl(prospecto)} target="_blank" rel="noreferrer" className="btn btn-ghost tap" style={{ flex: 1, minWidth: 160, textDecoration: 'none' }}>
                 <IconNavegar size={20} stroke={2.4} /> Cómo llegar
               </a>
-              {prospecto.telefono && (
-                <a href={`tel:${prospecto.telefono.replace(/[^+\d]/g, '')}`} className="btn btn-ghost tap" style={{ flex: 1, minWidth: 160, textDecoration: 'none' }}>
+              {prospecto.telefono && !prospecto.telefonoInvalido && (
+                <a href={telHref(prospecto.telefono)} className="btn btn-ghost tap" style={{ flex: 1, minWidth: 160, textDecoration: 'none' }}>
                   <IconTelefono size={20} /> Llamar
                 </a>
               )}
-            </div>
+            </div>}
+            {!practica && (prospecto.telefono && !prospecto.telefonoInvalido && !editarTelefono ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 14, fontWeight: 600, color: '#5a665f' }}>
+                Tel. {textoTelefono(prospecto.telefono)}
+                <button className="tap" onClick={() => setEditarTelefono(true)} style={{ fontSize: 14, fontWeight: 800, color: 'var(--aviva-green-700)', padding: '6px 4px' }}>¿Está mal? Corrígelo</button>
+              </div>
+            ) : (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--ink-800)', marginBottom: 8 }}>
+                  {prospecto.telefono && !prospecto.telefonoInvalido ? 'Teléfono correcto' : '¿Tienes su teléfono?'} <span style={{ fontWeight: 600, color: '#8a978f' }}>(opcional)</span>
+                </div>
+                <input className="field" type="tel" inputMode="tel" value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="Así podrás llamarle para agendar la próxima visita" />
+              </div>
+            ))}
             <Ubicacion gps={gps} distancia={distanciaNegocio} />
           </section>
         )}
@@ -249,6 +290,10 @@ export function RegistrarVisita({ nueva = false }: { nueva?: boolean }) {
             <div>
               <Etiqueta>Dirección o referencia <span style={{ fontWeight: 600, color: '#8a978f' }}>(opcional)</span></Etiqueta>
               <input className="field" value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Si la dejas vacía, usamos tu ubicación GPS" />
+            </div>
+            <div>
+              <Etiqueta>Teléfono <span style={{ fontWeight: 600, color: '#8a978f' }}>(opcional)</span></Etiqueta>
+              <input className="field" type="tel" inputMode="tel" value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="Para llamarle y agendar la próxima visita" />
             </div>
             <Ubicacion gps={gps} distancia={null} />
           </section>
@@ -363,7 +408,7 @@ export function RegistrarVisita({ nueva = false }: { nueva?: boolean }) {
             className="btn tap"
             style={{ width: '100%', minHeight: 62, fontSize: 19, background: faltantes.length ? '#9fb5a8' : 'var(--aviva-green-700)', color: '#fff' }}
           >
-            {guardando ? 'Guardando…' : faltantes.length ? `Falta: ${faltantes.join(', ')}` : <><IconCheck size={24} stroke={3} /> Guardar visita</>}
+            {guardando ? 'Guardando…' : faltantes.length ? `Falta: ${faltantes.join(', ')}` : <><IconCheck size={24} stroke={3} /> {practica ? 'Guardar visita (práctica)' : 'Guardar visita'}</>}
           </button>
         </div>
       </footer>
