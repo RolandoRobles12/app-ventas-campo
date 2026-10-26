@@ -33,6 +33,8 @@ export interface VendedorDoc {
   ciudad?: string;
   colonia?: string | null;
   zonaPoligonos?: ZonaPunto[][] | null;
+  // Cuándo vio el recorrido de bienvenida de la app (ver POST /auth/onboarding).
+  onboardingVisto?: Timestamp | null;
 }
 
 export async function productosPorId(ids: string[]): Promise<Map<string, string>> {
@@ -67,6 +69,7 @@ export function shapeVendedor(id: string, v: VendedorDoc, productoNombre?: strin
     bajaEn: toIso(v.bajaEn ?? null),
     bajaMotivo: v.bajaMotivo ?? null,
     rutaConfig: v.rutaConfig ?? null,
+    onboardingVisto: toIso(v.onboardingVisto ?? null),
     // Para precargar el planeador cuando aún no hay rutaConfig.
     rutaAnterior: v.rutaConfig ? null : {
       etiqueta: [v.colonia, v.ciudad].filter(Boolean).join(', '),

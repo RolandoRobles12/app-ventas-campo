@@ -8,6 +8,8 @@ export interface Vendedor {
   producto: string;
   zona: string | null;
   rutaConfig: { visitasPorDia: number; dias: number[]; zona: { etiqueta: string } } | null;
+  // Cuándo vio el recorrido de bienvenida (null: todavía no).
+  onboardingVisto?: string | null;
 }
 
 export interface Prospecto {
@@ -29,10 +31,29 @@ export interface Prospecto {
   fechaPlan?: string | null;
   orden?: number | null;
   reagendado?: boolean;
+  // Cita agendada por teléfono: vale solo si citaFecha === fechaPlan.
+  citaFecha?: string | null;
+  citaHora?: string | null;
+  ultimaLlamada?: { resultado: ResultadoLlamada; en: string } | null;
+  // El vendedor reportó que el número no es del negocio.
+  telefonoInvalido?: boolean;
   visitadoEn?: string | null;
   // Ventana semanal de rutas viejas (antes de fechaPlan).
   semanaInicio?: string | null;
   semanaHasta?: string | null;
+}
+
+export type ResultadoLlamada = 'cita' | 'llamar_despues' | 'no_contesto' | 'no_interesa' | 'numero_equivocado';
+
+export interface NuevaLlamada {
+  vendedorId: string;
+  prospectoId: string;
+  resultado: ResultadoLlamada;
+  citaFecha?: string;
+  citaHora?: string;
+  telefonoNuevo?: string;
+  notas?: string;
+  capturadoEn: number;
 }
 
 export interface VisitaReciente {
@@ -100,6 +121,9 @@ export const api = {
     req<Record<string, Antecedente[]>>(`/prospectos/vendedor/${vendedorId}/antecedentes?ids=${prospectoIds.map(encodeURIComponent).join(',')}`),
   registrarVisita: (data: Record<string, unknown>) =>
     req<{ id: string }>('/visitas', { method: 'POST', body: JSON.stringify(data) }),
+  registrarLlamada: (data: NuevaLlamada) =>
+    req<{ id: string }>('/llamadas', { method: 'POST', body: JSON.stringify(data) }),
+  marcarOnboarding: () => req<void>('/auth/onboarding', { method: 'POST' }),
   registrarUbicacion: (data: { vendedorId: string; lat: number; lng: number; accuracy?: number; capturadoEn?: number }) =>
     req<{ ok: boolean }>('/ubicaciones', { method: 'POST', body: JSON.stringify(data) }),
 };

@@ -146,14 +146,25 @@ function itemValido(i: unknown): i is ItemRuta {
   return !!x && typeof x.nombre === 'string' && !!x.nombre.trim() && esFechaIso(x.fechaPlan) && Number.isFinite(Number(x.orden));
 }
 
-async function borrarPendientes(vendedorId: string): Promise<number> {
-  const snap = await db.collection('prospectos').where('vendedorId', '==', vendedorId).where('estado', '==', POR_VISITAR).select().get();
-  for (const lote of chunkArray(snap.docs, ESCRITURAS_POR_LOTE)) {
+// Las citas que el vendedor agendó por teléfono (de hoy en adelante) se
+// conservan: son compromisos con el negocio. Devuelve cuántos borró y los
+// que se quedaron, para no volver a agregarlos.
+async function borrarPendientes(vendedorId: string): Promise<{ eliminados: number; conservados: Set<string> }> {
+  const snap = await db.collection('prospectos').where('vendedorId', '==', vendedorId).where('estado', '==', POR_VISITAR)
+    .select('negocioId', 'nombre', 'direccion', 'lat', 'lng', 'fechaPlan', 'citaFecha').get();
+  const hoy = hoyMx();
+  const conCita = (d: FirebaseFirestore.QueryDocumentSnapshot) => {
+    const citaFecha = d.get('citaFecha') as string | null | undefined;
+    return !!citaFecha && citaFecha >= hoy && citaFecha === d.get('fechaPlan');
+  };
+  const borrar = snap.docs.filter((d) => !conCita(d));
+  for (const lote of chunkArray(borrar, ESCRITURAS_POR_LOTE)) {
     const batch = db.batch();
     lote.forEach((d) => batch.delete(d.ref));
     await batch.commit();
   }
-  return snap.size;
+  const conservados = new Set(snap.docs.filter(conCita).map((d) => claveProspecto(d.data() as ProspectoExclusion)));
+  return { eliminados: borrar.length, conservados };
 }
 
 async function publicar(vendedorId: string, config: RutaConfig, items: ItemRuta[], reemplazar: boolean, centro?: { lat: number; lng: number }) {
@@ -164,8 +175,9 @@ async function publicar(vendedorId: string, config: RutaConfig, items: ItemRuta[
     : config;
   await db.collection('vendedores').doc(vendedorId).update({ rutaConfig: configGuardada, giros: config.giros });
 
-  const eliminados = reemplazar ? await borrarPendientes(vendedorId) : 0;
-  const existentes = reemplazar ? new Set<string>() : new Set(
+  const borrado = reemplazar ? await borrarPendientes(vendedorId) : null;
+  const eliminados = borrado?.eliminados ?? 0;
+  const existentes = borrado ? borrado.conservados : new Set(
     (await db.collection('prospectos').where('vendedorId', '==', vendedorId).select('negocioId', 'nombre', 'direccion', 'lat', 'lng').get())
       .docs.map((d) => claveProspecto(d.data() as ProspectoExclusion)),
   );

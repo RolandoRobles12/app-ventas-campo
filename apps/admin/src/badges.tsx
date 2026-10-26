@@ -35,3 +35,32 @@ export function resultadoBadgeStyle(resultado: string): CSSProperties {
   if (resultado === 'Se reagenda visita') return { ...base, color: '#2a6fdb', background: '#e2ecfb' };
   return { ...base, color: '#3a4a41', background: '#eef2ee' };
 }
+
+// Resultados de llamada: mismos colores que en la app del vendedor
+// (apps/seller/src/llamadas.ts).
+export const ETIQUETA_LLAMADA: Record<string, string> = {
+  cita: 'Agendó visita',
+  llamar_despues: 'Llamar más tarde',
+  no_contesto: 'No contestó',
+  no_interesa: 'No le interesa',
+  numero_equivocado: 'Número equivocado',
+};
+
+export function llamadaBadgeStyle(resultado: string): CSSProperties {
+  if (resultado === 'cita') return { ...base, color: '#0f5132', background: '#dcf1e5' };
+  if (resultado === 'llamar_despues') return { ...base, color: '#c96a1e', background: '#fdecdb' };
+  if (resultado === 'no_interesa') return { ...base, color: '#c0392b', background: '#fbe3e0' };
+  return { ...base, color: '#5a665f', background: '#eef2ee' };
+}
+
+// "14:30" → "2:30 pm".
+export function textoHora(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`;
+}
+
+// "5512345678" → "55 1234 5678".
+export function textoTelefono(tel: string): string {
+  const d = tel.replace(/\D/g, '');
+  return d.length === 10 ? `${d.slice(0, 2)} ${d.slice(2, 6)} ${d.slice(6)}` : tel;
+}

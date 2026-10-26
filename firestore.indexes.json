@@ -29,6 +29,34 @@
       ]
     },
     {
+      "collectionGroup": "llamadas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "negocioId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "llamadas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "vendedorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "visitas",
       "queryScope": "COLLECTION",
       "fields": [

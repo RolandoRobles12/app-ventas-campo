@@ -8,6 +8,7 @@ import { NoAdmin } from './pages/NoAdmin';
 import { Resumen } from './pages/Resumen';
 import { EnVivo } from './pages/EnVivo';
 import { Visitas } from './pages/Visitas';
+import { Llamadas } from './pages/Llamadas';
 import { Rutas } from './pages/Rutas';
 import { Planeador } from './pages/Planeador';
 import { Equipo } from './pages/Equipo';
@@ -28,6 +29,7 @@ function AppShell() {
             <Route path="/resumen" element={<Resumen />} />
             <Route path="/en-vivo" element={<EnVivo />} />
             <Route path="/visitas" element={<Visitas />} />
+            <Route path="/llamadas" element={<Llamadas />} />
             <Route path="/rutas" element={<Rutas />} />
             <Route path="/rutas/:vendedorId" element={<Planeador />} />
             <Route path="/equipo" element={<Equipo />} />

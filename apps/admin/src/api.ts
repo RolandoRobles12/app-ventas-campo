@@ -113,8 +113,21 @@ export interface VisitaListItem {
 export interface VisitasResponse { items: VisitaListItem[]; nextCursor: string | null }
 export interface HistorialNegocio {
   negocioId: string; nombre: string; direccion: string; giro: string | null; telefono: string | null;
-  enRuta: { vendedorNombre: string; fechaPlan: string | null } | null;
+  enRuta: { vendedorNombre: string; fechaPlan: string | null; citaHora?: string | null } | null;
   visitas: VisitaListItem[];
+  // Servidores anteriores a las llamadas no lo mandan.
+  llamadas?: Llamada[];
+}
+export type ResultadoLlamada = 'cita' | 'llamar_despues' | 'no_contesto' | 'no_interesa' | 'numero_equivocado';
+export interface Llamada {
+  id: string; vendedorId: string; vendedorNombre: string; producto: string;
+  prospectoId: string; negocioId: string; nombreNegocio: string; direccion: string; telefono: string | null;
+  resultado: ResultadoLlamada; citaFecha: string | null; citaHora: string | null; telefonoNuevo: string | null;
+  notas: string | null; createdAt: string;
+}
+export interface CitaProxima {
+  prospectoId: string; negocioId: string; vendedorId: string; vendedorNombre: string;
+  nombre: string; direccion: string; telefono: string | null; citaFecha: string; citaHora: string | null;
 }
 export interface Usuario { email: string; nombre: string | null; createdAt: string }
 
@@ -186,5 +199,10 @@ export const api = {
       vendedorIds: params.vendedorIds, productoIds: params.productoIds, resultados: params.resultados,
       desde: params.desde, hasta: params.hasta, cursor: params.cursor, limit: params.limit ? String(params.limit) : undefined,
     })}`),
+  llamadas: (params: Filtro & { resultados?: string[] }) =>
+    req<{ items: Llamada[]; truncado: boolean }>(`/llamadas${qs({
+      vendedorIds: params.vendedorIds, productoIds: params.productoIds, resultados: params.resultados, desde: params.desde, hasta: params.hasta,
+    })}`),
+  citas: (f: { productoIds?: string[]; vendedorIds?: string[] }) => req<CitaProxima[]>(`/llamadas/citas${qs(f)}`),
   historialNegocio: (negocioId: string) => req<HistorialNegocio>(`/visitas/negocio/${encodeURIComponent(negocioId)}`),
 };

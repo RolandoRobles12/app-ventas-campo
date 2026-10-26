@@ -12,6 +12,7 @@ import { BottomNav } from './components/BottomNav';
 import { LocationGate } from './components/LocationGate';
 import { UbicacionProvider } from './ubicacion';
 import { OfflineSync } from './offline';
+import { RecorridoProvider } from './recorrido';
 
 function AppShellConSesion() {
   const { vendedor, loading } = useSession();
@@ -32,18 +33,21 @@ function AppShellConSesion() {
       <LocationGate>
         <UbicacionProvider vendedorId={vendedor.id}>
           <OfflineSync />
-          <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            <Routes>
-              <Route path="/" element={<Hoy />} />
-              <Route path="/mapa" element={<Mapa />} />
-              <Route path="/historial" element={<Historial />} />
-              <Route path="/visita/nueva" element={<RegistrarVisita nueva />} />
-              <Route path="/visita/exito" element={<VisitaExito />} />
-              <Route path="/visita/:id" element={<RegistrarVisita />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </div>
-          {!enVisita && <BottomNav />}
+          <RecorridoProvider vendedor={vendedor}>
+            <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <Routes>
+                <Route path="/" element={<Hoy />} />
+                <Route path="/mapa" element={<Mapa />} />
+                <Route path="/historial" element={<Historial />} />
+                <Route path="/visita/nueva" element={<RegistrarVisita nueva />} />
+                <Route path="/visita/practica" element={<RegistrarVisita practica />} />
+                <Route path="/visita/exito" element={<VisitaExito />} />
+                <Route path="/visita/:id" element={<RegistrarVisita />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </div>
+            {!enVisita && <BottomNav />}
+          </RecorridoProvider>
         </UbicacionProvider>
       </LocationGate>
     </AppShell>
