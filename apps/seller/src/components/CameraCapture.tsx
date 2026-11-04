@@ -69,10 +69,19 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
     onCapture(new File([preview.blob], `visita-${Date.now()}.jpg`, { type: 'image/jpeg' }));
   };
 
+  // El visor ocupa lo que sobra y el video/foto se dibuja encima con
+  // position:absolute: así su tamaño natural (p. ej. 1080×1920 en vertical)
+  // nunca empuja los botones fuera de la pantalla.
+  const visor = (children: React.ReactNode) => (
+    <div style={{ flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'hidden' }}>{children}</div>
+  );
+  const llenar: React.CSSProperties = { position: 'absolute', inset: 0, width: '100%', height: '100%' };
+
   return (
-    <div style={{ position: 'absolute', inset: 0, background: '#000', zIndex: 100, display: 'flex', flexDirection: 'column' }}>
+    <div className="camara" style={{ position: 'absolute', inset: 0, background: '#000', zIndex: 100 }}>
       <button
         onClick={onClose}
+        aria-label="Cerrar cámara"
         style={{ position: 'absolute', top: 16, right: 16, zIndex: 2, width: 52, height: 52, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -85,8 +94,8 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
         </div>
       ) : preview ? (
         <>
-          <img src={preview.url} style={{ flex: 1, minHeight: 0, width: '100%', objectFit: 'contain' }} />
-          <div style={{ padding: '18px 20px 30px', display: 'flex', gap: 12, background: 'rgba(0,0,0,.55)' }}>
+          {visor(<img src={preview.url} alt="Foto tomada" style={{ ...llenar, objectFit: 'contain' }} />)}
+          <div className="camara-controles">
             <button
               onClick={() => setPreview(null)}
               style={{ flex: 1, background: 'rgba(255,255,255,.15)', color: '#fff', border: '1.5px solid #fff', borderRadius: 16, padding: 18, fontSize: 17, fontWeight: 800 }}
@@ -103,12 +112,12 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
         </>
       ) : (
         <>
-          <video ref={videoRef} autoPlay playsInline muted style={{ flex: 1, width: '100%', objectFit: 'cover' }} />
-          <div style={{ padding: '20px 0 30px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, background: 'rgba(0,0,0,.55)' }}>
+          {visor(<video ref={videoRef} autoPlay playsInline muted style={{ ...llenar, objectFit: 'cover' }} />)}
+          <div className="camara-controles camara-controles-centro">
             <button
               onClick={capturar} disabled={!ready}
               aria-label="Tomar foto"
-              style={{ width: 84, height: 84, borderRadius: '50%', border: '5px solid #fff', background: ready ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.12)', opacity: ready ? 1 : 0.6 }}
+              style={{ flex: 'none', width: 84, height: 84, borderRadius: '50%', border: '5px solid #fff', background: ready ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.12)', opacity: ready ? 1 : 0.6 }}
             />
             <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>{ready ? 'Tomar foto' : 'Preparando cámara…'}</span>
           </div>
