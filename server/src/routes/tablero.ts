@@ -1,16 +1,17 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
 import { chunkArray, parseCsvParam } from '../firestore-helpers.js';
-import { esFechaIso, fechaMx, hoyMx, inicioDiaMx, sumarDias, diaSemana } from '../fechas.js';
+import { diasEntre, esFechaIso, fechaMx, hoyMx, inicioDiaMx, sumarDias, diaSemana } from '../fechas.js';
 import { getVendedoresDocs, resolveVendedorIds } from './_filters.js';
-import { planeadosEnRango, type PlaneadoMetrica } from './metricas.js';
 import { productosPorId, type VendedorDoc } from './vendedores.js';
 import { dealsDeCampo, hubspotConfigurado, ownersPorEmail, type DealCampo } from '../integrations/hubspot.js';
 
-// Tablero: los 5 números clave para cualquier persona que quiera ver el
-// resultado de campo sin conocer la operación. Todo se calcula para un
-// periodo (día, semana o mes) y se compara contra el periodo anterior del
-// mismo tipo cortado en el mismo punto de avance (ver periodos()).
+// Tablero: el embudo de campo (meta de la ruta → visitados → reales → con
+// interés → solicitudes en HubSpot → aprobadas) para cualquier persona que
+// quiera ver el resultado sin conocer la operación, más el detalle por
+// vendedor y las alertas para quien coordina. Todo se calcula para un
+// periodo (día, semana, mes o un rango a elegir) y se compara contra el
+// periodo anterior cortado en el mismo punto de avance (ver periodos()).
 export const tableroRouter = Router();
 
 const SOLICITUD = 'Se realizó solicitud';
@@ -20,8 +21,13 @@ const CON_INTERES = new Set([SOLICITUD, 'Se dejó información', 'Se reagenda vi
 // tiene un deal en HubSpot creado hasta 30 min antes o después.
 const VENTANA_CONFIRMACION_MS = 30 * 60 * 1000;
 const PERIODOS_TENDENCIA = 8;
+// Un rango a elegir llega hasta un año; hasta 45 días la tendencia va por
+// día, más largo, por semana.
+const MAX_DIAS_RANGO = 366;
+const MAX_DIAS_SERIE_DIARIA = 45;
+const MIN = 60 * 1000;
 
-type Vista = 'dia' | 'semana' | 'mes';
+type Vista = 'dia' | 'semana' | 'mes' | 'rango';
 
 interface VisitaTablero {
   id: string;
@@ -29,37 +35,45 @@ interface VisitaTablero {
   resultado: string;
   createdAt: number;
   negocio: string;
+  ubicacionValida: boolean | null;
+}
+
+export interface PlaneadoMetrica {
+  vendedorId: string;
+  estado: string;
+  fechaPlan: string;
 }
 
 // ---------- Periodos ----------
 
 function sumarMeses(primeroDeMes: string, n: number): string {
   const [y, m] = primeroDeMes.split('-').map(Number);
-  const d = new Date(Date.UTC(y, m - 1 + n, 1));
-  return d.toISOString().slice(0, 10);
+  return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 10);
 }
 
-function inicioDe(vista: Vista, fecha: string): string {
+const lunesDe = (fecha: string) => { const dow = diaSemana(fecha); return sumarDias(fecha, dow === 0 ? -6 : 1 - dow); };
+
+function inicioDe(vista: Exclude<Vista, 'rango'>, fecha: string): string {
   if (vista === 'dia') return fecha;
-  if (vista === 'semana') { const dow = diaSemana(fecha); return sumarDias(fecha, dow === 0 ? -6 : 1 - dow); }
+  if (vista === 'semana') return lunesDe(fecha);
   return `${fecha.slice(0, 7)}-01`;
 }
 
-function finDe(vista: Vista, inicio: string): string {
+function finDe(vista: Exclude<Vista, 'rango'>, inicio: string): string {
   if (vista === 'dia') return inicio;
   if (vista === 'semana') return sumarDias(inicio, 6);
   return sumarDias(sumarMeses(inicio, 1), -1);
 }
 
-// Inicio del periodo `n` pasos antes (paso de la tendencia: el día, la
-// semana o el mes inmediato anterior).
-function inicioAnterior(vista: Vista, inicio: string, n = 1): string {
+// Inicio del periodo `n` pasos antes (el día, la semana o el mes anterior).
+function inicioAnterior(vista: Exclude<Vista, 'rango'>, inicio: string, n = 1): string {
   if (vista === 'dia') return sumarDias(inicio, -n);
   if (vista === 'semana') return sumarDias(inicio, -7 * n);
   return sumarMeses(inicio, -n);
 }
 
 interface Rango { desde: string; hasta: string; start: number; end: number }
+type Tramo = Rango & { parcial: boolean };
 
 function rango(desde: string, hasta: string, corte?: number): Rango {
   const start = inicioDiaMx(desde).getTime();
@@ -67,52 +81,97 @@ function rango(desde: string, hasta: string, corte?: number): Rango {
   return { desde, hasta, start, end: corte != null ? Math.min(fin, corte) : fin };
 }
 
-// El periodo elegido y contra qué se compara:
+// El periodo elegido, contra qué se compara y los tramos de la tendencia:
 // - Día: contra el mismo día de la semana pasada (un lunes no se parece a
 //   un sábado, así que "contra ayer" engañaría).
 // - Semana y mes: contra la semana / el mes anterior.
-// Si el periodo va en curso, los dos se cortan en el mismo punto de avance:
-// hoy hasta esta hora vs el martes pasado hasta esta hora; del 1 al 11 a
-// las 13:40 vs del 1 al 11 del mes pasado a las 13:40.
-export function periodos(vista: Vista, fecha: string, ahora: number) {
-  const desde = inicioDe(vista, fecha);
-  const hasta = finDe(vista, desde);
+// - Rango a elegir: contra los mismos días justo antes.
+// Si el periodo va en curso, los dos se cortan en el mismo punto de avance
+// (hoy hasta esta hora vs el martes pasado hasta esta hora; del 1 al 11 a
+// las 13:40 vs del 1 al 11 del mes pasado a las 13:40).
+// La tendencia son los últimos 8 días / semanas / meses; en un rango, los
+// días (o semanas) que lo forman.
+export function periodos(vista: Vista, desdeQ: string, hastaQ: string, ahora: number) {
+  let desde: string;
+  let hasta: string;
+  let prevDesde: string;
+  let prevHasta: string;
+  if (vista === 'rango') {
+    desde = desdeQ;
+    hasta = hastaQ;
+    const largo = diasEntre(desde, hasta) + 1;
+    prevDesde = sumarDias(desde, -largo);
+    prevHasta = sumarDias(desde, -1);
+  } else {
+    desde = inicioDe(vista, desdeQ);
+    hasta = finDe(vista, desde);
+    prevDesde = vista === 'dia' ? sumarDias(desde, -7) : inicioAnterior(vista, desde);
+    prevHasta = finDe(vista, prevDesde);
+  }
   const completo = rango(desde, hasta);
   const enCurso = ahora >= completo.start && ahora < completo.end;
   const actual = enCurso ? rango(desde, hasta, ahora) : completo;
-
-  const prevDesde = vista === 'dia' ? sumarDias(desde, -7) : inicioAnterior(vista, desde);
-  const prevHasta = finDe(vista, prevDesde);
   const prevCompleto = rango(prevDesde, prevHasta);
   const previo = enCurso ? rango(prevDesde, prevHasta, prevCompleto.start + (ahora - completo.start)) : prevCompleto;
 
-  const tendencia: (Rango & { parcial: boolean })[] = [];
-  for (let i = PERIODOS_TENDENCIA - 1; i >= 0; i--) {
-    const d = inicioAnterior(vista, desde, i);
-    tendencia.push({ ...(i === 0 ? actual : rango(d, finDe(vista, d))), parcial: i === 0 && enCurso });
+  const tendencia: Tramo[] = [];
+  let tendenciaPor: 'dia' | 'semana' | 'mes' = vista === 'rango' ? 'dia' : vista;
+  if (vista === 'rango') {
+    tendenciaPor = diasEntre(desde, hasta) + 1 > MAX_DIAS_SERIE_DIARIA ? 'semana' : 'dia';
+    for (let d = tendenciaPor === 'semana' ? lunesDe(desde) : desde; d <= hasta; d = sumarDias(d, tendenciaPor === 'semana' ? 7 : 1)) {
+      const fin = tendenciaPor === 'semana' ? sumarDias(d, 6) : d;
+      const r = rango(d < desde ? desde : d, fin > hasta ? hasta : fin, actual.end);
+      if (r.start >= actual.end) break;
+      tendencia.push({ ...r, desde: d, parcial: enCurso && r.end === actual.end });
+    }
+  } else {
+    for (let i = PERIODOS_TENDENCIA - 1; i >= 0; i--) {
+      const d = inicioAnterior(vista, desde, i);
+      tendencia.push({ ...(i === 0 ? actual : rango(d, finDe(vista, d))), parcial: i === 0 && enCurso });
+    }
   }
-  return { actual, previo, enCurso, tendencia };
+  return { actual, previo, enCurso, tendencia, tendenciaPor };
 }
 
-// Último día de calendario que toca un rango (para las paradas planeadas,
-// que se guardan por día).
+// Último día de calendario que toca un rango (las paradas planeadas se
+// guardan por día).
 const ultimoDia = (r: Rango) => fechaMx(new Date(r.end - 1));
 
 // ---------- Lecturas ----------
 
-async function visitasEnRango(ids: string[] | null, r: Rango, soloSolicitudes = false): Promise<VisitaTablero[]> {
-  const campos = ['vendedorId', 'resultado', 'createdAt', 'negocioId', 'prospectoId'];
+async function visitasEnRango(ids: string[] | null, r: { start: number; end: number }, soloSolicitudes = false): Promise<VisitaTablero[]> {
+  const campos = ['vendedorId', 'resultado', 'createdAt', 'negocioId', 'prospectoId', 'ubicacionValida'];
   const base = (q: FirebaseFirestore.Query) => {
-    let x = q;
-    if (soloSolicitudes) x = x.where('resultado', '==', SOLICITUD);
+    const x = soloSolicitudes ? q.where('resultado', '==', SOLICITUD) : q;
     return x.where('createdAt', '>=', Timestamp.fromMillis(r.start)).where('createdAt', '<', Timestamp.fromMillis(r.end)).select(...campos);
   };
   const consultas = ids ? chunkArray(ids).map((c) => db.collection('visitas').where('vendedorId', 'in', c)) : [db.collection('visitas')];
   const snaps = await Promise.all(consultas.map((q) => base(q).get()));
   return snaps.flatMap((s) => s.docs.map((d) => {
-    const v = d.data() as { vendedorId: string; resultado: string; createdAt: Timestamp; negocioId?: string | null; prospectoId?: string | null };
-    return { id: d.id, vendedorId: v.vendedorId, resultado: v.resultado, createdAt: v.createdAt.toMillis(), negocio: v.negocioId || v.prospectoId || `visita:${d.id}` };
+    const v = d.data() as { vendedorId: string; resultado: string; createdAt: Timestamp; negocioId?: string | null; prospectoId?: string | null; ubicacionValida?: boolean | null };
+    return {
+      id: d.id, vendedorId: v.vendedorId, resultado: v.resultado, createdAt: v.createdAt.toMillis(),
+      negocio: v.negocioId || v.prospectoId || `visita:${d.id}`, ubicacionValida: v.ubicacionValida ?? null,
+    };
   }));
+}
+
+// Cuántas visitas hubo en un rango (agregación: no lee los documentos).
+async function contarVisitas(ids: string[] | null, r: Rango): Promise<number> {
+  const consultas = ids ? chunkArray(ids).map((c) => db.collection('visitas').where('vendedorId', 'in', c)) : [db.collection('visitas')];
+  const snaps = await Promise.all(consultas.map((q) => q
+    .where('createdAt', '>=', Timestamp.fromMillis(r.start)).where('createdAt', '<', Timestamp.fromMillis(r.end)).count().get()));
+  return snaps.reduce((s, x) => s + x.data().count, 0);
+}
+
+// Negocios que la ruta planeó para el periodo (la meta). Se lee por fecha
+// (un solo rango) y se filtra el vendedor en memoria.
+async function planeadosEnRango(desde: string, hasta: string, ids: Set<string>): Promise<PlaneadoMetrica[]> {
+  if (desde > hasta) return [];
+  const snap = await db.collection('prospectos')
+    .where('fechaPlan', '>=', desde).where('fechaPlan', '<=', hasta)
+    .select('vendedorId', 'estado', 'fechaPlan').get();
+  return snap.docs.map((d) => d.data() as PlaneadoMetrica).filter((p) => ids.has(p.vendedorId));
 }
 
 // ---------- Confirmación contra HubSpot ----------
@@ -123,12 +182,7 @@ async function visitasEnRango(ids: string[] | null, r: Rango, soloSolicitudes = 
 // una sola vez (dos solicitudes seguidas no pueden confirmarse con el mismo
 // deal).
 export function emparejar(solicitudes: VisitaTablero[], deals: DealCampo[], ownerDe: Map<string, string>): Map<string, DealCampo> {
-  const dealsPorOwner = new Map<string, DealCampo[]>();
-  for (const d of deals) {
-    const l = dealsPorOwner.get(d.ownerId) ?? [];
-    l.push(d);
-    dealsPorOwner.set(d.ownerId, l);
-  }
+  const dealsPorOwner = agrupar(deals, (d) => d.ownerId);
   const parejas: { visita: string; deal: DealCampo; delta: number }[] = [];
   for (const v of solicitudes) {
     const owner = ownerDe.get(v.vendedorId);
@@ -147,6 +201,16 @@ export function emparejar(solicitudes: VisitaTablero[], deals: DealCampo[], owne
     usados.add(p.deal.id);
   }
   return porVisita;
+}
+
+function agrupar<T>(l: T[], llave: (x: T) => string): Map<string, T[]> {
+  const m = new Map<string, T[]>();
+  for (const x of l) {
+    const k = llave(x);
+    const g = m.get(k);
+    if (g) g.push(x); else m.set(k, [x]);
+  }
+  return m;
 }
 
 type EstadoDeal = 'aprobada' | 'rechazada' | 'en_proceso';
@@ -196,10 +260,13 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
   // como interesado.
   const ultima = new Map<string, VisitaTablero>();
   const interesados = new Set<string>();
+  let validables = 0;
+  let validas = 0;
   for (const v of visitas) {
     const u = ultima.get(v.negocio);
     if (!u || v.createdAt > u.createdAt) ultima.set(v.negocio, v);
     if (CON_INTERES.has(v.resultado)) interesados.add(v.negocio);
+    if (v.ubicacionValida != null) { validables++; if (v.ubicacionValida) validas++; }
   }
   const negociosVisitados = ultima.size;
   const noValidos = [...ultima.values()].filter((v) => v.resultado === NO_VALIDO).length;
@@ -213,51 +280,143 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
     interesados: interesados.size,
     meta: planeados.length,
     metaVisitados: planeados.filter((p) => p.estado === 'visitado').length,
+    avanceMeta: pct1(negociosVisitados, planeados.length),
     ...s,
     conversion: s.solicitudes != null ? pct1(s.solicitudes, negociosReales) : null,
     aprobacion: s.aprobadas != null ? pct1(s.aprobadas, s.aprobadas + (s.rechazadas ?? 0)) : null,
     confirmacion: s.confirmadasVisitas != null ? pct1(s.confirmadasVisitas, s.marcadas) : null,
+    // Visitas hechas en el negocio (GPS a 50 m o menos), de las que se pueden comprobar.
+    validables,
+    enNegocio: pct1(validas, validables),
+  };
+}
+
+// ---------- Diagnóstico de lo que no empata ----------
+
+// Para decidir si la ventana de ±30 min es la correcta (o si hay otro
+// problema de captura): por cada deal de HubSpot que no confirmó ninguna
+// visita, y por cada solicitud marcada en campo que no se confirmó, qué tan
+// lejos quedó lo más cercano del mismo vendedor.
+type Distancia = 'a_30_60' | 'a_1_3h' | 'mas_3h_mismo_dia' | 'otro_dia';
+function distancia(ms: number, a: number, b: number): Distancia {
+  if (fechaMx(new Date(a)) !== fechaMx(new Date(b))) return 'otro_dia';
+  if (ms <= 60 * MIN) return 'a_30_60';
+  if (ms <= 180 * MIN) return 'a_1_3h';
+  return 'mas_3h_mismo_dia';
+}
+
+function diagnostico(
+  actual: Rango, deals: DealCampo[], confirmadas: Map<string, DealCampo>,
+  visitas: VisitaTablero[], solicitudes: VisitaTablero[], ownerDe: Map<string, string>,
+) {
+  const vendedorDeOwner = new Map([...ownerDe].map(([v, o]) => [o, v]));
+  const usados = new Set([...confirmadas.values()].map((d) => d.id));
+  const visitasPorVendedor = agrupar(visitas, (v) => v.vendedorId);
+  const dealsPorOwner = agrupar(deals, (d) => d.ownerId);
+  const sumar = (m: Record<string, number>, k: string) => { m[k] = (m[k] ?? 0) + 1; };
+
+  const mismoDia = (x: number, y: number) => fechaMx(new Date(x)) === fechaMx(new Date(y));
+  const masCercano = <T>(l: T[], t: number, cuando: (x: T) => number): T | null => {
+    let mejor: T | null = null;
+    for (const x of l) if (mismoDia(cuando(x), t) && (!mejor || Math.abs(cuando(x) - t) < Math.abs(cuando(mejor) - t))) mejor = x;
+    return mejor;
+  };
+  const sinConfirmar = solicitudes.filter((v) => v.createdAt >= actual.start && v.createdAt < actual.end && !confirmadas.has(v.id));
+  const sinConfirmarPorVendedor = agrupar(sinConfirmar, (v) => v.vendedorId);
+
+  // Deals sin visita. Primero se busca una solicitud marcada sin confirmar
+  // del mismo vendedor ese día (lo más probable: capturó el deal tarde); si
+  // no hay, la visita más cercana de cualquier resultado. Un vendedor visita
+  // un negocio cada 20-30 min, así que buscar primero "cualquier visita"
+  // confundiría un deal capturado una hora tarde con una visita mal marcada.
+  const sinVisita = deals.filter((d) => d.creado >= actual.start && d.creado < actual.end && !usados.has(d.id));
+  const porCaso: Record<string, number> = {};
+  const otroResultado: Record<string, number> = {};
+  for (const d of sinVisita) {
+    const vendedor = vendedorDeOwner.get(d.ownerId) ?? '';
+    const pendiente = masCercano(sinConfirmarPorVendedor.get(vendedor) ?? [], d.creado, (v) => v.createdAt);
+    if (pendiente && Math.abs(pendiente.createdAt - d.creado) <= 180 * MIN) { sumar(porCaso, distancia(Math.abs(pendiente.createdAt - d.creado), pendiente.createdAt, d.creado)); continue; }
+    const cerca = masCercano(visitasPorVendedor.get(vendedor) ?? [], d.creado, (v) => v.createdAt);
+    if (!cerca) { sumar(porCaso, 'sin_visitas_ese_dia'); continue; }
+    const delta = Math.abs(cerca.createdAt - d.creado);
+    if (delta <= VENTANA_CONFIRMACION_MS) {
+      if (cerca.resultado === SOLICITUD) sumar(porCaso, 'visita_ya_confirmada');
+      else { sumar(porCaso, 'otro_resultado'); sumar(otroResultado, cerca.resultado); }
+      continue;
+    }
+    sumar(porCaso, pendiente ? distancia(Math.abs(pendiente.createdAt - d.creado), pendiente.createdAt, d.creado) : 'sin_solicitud_cerca');
+  }
+
+  // Solicitudes marcadas sin confirmar: primero el deal libre más cercano
+  // del vendedor ese día; si el único cercano ya confirmó otra visita, se dice.
+  const libresPorOwner = agrupar(deals.filter((d) => !usados.has(d.id)), (d) => d.ownerId);
+  const porCasoS: Record<string, number> = {};
+  for (const v of sinConfirmar) {
+    const owner = ownerDe.get(v.vendedorId);
+    if (!owner) { sumar(porCasoS, 'sin_usuario_hubspot'); continue; }
+    const libre = masCercano(libresPorOwner.get(owner) ?? [], v.createdAt, (d) => d.creado);
+    if (libre) { sumar(porCasoS, distancia(Math.abs(libre.creado - v.createdAt), libre.creado, v.createdAt)); continue; }
+    const usado = masCercano(dealsPorOwner.get(owner) ?? [], v.createdAt, (d) => d.creado);
+    sumar(porCasoS, usado && Math.abs(usado.creado - v.createdAt) <= VENTANA_CONFIRMACION_MS ? 'deal_ya_usado' : 'sin_deals_ese_dia');
+  }
+
+  return {
+    dealsSinVisita: { total: sinVisita.length, porCaso, otroResultado },
+    solicitudesSinConfirmar: { total: sinConfirmar.length, porCaso: porCasoS },
   };
 }
 
 // ---------- Ruta ----------
 
 tableroRouter.get('/', async (req, res) => {
-  const q = req.query as { vista?: string; fecha?: string; productoIds?: string };
-  const vista: Vista = q.vista === 'dia' || q.vista === 'semana' ? q.vista : 'mes';
+  const q = req.query as { vista?: string; fecha?: string; desde?: string; hasta?: string; productoIds?: string; vendedorIds?: string };
+  const vista: Vista = q.vista === 'dia' || q.vista === 'semana' || q.vista === 'rango' ? q.vista : 'mes';
   const hoy = hoyMx();
+  const ahora = Date.now();
   // No se puede ver el futuro: una fecha posterior a hoy se trata como hoy.
   const fecha = esFechaIso(q.fecha) && q.fecha <= hoy ? q.fecha : hoy;
-  const ahora = Date.now();
-  const { actual, previo, enCurso, tendencia } = periodos(vista, fecha, ahora);
+  let desdeQ = fecha;
+  let hastaQ = fecha;
+  if (vista === 'rango') {
+    hastaQ = esFechaIso(q.hasta) && q.hasta <= hoy ? q.hasta : hoy;
+    desdeQ = esFechaIso(q.desde) ? q.desde : sumarDias(hastaQ, -29);
+    if (desdeQ > hastaQ) [desdeQ, hastaQ] = [hastaQ, desdeQ];
+    if (diasEntre(desdeQ, hastaQ) >= MAX_DIAS_RANGO) desdeQ = sumarDias(hastaQ, -(MAX_DIAS_RANGO - 1));
+  }
+  const { actual, previo, enCurso, tendencia, tendenciaPor } = periodos(vista, desdeQ, hastaQ, ahora);
 
-  const filtro = await resolveVendedorIds(undefined, parseCsvParam(q.productoIds));
+  const filtro = await resolveVendedorIds(parseCsvParam(q.vendedorIds), parseCsvParam(q.productoIds));
   const vendedoresDocs = await getVendedoresDocs(filtro);
   const vendedores = vendedoresDocs.map((d) => ({ id: d.id, ...(d.data() as VendedorDoc) }));
   const ids = vendedores.map((v) => v.id);
   const idsSet = new Set(ids);
-  // Sin filtro de producto se lee por fecha (una sola consulta); las
-  // solicitudes sí van por vendedor para usar el índice vendedor+resultado+fecha.
+  // Sin filtro se lee por fecha (una sola consulta); las solicitudes sí van
+  // por vendedor para usar el índice vendedor+resultado+fecha.
   const idsConsulta = filtro ? ids : null;
 
-  const rangoTendencia: Rango = { desde: tendencia[0].desde, hasta: actual.hasta, start: tendencia[0].start, end: actual.end };
-  const [visitasAct, visitasPrev, solicitudesTodas, planAct, planPrev] = ids.length === 0
-    ? [[], [], [], [], []] as [VisitaTablero[], VisitaTablero[], VisitaTablero[], PlaneadoMetrica[], PlaneadoMetrica[]]
-    : await Promise.all([
-      visitasEnRango(idsConsulta, actual),
-      visitasEnRango(idsConsulta, previo),
-      visitasEnRango(ids, rangoTendencia, true),
-      planeadosEnRango(actual.desde, ultimoDia(actual), idsSet),
-      planeadosEnRango(previo.desde, ultimoDia(previo), idsSet),
-    ]);
+  const rangoSolicitudes = { start: Math.min(previo.start, tendencia[0]?.start ?? actual.start), end: actual.end };
+  // Visitas de los tramos anteriores de la tendencia: en un rango a elegir
+  // salen de las mismas visitas del periodo; en día/semana/mes se cuentan.
+  const tramosACont = vista === 'rango' ? [] : tendencia.slice(0, -1);
+  const vacio = ids.length === 0;
+  const [visitasAct, visitasPrev, solicitudesTodas, planAct, planPrev, conteos] = await Promise.all([
+    vacio ? [] : visitasEnRango(idsConsulta, actual),
+    vacio ? [] : visitasEnRango(idsConsulta, previo),
+    vacio ? [] : visitasEnRango(ids, rangoSolicitudes, true),
+    vacio ? [] : planeadosEnRango(actual.desde, ultimoDia(actual), idsSet),
+    vacio ? [] : planeadosEnRango(previo.desde, ultimoDia(previo), idsSet),
+    Promise.all(tramosACont.map((t) => (vacio ? 0 : contarVisitas(idsConsulta, t)))),
+  ]);
   const solo = <T extends { vendedorId: string }>(l: T[]) => l.filter((v) => idsSet.has(v.vendedorId));
+  const act = solo(visitasAct);
   const solicitudes = solo(solicitudesTodas);
 
-  // HubSpot: dueño del deal = vendedor con el mismo correo.
+  // HubSpot: dueño del deal = vendedor con el mismo correo (endpoint de owners).
   const ownerDe = new Map<string, string>();
-  let hubspot: { estado: 'ok' | 'sin_configurar' | 'error'; mensaje?: string; dealsSinVisita: number | null; vendedoresSinCuenta: string[] } = {
-    estado: hubspotConfigurado() ? 'ok' : 'sin_configurar', dealsSinVisita: null, vendedoresSinCuenta: [],
-  };
+  let hubspot: {
+    estado: 'ok' | 'sin_configurar' | 'error'; mensaje?: string; vendedoresSinCuenta: string[];
+    diagnostico: ReturnType<typeof diagnostico> | null;
+  } = { estado: hubspotConfigurado() ? 'ok' : 'sin_configurar', vendedoresSinCuenta: [], diagnostico: null };
   let confirmadas = new Map<string, DealCampo>();
   if (hubspot.estado === 'ok' && ids.length) {
     try {
@@ -269,19 +428,19 @@ tableroRouter.get('/', async (req, res) => {
       // Solo importa quién no tiene cuenta si tuvo solicitudes en el periodo.
       const conSolicitud = new Set(solicitudes.filter((s) => s.createdAt >= actual.start).map((s) => s.vendedorId));
       hubspot.vendedoresSinCuenta = vendedores.filter((v) => conSolicitud.has(v.id) && !ownerDe.has(v.id)).map((v) => v.nombre);
-      const deals = await dealsDeCampo([...ownerDe.values()], new Date(rangoTendencia.start - VENTANA_CONFIRMACION_MS), new Date(rangoTendencia.end + VENTANA_CONFIRMACION_MS));
+      const deals = await dealsDeCampo(
+        [...ownerDe.values()],
+        new Date(rangoSolicitudes.start - VENTANA_CONFIRMACION_MS), new Date(rangoSolicitudes.end + VENTANA_CONFIRMACION_MS),
+      );
       confirmadas = emparejar(solicitudes, deals, ownerDe);
-      const usados = new Set([...confirmadas.values()].map((d) => d.id));
-      hubspot.dealsSinVisita = deals.filter((d) => d.creado >= actual.start && d.creado < actual.end && !usados.has(d.id)).length;
+      hubspot.diagnostico = diagnostico(actual, deals, confirmadas, act, solicitudes, ownerDe);
     } catch (err) {
       console.error('Tablero: HubSpot falló:', err);
-      hubspot = { estado: 'error', mensaje: (err as Error).message, dealsSinVisita: null, vendedoresSinCuenta: [] };
+      hubspot = { estado: 'error', mensaje: (err as Error).message, vendedoresSinCuenta: [], diagnostico: null };
     }
   }
   const ctx: Contexto = { hubspotOk: hubspot.estado === 'ok', confirmadas };
-  const enRango = (l: VisitaTablero[], r: Rango) => l.filter((v) => v.createdAt >= r.start && v.createdAt < r.end);
-
-  const act = solo(visitasAct);
+  const enRango = <T extends { createdAt: number }>(l: T[], r: { start: number; end: number }) => l.filter((v) => v.createdAt >= r.start && v.createdAt < r.end);
   const solAct = enRango(solicitudes, actual);
 
   // Por producto (el producto actual de cada vendedor).
@@ -290,27 +449,44 @@ tableroRouter.get('/', async (req, res) => {
   const productosConDatos = [...new Set([...act, ...planAct].map((x) => productoDe.get(x.vendedorId) ?? ''))].filter(Boolean);
   const porProducto = productosConDatos.map((pid) => {
     const de = <T extends { vendedorId: string }>(l: T[]) => l.filter((x) => productoDe.get(x.vendedorId) === pid);
-    const b = bloque(de(act), de(solAct), de(planAct), ctx);
-    return {
-      productoId: pid, producto: nombresProducto.get(pid) ?? '—',
-      negociosVisitados: b.negociosVisitados, meta: b.meta, solicitudes: b.solicitudes, conversion: b.conversion, aprobacion: b.aprobacion,
-      aprobadas: b.aprobadas, rechazadas: b.rechazadas,
-    };
+    return { productoId: pid, producto: nombresProducto.get(pid) ?? '—', ...bloque(de(act), de(solAct), de(planAct), ctx) };
   }).sort((a, b) => (b.solicitudes ?? 0) - (a.solicitudes ?? 0) || b.negociosVisitados - a.negociosVisitados);
+
+  // Por vendedor: el equipo activo, más quien ya no está activo pero
+  // trabajó en el periodo (su historia sigue contando).
+  const visitasPorVendedor = agrupar(act, (v) => v.vendedorId);
+  const solPorVendedor = agrupar(solAct, (v) => v.vendedorId);
+  const planPorVendedor = agrupar(planAct, (p) => p.vendedorId);
+  const porVendedor = vendedores
+    .filter((v) => v.estado !== 'Baja' || visitasPorVendedor.has(v.id))
+    .map((v) => {
+      const propias = visitasPorVendedor.get(v.id) ?? [];
+      return {
+        id: v.id, nombre: v.nombre, iniciales: v.iniciales, color: v.color,
+        producto: nombresProducto.get(v.productoId) ?? '—', activo: v.estado !== 'Baja',
+        sinUsuarioHubspot: ctx.hubspotOk && !ownerDe.has(v.id),
+        ultimaVisita: propias.length ? new Date(Math.max(...propias.map((x) => x.createdAt))).toISOString() : null,
+        ...bloque(propias, solPorVendedor.get(v.id) ?? [], planPorVendedor.get(v.id) ?? [], ctx),
+      };
+    })
+    .sort((a, b) => (b.solicitudes ?? b.marcadas) - (a.solicitudes ?? a.marcadas) || b.negociosVisitados - a.negociosVisitados || a.nombre.localeCompare(b.nombre));
 
   const describir = (r: Rango) => ({ desde: r.desde, hasta: r.hasta, inicio: new Date(r.start).toISOString(), fin: new Date(r.end).toISOString() });
 
   res.json({
-    vista, hoy, enCurso,
+    vista, hoy, enCurso, tendenciaPor,
     periodo: describir(actual),
     anterior: describir(previo),
     actual: bloque(act, solAct, planAct, ctx),
     previo: bloque(solo(visitasPrev), enRango(solicitudes, previo), planPrev, ctx),
     hubspot,
     porProducto,
-    tendencia: tendencia.map((r) => {
+    porVendedor,
+    equipo: { activos: vendedores.filter((v) => v.estado !== 'Baja').length, conVisitas: porVendedor.filter((v) => v.activo && v.visitas > 0).length },
+    tendencia: tendencia.map((r, i) => {
       const s = solicitudesDe(enRango(solicitudes, r), ctx);
-      return { desde: r.desde, hasta: r.hasta, parcial: r.parcial, marcadas: s.marcadas, solicitudes: s.solicitudes, aprobadas: s.aprobadas, rechazadas: s.rechazadas };
+      const visitas = vista === 'rango' || i === tendencia.length - 1 ? enRango(act, r).length : conteos[i];
+      return { desde: r.desde, hasta: r.hasta, parcial: r.parcial, visitas, marcadas: s.marcadas, solicitudes: s.solicitudes, aprobadas: s.aprobadas, rechazadas: s.rechazadas };
     }),
   });
 });

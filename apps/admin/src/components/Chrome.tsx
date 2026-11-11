@@ -17,7 +17,6 @@ const SECCIONES: { titulo: string; items: { to: string; label: string; icon: Rea
   {
     titulo: 'Operación',
     items: [
-      { to: '/resumen', label: 'Resumen', icon: icono(<><path d="M3 3v18h18" /><rect x="7" y="10" width="3" height="8" /><rect x="12" y="6" width="3" height="12" /><rect x="17" y="13" width="3" height="5" /></>) },
       { to: '/en-vivo', label: 'En vivo', icon: icono(<><circle cx="12" cy="12" r="2" /><path d="M16.2 7.8a6 6 0 0 1 0 8.5M7.8 16.2a6 6 0 0 1 0-8.5M19.1 4.9a10 10 0 0 1 0 14.2M4.9 19.1a10 10 0 0 1 0-14.2" /></>) },
       { to: '/visitas', label: 'Visitas', icon: icono(<><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>) },
       { to: '/llamadas', label: 'Llamadas', icon: icono(<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.6a2 2 0 0 1-.5 2.1L8.1 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.6 2.6.7a2 2 0 0 1 1.9 2Z" />) },
@@ -101,8 +100,7 @@ export function TopBar({ userEmail, onSignOut, onAyuda }: { userEmail: string; o
 // Recorrido del panel: qué es cada pantalla. Sale solo la primera vez (por
 // navegador) y se vuelve a ver con "¿Cómo funciona?".
 const PASOS_ADMIN: PasoRecorrido[] = [
-  { objetivo: 'nav/tablero', titulo: 'Tablero', texto: 'Los números clave para cualquier persona: solicitudes confirmadas en HubSpot, su aprobación, negocios visitados contra la meta de la ruta, conversión y qué tanto de lo que se marca en campo existe en HubSpot. Por día, semana o mes.' },
-  { objetivo: 'nav/resumen', titulo: 'Resumen', texto: 'Cómo va la operación en el periodo: visitas, cumplimiento de las rutas, visitas hechas en el negocio y alertas de quién necesita atención.' },
+  { objetivo: 'nav/tablero', titulo: 'Tablero', texto: 'El embudo de campo, de la meta de la ruta a la solicitud aprobada en HubSpot, por día, semana, mes o las fechas que elijas. Abajo, el mismo embudo por vendedor y lo que requiere atención.' },
   { objetivo: 'nav/en-vivo', titulo: 'En vivo', texto: 'Dónde está cada vendedor ahorita, cuántas visitas lleva hoy y cuándo dio señal por última vez.' },
   { objetivo: 'nav/visitas', titulo: 'Visitas', texto: 'Cada visita con su foto, su resultado y si se hizo en el negocio (GPS a 50 m o menos). Toca un negocio para ver todo su historial.' },
   { objetivo: 'nav/llamadas', titulo: 'Llamadas y agenda', texto: 'A qué negocios llamaron los vendedores, qué pasó y las visitas que agendaron. El vendedor es dueño de su agenda: una cita mueve el negocio al día y hora que acordó.' },
@@ -144,7 +142,7 @@ function Bienvenida({ onRecorrido, onCerrar }: { onRecorrido: () => void; onCerr
         </ul>
         <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.6px', color: '#6f7d75', marginBottom: 8 }}>EN ESTE PANEL</div>
         <p style={{ margin: 0 }}>
-          Ves cómo va el equipo (Resumen y En vivo), cada visita con su evidencia, las llamadas y citas, y armas las rutas.
+          Ves cómo va el equipo (Tablero y En vivo), cada visita con su evidencia, las llamadas y citas, y armas las rutas.
           Casi todas las pantallas se filtran por producto, vendedor y fechas.
         </p>
       </div>

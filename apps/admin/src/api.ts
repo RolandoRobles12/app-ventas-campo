@@ -68,43 +68,34 @@ export interface EstadoEquipo {
   ultimo: ReporteSync | null;
 }
 
-export interface MetricasResumen {
-  desde: string; hasta: string; porSemana: boolean; limitePlan: string;
-  totales: {
-    visitas: number; visitasPrev: number; cambioPct: number | null;
-    planeados: number; cumplidos: number; cumplimiento: number | null;
-    promedioDia: number; ubicacionValida: number | null; validables: number; validas: number;
-    negociosNuevos: number; vendedoresActivos: number; vendedoresConVisitas: number; vendedoresYaNoActivos: number;
-  };
-  serie: { fecha: string; visitas: number }[];
-  resultados: { resultado: string; count: number }[];
-  vendedores: {
-    id: string; nombre: string; iniciales: string; color: string; producto: string; estado: 'Activo' | 'Baja';
-    visitas: number; diasActivos: number; promedioDia: number; planeados: number; cumplidos: number;
-    cumplimiento: number | null; ubicacionValida: number | null; negociosNuevos: number; ultimaVisita: string | null;
-  }[];
-}
-
-export type VistaTablero = 'dia' | 'semana' | 'mes';
+export type VistaTablero = 'dia' | 'semana' | 'mes' | 'rango';
 export interface BloqueTablero {
   visitas: number; negociosVisitados: number; negociosReales: number; noValidos: number; interesados: number;
-  meta: number; metaVisitados: number;
+  meta: number; metaVisitados: number; avanceMeta: number | null;
   // null mientras HubSpot no está conectado o falló.
   marcadas: number; confirmadasVisitas: number | null; solicitudes: number | null;
   aprobadas: number | null; rechazadas: number | null; enProceso: number | null;
   conversion: number | null; aprobacion: number | null; confirmacion: number | null;
+  validables: number; enNegocio: number | null;
 }
 export interface RangoTablero { desde: string; hasta: string; inicio: string; fin: string }
+export interface DiagnosticoHubspot {
+  dealsSinVisita: { total: number; porCaso: Record<string, number>; otroResultado: Record<string, number> };
+  solicitudesSinConfirmar: { total: number; porCaso: Record<string, number> };
+}
+export interface VendedorTablero extends BloqueTablero {
+  id: string; nombre: string; iniciales: string; color: string; producto: string; activo: boolean;
+  sinUsuarioHubspot: boolean; ultimaVisita: string | null;
+}
 export interface Tablero {
-  vista: VistaTablero; hoy: string; enCurso: boolean;
+  vista: VistaTablero; hoy: string; enCurso: boolean; tendenciaPor: 'dia' | 'semana' | 'mes';
   periodo: RangoTablero; anterior: RangoTablero;
   actual: BloqueTablero; previo: BloqueTablero;
-  hubspot: { estado: 'ok' | 'sin_configurar' | 'error'; mensaje?: string; dealsSinVisita: number | null; vendedoresSinCuenta: string[] };
-  porProducto: {
-    productoId: string; producto: string; negociosVisitados: number; meta: number;
-    solicitudes: number | null; conversion: number | null; aprobacion: number | null; aprobadas: number | null; rechazadas: number | null;
-  }[];
-  tendencia: { desde: string; hasta: string; parcial: boolean; marcadas: number; solicitudes: number | null; aprobadas: number | null; rechazadas: number | null }[];
+  hubspot: { estado: 'ok' | 'sin_configurar' | 'error'; mensaje?: string; vendedoresSinCuenta: string[]; diagnostico: DiagnosticoHubspot | null };
+  porProducto: (BloqueTablero & { productoId: string; producto: string })[];
+  porVendedor: VendedorTablero[];
+  equipo: { activos: number; conVisitas: number };
+  tendencia: { desde: string; hasta: string; parcial: boolean; visitas: number; marcadas: number; solicitudes: number | null; aprobadas: number | null; rechazadas: number | null }[];
 }
 
 export interface EnVivoItem {
@@ -211,8 +202,8 @@ export const api = {
 
   prospectos: (vendedorId: string) => req<Prospecto[]>(`/prospectos/vendedor/${vendedorId}`),
 
-  tablero: (f: { vista: VistaTablero; fecha: string; productoIds?: string[] }) => req<Tablero>(`/tablero${qs(f)}`),
-  metricas: (f: Filtro & { todo?: boolean }) => req<MetricasResumen>(`/metricas/resumen${qs({ ...f, todo: f.todo ? '1' : undefined })}`),
+  tablero: (f: { vista: VistaTablero; fecha?: string; desde?: string; hasta?: string; productoIds?: string[]; vendedorIds?: string[] }) =>
+    req<Tablero>(`/tablero${qs(f)}`),
   enVivo: (f: { productoIds?: string[]; vendedorIds?: string[] }) => req<{ hoy: string; items: EnVivoItem[] }>(`/seguimiento${qs(f)}`),
   mapaCalor: (f: Filtro) => req<MapaCalorResponse>(`/mapa/calor${qs({ ...f })}`),
   recorridos: (f: Filtro) => req<RecorridoVendedor[]>(`/ubicaciones/recorrido${qs({ ...f })}`),

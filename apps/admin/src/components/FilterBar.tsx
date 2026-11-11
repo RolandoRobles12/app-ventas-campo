@@ -17,7 +17,7 @@ export function FilterBar({
 }: {
   extra?: React.ReactNode;
   // Pantallas de "ahora mismo" (En vivo, Rutas, Equipo) no usan el rango de
-  // fechas y solo trabajan con el equipo activo; las de un periodo (Resumen,
+  // fechas y solo trabajan con el equipo activo; las de un periodo (Tablero,
   // Visitas) también ofrecen a quien ya no está activo, para ver su historia.
   sinFechas?: boolean;
   // Filtro propio de la página (p.ej. "Resultado" en Visitas), que vive fuera
