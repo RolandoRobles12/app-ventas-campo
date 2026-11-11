@@ -448,7 +448,7 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
             <ThOrden k="conversion" orden={orden} setOrden={setOrden} alinear="right">Conversión</ThOrden>
             <ThOrden k="aprobacion" orden={orden} setOrden={setOrden} alinear="right">Aprobación</ThOrden>
             <ThOrden k="confirmacion" orden={orden} setOrden={setOrden} alinear="right">En HubSpot</ThOrden>
-            <ThOrden k="enNegocio" orden={orden} setOrden={setOrden} alinear="right">En el negocio</ThOrden>
+            <span title="Visitas guardadas con la tablet a 50 m o menos del negocio. Solo se puede comprobar en negocios de la ruta (traen la ubicación oficial del DENUE) y cuando la tablet tenía GPS."><ThOrden k="enNegocio" orden={orden} setOrden={setOrden} alinear="right">En el negocio</ThOrden></span>
             <ThOrden k="ultimaVisita" orden={orden} setOrden={setOrden} alinear="right">Última visita</ThOrden>
           </div>
           {filas.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: '#9aa39c', fontSize: 13 }}>No hay vendedores en este filtro.</div>}
@@ -465,17 +465,41 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
                   </div>
                 </div>
               </div>
-              <div style={celdaNum}>{f.meta ? num(f.meta) : '—'}</div>
-              <div><BarraAvance pct={f.avanceMeta} /><div style={{ fontSize: 11, color: '#9aa39c', marginTop: 2 }}>{f.meta ? `${num(f.negociosVisitados)} visitados` : `${num(f.negociosVisitados)} visitados · sin ruta`}</div></div>
+              <div style={celdaNum}>{f.meta ? num(f.meta) : <SinDato texto="sin ruta" ayuda="No tenía negocios planeados en su ruta para estos días." />}</div>
+              <div>
+                {f.meta ? <BarraAvance pct={f.avanceMeta} /> : <SinDato texto="sin ruta" alinear="left" ayuda="No tenía negocios planeados en su ruta para estos días, así que no hay meta contra la cual medir." />}
+                <div style={{ fontSize: 11, color: '#9aa39c', marginTop: 2 }}>{num(f.negociosVisitados)} visitados</div>
+              </div>
               <div style={celdaNum}>{num(hsOk ? f.solicitudes : f.marcadas)}</div>
-              <div style={celdaNum}>{pctTxt(f.conversion)}</div>
-              <div style={celdaNum}>{pctTxt(f.aprobacion)}{f.aprobadas != null && f.aprobadas + (f.rechazadas ?? 0) > 0 && <Sub>de {num(f.aprobadas + (f.rechazadas ?? 0))}</Sub>}</div>
-              <div style={celdaNum}>{f.confirmadasVisitas != null && f.marcadas ? `${num(f.confirmadasVisitas)} de ${num(f.marcadas)}` : '—'}</div>
-              <div style={celdaNum}>{pctTxt(f.enNegocio)}</div>
-              <div style={{ textAlign: 'right', color: '#5a665f', fontSize: 12.5 }}>{haceCuanto(f.ultimaVisita)}</div>
+              <div style={celdaNum}>
+                {f.conversion != null ? <>{pctTxt(f.conversion)}<Sub>de {num(f.negociosReales)} negocios</Sub></>
+                  : <SinDato texto={f.visitas ? '—' : 'sin visitas'} ayuda={f.visitas ? 'Se calcula con las solicitudes confirmadas en HubSpot.' : 'No visitó ningún negocio en el periodo.'} />}
+              </div>
+              <div style={celdaNum}>
+                {f.aprobacion != null ? <>{pctTxt(f.aprobacion)}<Sub>de {num((f.aprobadas ?? 0) + (f.rechazadas ?? 0))} con respuesta</Sub></>
+                  : (f.solicitudes ?? 0) > 0
+                    ? <SinDato texto="en revisión" ayuda="Sus solicitudes del periodo todavía no tienen respuesta (ni aprobadas ni rechazadas)." />
+                    : <SinDato texto="sin solicitudes" ayuda="No tuvo solicitudes confirmadas en el periodo; no hay nada que aprobar." />}
+              </div>
+              <div style={celdaNum}>
+                {f.confirmadasVisitas != null && f.marcadas ? `${num(f.confirmadasVisitas)} de ${num(f.marcadas)}`
+                  : <SinDato texto="sin solicitudes" ayuda="No marcó ninguna visita como «Hizo solicitud» en el periodo." />}
+              </div>
+              <div style={celdaNum}>
+                {f.enNegocio != null ? <>{pctTxt(f.enNegocio)}<Sub>de {num(f.validables)} {f.validables === 1 ? 'visita' : 'visitas'}</Sub></>
+                  : f.visitas
+                    ? <SinDato texto="no se puede comprobar" ayuda={`Sus ${num(f.visitas)} visitas fueron a negocios nuevos (los registra el vendedor y no traen una ubicación oficial contra la cual comparar) o la tablet no tenía GPS al guardarlas.`} />
+                    : <SinDato texto="sin visitas" ayuda="No visitó ningún negocio en el periodo." />}
+              </div>
+              <div style={{ textAlign: 'right', color: '#5a665f', fontSize: 12.5 }}>{f.ultimaVisita ? haceCuanto(f.ultimaVisita) : <SinDato texto="sin visitas" ayuda="No visitó ningún negocio en el periodo." />}</div>
             </div>
           ))}
         </div>
+      </div>
+      <div style={{ padding: '10px 20px 8px', fontSize: 11.5, color: '#8a978f', lineHeight: 1.5 }}>
+        <b style={{ color: '#6f7d75' }}>En el negocio:</b> visitas guardadas con la tablet a 50 m o menos del negocio. Solo se puede comprobar en negocios
+        de la ruta (traen la ubicación oficial del DENUE) y si la tablet tenía GPS; los negocios nuevos que registra el vendedor no cuentan. Debajo de cada
+        porcentaje está sobre cuántas visitas se calculó.
       </div>
     </Card>
   );
@@ -544,6 +568,10 @@ function RequiereAtencion({ data, rutas }: { data: TableroData; rutas: EstadoRut
 // ---------- Piezas ----------
 
 const Fuente = () => <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#b2431f', background: '#fff0eb', borderRadius: 999, padding: '1px 6px', verticalAlign: 2 }}>HubSpot</span>;
+// Celda sin número: dice por qué, en vez de un "—" que parece un error.
+const SinDato = ({ texto, ayuda, alinear = 'right' }: { texto: string; ayuda: string; alinear?: 'left' | 'right' }) => (
+  <span title={ayuda} style={{ display: 'block', textAlign: alinear, fontSize: 11.5, fontWeight: 400, color: '#9aa39c', cursor: 'help' }}>{texto}</span>
+);
 const Sub = ({ children }: { children: ReactNode }) => <div style={{ fontSize: 11, color: '#9aa39c', fontWeight: 400 }}>{children}</div>;
 const Vacio = ({ texto }: { texto?: string }) => <div style={{ padding: 20, color: '#9aa39c', fontSize: 13, textAlign: 'center' }}>{texto ?? 'Cargando…'}</div>;
 
