@@ -6,7 +6,6 @@ import { FiltersProvider } from './filters';
 import { ToastProvider } from './toast';
 import { Chrome } from './components/Chrome';
 import { NoAdmin } from './pages/NoAdmin';
-import { Resumen } from './pages/Resumen';
 import { EnVivo } from './pages/EnVivo';
 import { Visitas } from './pages/Visitas';
 import { Llamadas } from './pages/Llamadas';
@@ -28,7 +27,7 @@ function AppShell() {
           <Routes>
             <Route path="/" element={<Navigate to="/tablero" replace />} />
             <Route path="/tablero" element={<Tablero />} />
-            <Route path="/resumen" element={<Resumen />} />
+            <Route path="/resumen" element={<Navigate to="/tablero" replace />} />
             <Route path="/en-vivo" element={<EnVivo />} />
             <Route path="/visitas" element={<Visitas />} />
             <Route path="/llamadas" element={<Llamadas />} />
