@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  api, type BloqueTablero, type DiagnosticoHubspot, type EstadoRuta, type Tablero as TableroData, type VendedorTablero, type VistaTablero,
+  api, type BloqueTablero, type EstadoRuta, type Tablero as TableroData, type VendedorTablero, type VistaTablero,
 } from '../api';
 import { useFilters } from '../filters';
 import { PageHeader } from '../components/FilterBar';
 import { MultiSelectDropdown } from '../components/MultiSelectDropdown';
-import { Aviso, Avatar, Card, Modal, ThOrden, boton } from '../components/ui';
+import { Aviso, Avatar, Card, ThOrden } from '../components/ui';
 import { haceCuanto, sumarDias, toISODate } from '../lib/dateRanges';
 
 // Tablero: el embudo de campo, de la meta de la ruta a la solicitud aprobada
@@ -22,10 +22,6 @@ const VISTAS: { v: VistaTablero; label: string }[] = [
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const MESES_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-const ETIQUETA_RESULTADO: Record<string, string> = {
-  'Se realizó solicitud': 'Hizo solicitud', 'Se dejó información': 'Se dejó información', 'Se reagenda visita': 'Volver otro día',
-  'Cliente no interesado': 'No le interesa', 'No es un negocio válido o existente': 'Cerrado o no existe',
-};
 
 const partes = (iso: string) => {
   const d = new Date(`${iso}T12:00:00`);
@@ -115,7 +111,6 @@ export function Tablero() {
   const [rutas, setRutas] = useState<EstadoRuta[]>([]);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState('');
-  const [verDiagnostico, setVerDiagnostico] = useState(false);
 
   useEffect(() => {
     setCargando(true);
@@ -228,7 +223,6 @@ export function Tablero() {
             <>
               <Embudo a={a} p={p} hsOk={hsOk} corto={corto} />
               <Tasas a={a} p={p} hsOk={hsOk} />
-              <Confianza a={a} hs={hs!} onDiagnostico={() => setVerDiagnostico(true)} />
             </>
           ) : <Vacio />}
         </Card>
@@ -268,7 +262,6 @@ export function Tablero() {
         </div>
       </div>
 
-      {verDiagnostico && hs?.diagnostico && <Diagnostico d={hs.diagnostico} onClose={() => setVerDiagnostico(false)} />}
     </div>
   );
 }
@@ -350,105 +343,6 @@ function Tasas({ a, p, hsOk }: { a: BloqueTablero; p: BloqueTablero; hsOk: boole
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function Confianza({ a, hs, onDiagnostico }: { a: BloqueTablero; hs: TableroData['hubspot']; onDiagnostico: () => void }) {
-  const sinVisita = hs.diagnostico?.dealsSinVisita.total ?? 0;
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 24px', marginTop: 18, padding: '12px 16px', background: '#f4f9f5', borderRadius: 10, fontSize: 12.5, color: '#3a4a41' }}>
-      <span style={{ fontWeight: 600, color: '#263238' }}>¿Qué tan confiable es?</span>
-      {hs.estado === 'ok' && (
-        <span><b style={grande}>{pctTxt(a.confirmacion)}</b> de las solicitudes marcadas en campo están en HubSpot ({num(a.confirmadasVisitas)} de {num(a.marcadas)})</span>
-      )}
-      <span><b style={grande}>{pctTxt(a.enNegocio)}</b> de las visitas se hicieron en el negocio (GPS a 50 m o menos{a.validables ? `, de ${num(a.validables)} comprobables` : ''})</span>
-      {hs.estado === 'ok' && sinVisita > 0 && (
-        <span style={{ color: '#94500f' }}><b style={{ ...grande, color: '#94500f' }}>{num(sinVisita)}</b> solicitudes en HubSpot de estos vendedores sin visita que las respalde</span>
-      )}
-      {hs.estado === 'ok' && hs.diagnostico && (sinVisita > 0 || hs.diagnostico.solicitudesSinConfirmar.total > 0) && (
-        <button onClick={onDiagnostico} style={{ ...boton.secundario, padding: '6px 12px', fontSize: 12.5 }}>¿Por qué no empatan?</button>
-      )}
-      {hs.vendedoresSinCuenta.length > 0 && (
-        <span style={{ flexBasis: '100%', color: '#5a665f' }}>
-          Las solicitudes de <b>{lista(hs.vendedoresSinCuenta)}</b> no se pueden confirmar: su correo no tiene usuario en HubSpot.
-        </span>
-      )}
-    </div>
-  );
-}
-
-// ---------- Diagnóstico ----------
-
-const CASOS_DEAL: Record<string, string> = {
-  a_30_60: 'El vendedor marcó una solicitud 30–60 min antes o después que no se confirmó: capturó el deal tarde',
-  a_1_3h: 'El vendedor marcó una solicitud 1–3 horas antes o después que no se confirmó: capturó el deal muy tarde',
-  otro_resultado: 'El vendedor sí registró una visita a ±30 min, pero con otro resultado (no «Hizo solicitud»)',
-  visita_ya_confirmada: 'La visita a ±30 min ya confirmó otro deal (dos deals para una sola visita)',
-  sin_solicitud_cerca: 'Ese día hubo visitas, pero ninguna marcada como solicitud cerca de la hora del deal',
-  sin_visitas_ese_dia: 'Ese día el vendedor no registró ninguna visita',
-};
-const CASOS_SOLICITUD: Record<string, string> = {
-  sin_usuario_hubspot: 'El vendedor no tiene usuario en HubSpot (su correo no aparece como owner)',
-  deal_ya_usado: 'Hay un deal a ±30 min, pero ya confirmó otra visita del vendedor',
-  a_30_60: 'El deal más cercano del vendedor se creó a 30–60 min',
-  a_1_3h: 'El deal más cercano del vendedor se creó a 1–3 horas',
-  mas_3h_mismo_dia: 'El deal más cercano se creó a más de 3 horas, el mismo día',
-  sin_deals_ese_dia: 'Ese día el vendedor no creó ningún deal en el pipeline de campo',
-};
-
-// Lectura en una línea del caso que más pesa, para decidir qué hacer.
-function conclusion(d: DiagnosticoHubspot): string | null {
-  const deals = d.dealsSinVisita.porCaso;
-  const total = d.dealsSinVisita.total;
-  if (!total) return null;
-  const cerca = (deals.a_30_60 ?? 0) + (deals.a_1_3h ?? 0);
-  const [mayor] = Object.entries(deals).sort((x, y) => y[1] - x[1]);
-  if (cerca / total >= 0.3) return `${Math.round((cerca / total) * 100)}% de las solicitudes en HubSpot sin visita tienen una solicitud marcada por el mismo vendedor a menos de 3 horas: probablemente capturan el deal después de la visita. Conviene ampliar la ventana (por ejemplo, a 2 horas).`;
-  if (mayor[0] === 'otro_resultado') return 'Lo que más pesa: el vendedor sí visitó, pero marcó otro resultado. Es un tema de captura en la app (marcar «Hizo solicitud»), no de la ventana de tiempo.';
-  if (mayor[0] === 'sin_visitas_ese_dia') return 'Lo que más pesa: solicitudes creadas en HubSpot en días sin visitas registradas. Lo más probable es que vengan de otro canal (llamadas, referidos) o que la visita no se registró en la app.';
-  if (mayor[0] === 'sin_solicitud_cerca') return 'Lo que más pesa: ese día hubo visitas, pero ninguna marcada como solicitud cerca de la hora del deal. Puede ser otro canal o una visita mal marcada.';
-  return null;
-}
-
-function Diagnostico({ d, onClose }: { d: DiagnosticoHubspot; onClose: () => void }) {
-  const texto = conclusion(d);
-  return (
-    <Modal titulo="¿Por qué no empatan las solicitudes?" subtitulo="Para cada caso sin pareja, lo más cercano del mismo vendedor (en el periodo elegido)" onClose={onClose} ancho={640}
-      pie={<button onClick={onClose} style={boton.primario}>Entendido</button>}>
-      {texto && <div style={{ marginBottom: 14 }}><Aviso tono="info">{texto}</Aviso></div>}
-      <Bloque titulo={`${num(d.dealsSinVisita.total)} solicitudes en HubSpot sin visita «Hizo solicitud» a ±30 min`} casos={d.dealsSinVisita.porCaso} etiquetas={CASOS_DEAL}
-        extra={(k) => k === 'otro_resultado' && Object.keys(d.dealsSinVisita.otroResultado).length > 0 ? (
-          <div style={{ fontSize: 11.5, color: '#8a978f', marginTop: 2 }}>
-            {Object.entries(d.dealsSinVisita.otroResultado).sort((x, y) => y[1] - x[1]).map(([r, n]) => `${ETIQUETA_RESULTADO[r] ?? r}: ${n}`).join(' · ')}
-          </div>
-        ) : null}
-      />
-      <div style={{ height: 16 }} />
-      <Bloque titulo={`${num(d.solicitudesSinConfirmar.total)} solicitudes marcadas en campo sin deal a ±30 min`} casos={d.solicitudesSinConfirmar.porCaso} etiquetas={CASOS_SOLICITUD} />
-    </Modal>
-  );
-}
-
-function Bloque({ titulo, casos, etiquetas, extra }: { titulo: string; casos: Record<string, number>; etiquetas: Record<string, string>; extra?: (k: string) => ReactNode }) {
-  const total = Object.values(casos).reduce((s, n) => s + n, 0);
-  const filas = Object.entries(casos).sort((x, y) => y[1] - x[1]);
-  return (
-    <div>
-      <div style={{ fontSize: 13.5, fontWeight: 600, color: '#263238', marginBottom: 8 }}>{titulo}</div>
-      {!filas.length && <div style={{ fontSize: 12.5, color: '#8a978f' }}>Ninguna.</div>}
-      {filas.map(([k, n]) => (
-        <div key={k} style={{ padding: '7px 0', borderBottom: '1px solid #f2f5f2' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12.5, color: '#3a4a41' }}>
-            <span>{etiquetas[k] ?? k}</span>
-            <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}><b>{n}</b> · {Math.round((n / total) * 100)}%</span>
-          </div>
-          <div style={{ height: 5, background: '#f1f4f2', borderRadius: 3, marginTop: 4 }}>
-            <div style={{ height: '100%', width: `${(n / total) * 100}%`, background: '#157347', borderRadius: 3 }} />
-          </div>
-          {extra?.(k)}
-        </div>
-      ))}
     </div>
   );
 }
@@ -654,7 +548,6 @@ const Sub = ({ children }: { children: ReactNode }) => <div style={{ fontSize: 1
 const Vacio = ({ texto }: { texto?: string }) => <div style={{ padding: 20, color: '#9aa39c', fontSize: 13, textAlign: 'center' }}>{texto ?? 'Cargando…'}</div>;
 
 const negro: CSSProperties = { color: '#263238', fontWeight: 600 };
-const grande: CSSProperties = { fontSize: 15, color: '#1f2a24' };
 const flecha: CSSProperties = { background: 'none', border: 'none', fontSize: 18, lineHeight: 1, color: '#3a4a41', padding: '6px 10px', cursor: 'pointer' };
 const fechaInput: CSSProperties = { border: '1px solid #d9e1db', background: '#fff', borderRadius: 8, padding: '7px 10px', fontSize: 13, color: '#263238' };
 const tabla: CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 460 };

@@ -25,7 +25,6 @@ const PERIODOS_TENDENCIA = 8;
 // día, más largo, por semana.
 const MAX_DIAS_RANGO = 366;
 const MAX_DIAS_SERIE_DIARIA = 45;
-const MIN = 60 * 1000;
 
 type Vista = 'dia' | 'semana' | 'mes' | 'rango';
 
@@ -291,81 +290,6 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
   };
 }
 
-// ---------- Diagnóstico de lo que no empata ----------
-
-// Para decidir si la ventana de ±30 min es la correcta (o si hay otro
-// problema de captura): por cada deal de HubSpot que no confirmó ninguna
-// visita, y por cada solicitud marcada en campo que no se confirmó, qué tan
-// lejos quedó lo más cercano del mismo vendedor.
-type Distancia = 'a_30_60' | 'a_1_3h' | 'mas_3h_mismo_dia' | 'otro_dia';
-function distancia(ms: number, a: number, b: number): Distancia {
-  if (fechaMx(new Date(a)) !== fechaMx(new Date(b))) return 'otro_dia';
-  if (ms <= 60 * MIN) return 'a_30_60';
-  if (ms <= 180 * MIN) return 'a_1_3h';
-  return 'mas_3h_mismo_dia';
-}
-
-function diagnostico(
-  actual: Rango, deals: DealCampo[], confirmadas: Map<string, DealCampo>,
-  visitas: VisitaTablero[], solicitudes: VisitaTablero[], ownerDe: Map<string, string>,
-) {
-  const vendedorDeOwner = new Map([...ownerDe].map(([v, o]) => [o, v]));
-  const usados = new Set([...confirmadas.values()].map((d) => d.id));
-  const visitasPorVendedor = agrupar(visitas, (v) => v.vendedorId);
-  const dealsPorOwner = agrupar(deals, (d) => d.ownerId);
-  const sumar = (m: Record<string, number>, k: string) => { m[k] = (m[k] ?? 0) + 1; };
-
-  const mismoDia = (x: number, y: number) => fechaMx(new Date(x)) === fechaMx(new Date(y));
-  const masCercano = <T>(l: T[], t: number, cuando: (x: T) => number): T | null => {
-    let mejor: T | null = null;
-    for (const x of l) if (mismoDia(cuando(x), t) && (!mejor || Math.abs(cuando(x) - t) < Math.abs(cuando(mejor) - t))) mejor = x;
-    return mejor;
-  };
-  const sinConfirmar = solicitudes.filter((v) => v.createdAt >= actual.start && v.createdAt < actual.end && !confirmadas.has(v.id));
-  const sinConfirmarPorVendedor = agrupar(sinConfirmar, (v) => v.vendedorId);
-
-  // Deals sin visita. Primero se busca una solicitud marcada sin confirmar
-  // del mismo vendedor ese día (lo más probable: capturó el deal tarde); si
-  // no hay, la visita más cercana de cualquier resultado. Un vendedor visita
-  // un negocio cada 20-30 min, así que buscar primero "cualquier visita"
-  // confundiría un deal capturado una hora tarde con una visita mal marcada.
-  const sinVisita = deals.filter((d) => d.creado >= actual.start && d.creado < actual.end && !usados.has(d.id));
-  const porCaso: Record<string, number> = {};
-  const otroResultado: Record<string, number> = {};
-  for (const d of sinVisita) {
-    const vendedor = vendedorDeOwner.get(d.ownerId) ?? '';
-    const pendiente = masCercano(sinConfirmarPorVendedor.get(vendedor) ?? [], d.creado, (v) => v.createdAt);
-    if (pendiente && Math.abs(pendiente.createdAt - d.creado) <= 180 * MIN) { sumar(porCaso, distancia(Math.abs(pendiente.createdAt - d.creado), pendiente.createdAt, d.creado)); continue; }
-    const cerca = masCercano(visitasPorVendedor.get(vendedor) ?? [], d.creado, (v) => v.createdAt);
-    if (!cerca) { sumar(porCaso, 'sin_visitas_ese_dia'); continue; }
-    const delta = Math.abs(cerca.createdAt - d.creado);
-    if (delta <= VENTANA_CONFIRMACION_MS) {
-      if (cerca.resultado === SOLICITUD) sumar(porCaso, 'visita_ya_confirmada');
-      else { sumar(porCaso, 'otro_resultado'); sumar(otroResultado, cerca.resultado); }
-      continue;
-    }
-    sumar(porCaso, pendiente ? distancia(Math.abs(pendiente.createdAt - d.creado), pendiente.createdAt, d.creado) : 'sin_solicitud_cerca');
-  }
-
-  // Solicitudes marcadas sin confirmar: primero el deal libre más cercano
-  // del vendedor ese día; si el único cercano ya confirmó otra visita, se dice.
-  const libresPorOwner = agrupar(deals.filter((d) => !usados.has(d.id)), (d) => d.ownerId);
-  const porCasoS: Record<string, number> = {};
-  for (const v of sinConfirmar) {
-    const owner = ownerDe.get(v.vendedorId);
-    if (!owner) { sumar(porCasoS, 'sin_usuario_hubspot'); continue; }
-    const libre = masCercano(libresPorOwner.get(owner) ?? [], v.createdAt, (d) => d.creado);
-    if (libre) { sumar(porCasoS, distancia(Math.abs(libre.creado - v.createdAt), libre.creado, v.createdAt)); continue; }
-    const usado = masCercano(dealsPorOwner.get(owner) ?? [], v.createdAt, (d) => d.creado);
-    sumar(porCasoS, usado && Math.abs(usado.creado - v.createdAt) <= VENTANA_CONFIRMACION_MS ? 'deal_ya_usado' : 'sin_deals_ese_dia');
-  }
-
-  return {
-    dealsSinVisita: { total: sinVisita.length, porCaso, otroResultado },
-    solicitudesSinConfirmar: { total: sinConfirmar.length, porCaso: porCasoS },
-  };
-}
-
 // ---------- Ruta ----------
 
 tableroRouter.get('/', async (req, res) => {
@@ -415,8 +339,7 @@ tableroRouter.get('/', async (req, res) => {
   const ownerDe = new Map<string, string>();
   let hubspot: {
     estado: 'ok' | 'sin_configurar' | 'error'; mensaje?: string; vendedoresSinCuenta: string[];
-    diagnostico: ReturnType<typeof diagnostico> | null;
-  } = { estado: hubspotConfigurado() ? 'ok' : 'sin_configurar', vendedoresSinCuenta: [], diagnostico: null };
+  } = { estado: hubspotConfigurado() ? 'ok' : 'sin_configurar', vendedoresSinCuenta: [] };
   let confirmadas = new Map<string, DealCampo>();
   if (hubspot.estado === 'ok' && ids.length) {
     try {
@@ -433,10 +356,9 @@ tableroRouter.get('/', async (req, res) => {
         new Date(rangoSolicitudes.start - VENTANA_CONFIRMACION_MS), new Date(rangoSolicitudes.end + VENTANA_CONFIRMACION_MS),
       );
       confirmadas = emparejar(solicitudes, deals, ownerDe);
-      hubspot.diagnostico = diagnostico(actual, deals, confirmadas, act, solicitudes, ownerDe);
     } catch (err) {
       console.error('Tablero: HubSpot falló:', err);
-      hubspot = { estado: 'error', mensaje: (err as Error).message, vendedoresSinCuenta: [], diagnostico: null };
+      hubspot = { estado: 'error', mensaje: (err as Error).message, vendedoresSinCuenta: [] };
     }
   }
   const ctx: Contexto = { hubspotOk: hubspot.estado === 'ok', confirmadas };
