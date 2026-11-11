@@ -77,12 +77,10 @@ export interface BloqueTablero {
   aprobadas: number | null; rechazadas: number | null; enProceso: number | null;
   conversion: number | null; aprobacion: number | null; confirmacion: number | null;
   validables: number; enNegocio: number | null;
+  // Visitas que no se pueden comprobar (no cuentan en enNegocio), por motivo.
+  sinComprobar: { nuevo: number; sinGps: number; sinUbicacion: number };
 }
 export interface RangoTablero { desde: string; hasta: string; inicio: string; fin: string }
-export interface DiagnosticoHubspot {
-  dealsSinVisita: { total: number; porCaso: Record<string, number>; otroResultado: Record<string, number> };
-  solicitudesSinConfirmar: { total: number; porCaso: Record<string, number> };
-}
 export interface VendedorTablero extends BloqueTablero {
   id: string; nombre: string; iniciales: string; color: string; producto: string; activo: boolean;
   sinUsuarioHubspot: boolean; ultimaVisita: string | null;
@@ -91,7 +89,7 @@ export interface Tablero {
   vista: VistaTablero; hoy: string; enCurso: boolean; tendenciaPor: 'dia' | 'semana' | 'mes';
   periodo: RangoTablero; anterior: RangoTablero;
   actual: BloqueTablero; previo: BloqueTablero;
-  hubspot: { estado: 'ok' | 'sin_configurar' | 'error'; mensaje?: string; vendedoresSinCuenta: string[]; diagnostico: DiagnosticoHubspot | null };
+  hubspot: { estado: 'ok' | 'sin_configurar' | 'error'; mensaje?: string; vendedoresSinCuenta: string[] };
   porProducto: (BloqueTablero & { productoId: string; producto: string })[];
   porVendedor: VendedorTablero[];
   equipo: { activos: number; conVisitas: number };

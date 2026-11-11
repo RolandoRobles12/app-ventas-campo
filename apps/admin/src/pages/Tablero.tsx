@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  api, type BloqueTablero, type DiagnosticoHubspot, type EstadoRuta, type Tablero as TableroData, type VendedorTablero, type VistaTablero,
+  api, type BloqueTablero, type EstadoRuta, type Tablero as TableroData, type VendedorTablero, type VistaTablero,
 } from '../api';
 import { useFilters } from '../filters';
 import { PageHeader } from '../components/FilterBar';
 import { MultiSelectDropdown } from '../components/MultiSelectDropdown';
-import { Aviso, Avatar, Card, Modal, ThOrden, boton } from '../components/ui';
+import { Aviso, Avatar, Card, ThOrden } from '../components/ui';
 import { haceCuanto, sumarDias, toISODate } from '../lib/dateRanges';
 
 // Tablero: el embudo de campo, de la meta de la ruta a la solicitud aprobada
@@ -22,10 +22,6 @@ const VISTAS: { v: VistaTablero; label: string }[] = [
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const MESES_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-const ETIQUETA_RESULTADO: Record<string, string> = {
-  'Se realizó solicitud': 'Hizo solicitud', 'Se dejó información': 'Se dejó información', 'Se reagenda visita': 'Volver otro día',
-  'Cliente no interesado': 'No le interesa', 'No es un negocio válido o existente': 'Cerrado o no existe',
-};
 
 const partes = (iso: string) => {
   const d = new Date(`${iso}T12:00:00`);
@@ -115,7 +111,6 @@ export function Tablero() {
   const [rutas, setRutas] = useState<EstadoRuta[]>([]);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState('');
-  const [verDiagnostico, setVerDiagnostico] = useState(false);
 
   useEffect(() => {
     setCargando(true);
@@ -228,7 +223,6 @@ export function Tablero() {
             <>
               <Embudo a={a} p={p} hsOk={hsOk} corto={corto} />
               <Tasas a={a} p={p} hsOk={hsOk} />
-              <Confianza a={a} hs={hs!} onDiagnostico={() => setVerDiagnostico(true)} />
             </>
           ) : <Vacio />}
         </Card>
@@ -268,7 +262,6 @@ export function Tablero() {
         </div>
       </div>
 
-      {verDiagnostico && hs?.diagnostico && <Diagnostico d={hs.diagnostico} onClose={() => setVerDiagnostico(false)} />}
     </div>
   );
 }
@@ -350,105 +343,6 @@ function Tasas({ a, p, hsOk }: { a: BloqueTablero; p: BloqueTablero; hsOk: boole
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function Confianza({ a, hs, onDiagnostico }: { a: BloqueTablero; hs: TableroData['hubspot']; onDiagnostico: () => void }) {
-  const sinVisita = hs.diagnostico?.dealsSinVisita.total ?? 0;
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 24px', marginTop: 18, padding: '12px 16px', background: '#f4f9f5', borderRadius: 10, fontSize: 12.5, color: '#3a4a41' }}>
-      <span style={{ fontWeight: 600, color: '#263238' }}>¿Qué tan confiable es?</span>
-      {hs.estado === 'ok' && (
-        <span><b style={grande}>{pctTxt(a.confirmacion)}</b> de las solicitudes marcadas en campo están en HubSpot ({num(a.confirmadasVisitas)} de {num(a.marcadas)})</span>
-      )}
-      <span><b style={grande}>{pctTxt(a.enNegocio)}</b> de las visitas se hicieron en el negocio (GPS a 50 m o menos{a.validables ? `, de ${num(a.validables)} comprobables` : ''})</span>
-      {hs.estado === 'ok' && sinVisita > 0 && (
-        <span style={{ color: '#94500f' }}><b style={{ ...grande, color: '#94500f' }}>{num(sinVisita)}</b> solicitudes en HubSpot de estos vendedores sin visita que las respalde</span>
-      )}
-      {hs.estado === 'ok' && hs.diagnostico && (sinVisita > 0 || hs.diagnostico.solicitudesSinConfirmar.total > 0) && (
-        <button onClick={onDiagnostico} style={{ ...boton.secundario, padding: '6px 12px', fontSize: 12.5 }}>¿Por qué no empatan?</button>
-      )}
-      {hs.vendedoresSinCuenta.length > 0 && (
-        <span style={{ flexBasis: '100%', color: '#5a665f' }}>
-          Las solicitudes de <b>{lista(hs.vendedoresSinCuenta)}</b> no se pueden confirmar: su correo no tiene usuario en HubSpot.
-        </span>
-      )}
-    </div>
-  );
-}
-
-// ---------- Diagnóstico ----------
-
-const CASOS_DEAL: Record<string, string> = {
-  a_30_60: 'El vendedor marcó una solicitud 30–60 min antes o después que no se confirmó: capturó el deal tarde',
-  a_1_3h: 'El vendedor marcó una solicitud 1–3 horas antes o después que no se confirmó: capturó el deal muy tarde',
-  otro_resultado: 'El vendedor sí registró una visita a ±30 min, pero con otro resultado (no «Hizo solicitud»)',
-  visita_ya_confirmada: 'La visita a ±30 min ya confirmó otro deal (dos deals para una sola visita)',
-  sin_solicitud_cerca: 'Ese día hubo visitas, pero ninguna marcada como solicitud cerca de la hora del deal',
-  sin_visitas_ese_dia: 'Ese día el vendedor no registró ninguna visita',
-};
-const CASOS_SOLICITUD: Record<string, string> = {
-  sin_usuario_hubspot: 'El vendedor no tiene usuario en HubSpot (su correo no aparece como owner)',
-  deal_ya_usado: 'Hay un deal a ±30 min, pero ya confirmó otra visita del vendedor',
-  a_30_60: 'El deal más cercano del vendedor se creó a 30–60 min',
-  a_1_3h: 'El deal más cercano del vendedor se creó a 1–3 horas',
-  mas_3h_mismo_dia: 'El deal más cercano se creó a más de 3 horas, el mismo día',
-  sin_deals_ese_dia: 'Ese día el vendedor no creó ningún deal en el pipeline de campo',
-};
-
-// Lectura en una línea del caso que más pesa, para decidir qué hacer.
-function conclusion(d: DiagnosticoHubspot): string | null {
-  const deals = d.dealsSinVisita.porCaso;
-  const total = d.dealsSinVisita.total;
-  if (!total) return null;
-  const cerca = (deals.a_30_60 ?? 0) + (deals.a_1_3h ?? 0);
-  const [mayor] = Object.entries(deals).sort((x, y) => y[1] - x[1]);
-  if (cerca / total >= 0.3) return `${Math.round((cerca / total) * 100)}% de las solicitudes en HubSpot sin visita tienen una solicitud marcada por el mismo vendedor a menos de 3 horas: probablemente capturan el deal después de la visita. Conviene ampliar la ventana (por ejemplo, a 2 horas).`;
-  if (mayor[0] === 'otro_resultado') return 'Lo que más pesa: el vendedor sí visitó, pero marcó otro resultado. Es un tema de captura en la app (marcar «Hizo solicitud»), no de la ventana de tiempo.';
-  if (mayor[0] === 'sin_visitas_ese_dia') return 'Lo que más pesa: solicitudes creadas en HubSpot en días sin visitas registradas. Lo más probable es que vengan de otro canal (llamadas, referidos) o que la visita no se registró en la app.';
-  if (mayor[0] === 'sin_solicitud_cerca') return 'Lo que más pesa: ese día hubo visitas, pero ninguna marcada como solicitud cerca de la hora del deal. Puede ser otro canal o una visita mal marcada.';
-  return null;
-}
-
-function Diagnostico({ d, onClose }: { d: DiagnosticoHubspot; onClose: () => void }) {
-  const texto = conclusion(d);
-  return (
-    <Modal titulo="¿Por qué no empatan las solicitudes?" subtitulo="Para cada caso sin pareja, lo más cercano del mismo vendedor (en el periodo elegido)" onClose={onClose} ancho={640}
-      pie={<button onClick={onClose} style={boton.primario}>Entendido</button>}>
-      {texto && <div style={{ marginBottom: 14 }}><Aviso tono="info">{texto}</Aviso></div>}
-      <Bloque titulo={`${num(d.dealsSinVisita.total)} solicitudes en HubSpot sin visita «Hizo solicitud» a ±30 min`} casos={d.dealsSinVisita.porCaso} etiquetas={CASOS_DEAL}
-        extra={(k) => k === 'otro_resultado' && Object.keys(d.dealsSinVisita.otroResultado).length > 0 ? (
-          <div style={{ fontSize: 11.5, color: '#8a978f', marginTop: 2 }}>
-            {Object.entries(d.dealsSinVisita.otroResultado).sort((x, y) => y[1] - x[1]).map(([r, n]) => `${ETIQUETA_RESULTADO[r] ?? r}: ${n}`).join(' · ')}
-          </div>
-        ) : null}
-      />
-      <div style={{ height: 16 }} />
-      <Bloque titulo={`${num(d.solicitudesSinConfirmar.total)} solicitudes marcadas en campo sin deal a ±30 min`} casos={d.solicitudesSinConfirmar.porCaso} etiquetas={CASOS_SOLICITUD} />
-    </Modal>
-  );
-}
-
-function Bloque({ titulo, casos, etiquetas, extra }: { titulo: string; casos: Record<string, number>; etiquetas: Record<string, string>; extra?: (k: string) => ReactNode }) {
-  const total = Object.values(casos).reduce((s, n) => s + n, 0);
-  const filas = Object.entries(casos).sort((x, y) => y[1] - x[1]);
-  return (
-    <div>
-      <div style={{ fontSize: 13.5, fontWeight: 600, color: '#263238', marginBottom: 8 }}>{titulo}</div>
-      {!filas.length && <div style={{ fontSize: 12.5, color: '#8a978f' }}>Ninguna.</div>}
-      {filas.map(([k, n]) => (
-        <div key={k} style={{ padding: '7px 0', borderBottom: '1px solid #f2f5f2' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12.5, color: '#3a4a41' }}>
-            <span>{etiquetas[k] ?? k}</span>
-            <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}><b>{n}</b> · {Math.round((n / total) * 100)}%</span>
-          </div>
-          <div style={{ height: 5, background: '#f1f4f2', borderRadius: 3, marginTop: 4 }}>
-            <div style={{ height: '100%', width: `${(n / total) * 100}%`, background: '#157347', borderRadius: 3 }} />
-          </div>
-          {extra?.(k)}
-        </div>
-      ))}
     </div>
   );
 }
@@ -537,7 +431,7 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
     });
   }, [data, orden, hsOk]);
   const yaNo = data.porVendedor.filter((v) => !v.activo).length;
-  const cols = 'minmax(190px, 2fr) 60px minmax(120px, 1.1fr) 80px 80px 90px 90px 80px 105px';
+  const cols = 'minmax(180px, 2fr) 60px minmax(120px, 1.1fr) 80px 85px 95px 85px 130px 95px';
   return (
     <Card
       titulo="Por vendedor"
@@ -554,7 +448,7 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
             <ThOrden k="conversion" orden={orden} setOrden={setOrden} alinear="right">Conversión</ThOrden>
             <ThOrden k="aprobacion" orden={orden} setOrden={setOrden} alinear="right">Aprobación</ThOrden>
             <ThOrden k="confirmacion" orden={orden} setOrden={setOrden} alinear="right">En HubSpot</ThOrden>
-            <ThOrden k="enNegocio" orden={orden} setOrden={setOrden} alinear="right">En el negocio</ThOrden>
+            <span title="Visitas guardadas con la tablet a 50 m o menos del negocio. Solo se puede comprobar en negocios de la ruta (traen la ubicación oficial del DENUE) y cuando la tablet tenía GPS."><ThOrden k="enNegocio" orden={orden} setOrden={setOrden} alinear="right">En el negocio</ThOrden></span>
             <ThOrden k="ultimaVisita" orden={orden} setOrden={setOrden} alinear="right">Última visita</ThOrden>
           </div>
           {filas.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: '#9aa39c', fontSize: 13 }}>No hay vendedores en este filtro.</div>}
@@ -571,19 +465,73 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
                   </div>
                 </div>
               </div>
-              <div style={celdaNum}>{f.meta ? num(f.meta) : '—'}</div>
-              <div><BarraAvance pct={f.avanceMeta} /><div style={{ fontSize: 11, color: '#9aa39c', marginTop: 2 }}>{f.meta ? `${num(f.negociosVisitados)} visitados` : `${num(f.negociosVisitados)} visitados · sin ruta`}</div></div>
+              <div style={celdaNum}>{f.meta ? num(f.meta) : <SinDato texto="sin ruta" ayuda="No tenía negocios planeados en su ruta para estos días." />}</div>
+              <div>
+                {f.meta ? <BarraAvance pct={f.avanceMeta} /> : <SinDato texto="sin ruta" alinear="left" ayuda="No tenía negocios planeados en su ruta para estos días, así que no hay meta contra la cual medir." />}
+                <div style={{ fontSize: 11, color: '#9aa39c', marginTop: 2 }}>{num(f.negociosVisitados)} visitados</div>
+              </div>
               <div style={celdaNum}>{num(hsOk ? f.solicitudes : f.marcadas)}</div>
-              <div style={celdaNum}>{pctTxt(f.conversion)}</div>
-              <div style={celdaNum}>{pctTxt(f.aprobacion)}{f.aprobadas != null && f.aprobadas + (f.rechazadas ?? 0) > 0 && <Sub>de {num(f.aprobadas + (f.rechazadas ?? 0))}</Sub>}</div>
-              <div style={celdaNum}>{f.confirmadasVisitas != null && f.marcadas ? `${num(f.confirmadasVisitas)} de ${num(f.marcadas)}` : '—'}</div>
-              <div style={celdaNum}>{pctTxt(f.enNegocio)}</div>
-              <div style={{ textAlign: 'right', color: '#5a665f', fontSize: 12.5 }}>{haceCuanto(f.ultimaVisita)}</div>
+              <div style={celdaNum}>
+                {f.conversion != null ? <>{pctTxt(f.conversion)}<Sub>de {num(f.negociosReales)} negocios</Sub></>
+                  : <SinDato texto={f.visitas ? '—' : 'sin visitas'} ayuda={f.visitas ? 'Se calcula con las solicitudes confirmadas en HubSpot.' : 'No visitó ningún negocio en el periodo.'} />}
+              </div>
+              <div style={celdaNum}>
+                {f.aprobacion != null ? <>{pctTxt(f.aprobacion)}<Sub>de {num((f.aprobadas ?? 0) + (f.rechazadas ?? 0))} con respuesta</Sub></>
+                  : (f.solicitudes ?? 0) > 0
+                    ? <SinDato texto="en revisión" ayuda="Sus solicitudes del periodo todavía no tienen respuesta (ni aprobadas ni rechazadas)." />
+                    : <SinDato texto="sin solicitudes" ayuda="No tuvo solicitudes confirmadas en el periodo; no hay nada que aprobar." />}
+              </div>
+              <div style={celdaNum}>
+                {f.confirmadasVisitas != null && f.marcadas ? `${num(f.confirmadasVisitas)} de ${num(f.marcadas)}`
+                  : <SinDato texto="sin solicitudes" ayuda="No marcó ninguna visita como «Hizo solicitud» en el periodo." />}
+              </div>
+              <div style={celdaNum}><EnNegocio f={f} /></div>
+              <div style={{ textAlign: 'right', color: '#5a665f', fontSize: 12.5 }}>{f.ultimaVisita ? haceCuanto(f.ultimaVisita) : <SinDato texto="sin visitas" ayuda="No visitó ningún negocio en el periodo." />}</div>
             </div>
           ))}
         </div>
       </div>
+      <div style={{ padding: '10px 20px 8px', fontSize: 11.5, color: '#8a978f', lineHeight: 1.5 }}>
+        <b style={{ color: '#6f7d75' }}>En el negocio:</b> de las visitas que se pueden comprobar, cuántas se guardaron con la tablet a 50 m o menos del negocio.
+        Se comprueba contra la ubicación oficial del negocio (DENUE), así que no se pueden medir las visitas a <b style={{ color: '#6f7d75' }}>negocios nuevos</b> (su única
+        ubicación es la que manda el propio vendedor: siempre daría "sí"), a negocios <b style={{ color: '#6f7d75' }}>agregados a mano</b> en la ruta (no tienen coordenadas)
+        ni las que se guardaron <b style={{ color: '#6f7d75' }}>sin GPS</b>. Esas no cuentan ni a favor ni en contra; debajo de cada porcentaje se dice cuántas son
+        («3 nuevos · 1 a mano · 2 sin GPS»).
+      </div>
     </Card>
+  );
+}
+
+// "3 nuevos · 1 a mano · 2 sin GPS" (la nota al pie de la tabla explica cada uno).
+function motivosTxt(sc: BloqueTablero['sinComprobar']): string {
+  return [
+    sc.nuevo && `${num(sc.nuevo)} ${sc.nuevo === 1 ? 'nuevo' : 'nuevos'}`,
+    sc.sinUbicacion && `${num(sc.sinUbicacion)} a mano`,
+    sc.sinGps && `${num(sc.sinGps)} sin GPS`,
+  ].filter(Boolean).join(' · ');
+}
+
+const AYUDA_SIN_COMPROBAR = 'Solo se puede comprobar contra la ubicación oficial del negocio (DENUE). Los negocios nuevos solo tienen la ubicación que manda el propio vendedor (compararla consigo misma siempre daría "sí"), los agregados a mano en la ruta no tienen coordenadas, y sin GPS no hay dónde estaba la tablet. Esas visitas no cuentan ni a favor ni en contra.';
+
+// "En el negocio" de un vendedor: el % solo con lo comprobable y, debajo,
+// cuántas visitas quedaron fuera y por qué; nunca una celda vacía.
+function EnNegocio({ f }: { f: VendedorTablero }) {
+  const fuera = f.sinComprobar.nuevo + f.sinComprobar.sinGps + f.sinComprobar.sinUbicacion;
+  if (!f.visitas) return <SinDato texto="sin visitas" ayuda="No visitó ningún negocio en el periodo." />;
+  if (f.enNegocio == null) {
+    return (
+      <span title={AYUDA_SIN_COMPROBAR} style={{ display: 'block', textAlign: 'right', fontSize: 11.5, fontWeight: 400, color: '#6f7d75', cursor: 'help', lineHeight: 1.35 }}>
+        no se pueden medir
+        <span style={{ display: 'block', color: '#9aa39c' }}>{motivosTxt(f.sinComprobar)}</span>
+      </span>
+    );
+  }
+  return (
+    <span title={fuera ? AYUDA_SIN_COMPROBAR : 'Visitas guardadas con la tablet a 50 m o menos del negocio.'} style={{ cursor: 'help' }}>
+      {pctTxt(f.enNegocio)}
+      <Sub>de {num(f.validables)} {f.validables === 1 ? 'comprobable' : 'comprobables'}</Sub>
+      {fuera > 0 && <Sub>no se miden: {motivosTxt(f.sinComprobar)}</Sub>}
+    </span>
   );
 }
 
@@ -612,7 +560,8 @@ function RequiereAtencion({ data, rutas }: { data: TableroData; rutas: EstadoRut
     { titulo: 'Su ruta se acaba en ≤2 días', nombres: deRuta.filter((r) => r.pendientes > 0 && r.diasRestantes != null && r.diasRestantes <= 2).map((r) => nombre(r.vendedorId)), link: '/rutas?filtro=por_vencer', accion: 'Renovar rutas' },
     { titulo: 'Con 5+ paradas atrasadas', nombres: deRuta.filter((r) => r.atrasadas >= 5).sort((x, y) => y.atrasadas - x.atrasadas).map((r) => `${nombre(r.vendedorId)} (${r.atrasadas})`), link: '/rutas', accion: 'Ver rutas' },
     { titulo: 'Sin visitas en el periodo', nombres: filas.filter((f) => f.visitas === 0).map((f) => f.nombre), link: '/en-vivo', accion: 'Ver en vivo' },
-    { titulo: 'Menos de la mitad de sus visitas en el negocio', nombres: filas.filter((f) => f.enNegocio != null && f.enNegocio < 50).map((f) => `${f.nombre} (${pctTxt(f.enNegocio)})`), link: '/visitas', accion: 'Revisar visitas' },
+    // Con 1 o 2 visitas comprobables un 0% no dice nada: se pide un mínimo.
+    { titulo: 'Menos de la mitad de sus visitas en el negocio', nombres: filas.filter((f) => f.enNegocio != null && f.validables >= 3 && f.enNegocio < 50).map((f) => `${f.nombre} (${pctTxt(f.enNegocio)} de ${num(f.validables)})`), link: '/visitas', accion: 'Revisar visitas' },
     { titulo: 'Menos de la mitad de sus solicitudes en HubSpot', nombres: filas.filter((f) => f.confirmacion != null && f.marcadas >= 2 && f.confirmacion < 50).map((f) => `${f.nombre} (${num(f.confirmadasVisitas)} de ${num(f.marcadas)})`), link: '/visitas', accion: 'Revisar visitas' },
   ].filter((x) => x.nombres.length);
   const [abierto, setAbierto] = useState(false);
@@ -650,11 +599,14 @@ function RequiereAtencion({ data, rutas }: { data: TableroData; rutas: EstadoRut
 // ---------- Piezas ----------
 
 const Fuente = () => <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#b2431f', background: '#fff0eb', borderRadius: 999, padding: '1px 6px', verticalAlign: 2 }}>HubSpot</span>;
+// Celda sin número: dice por qué, en vez de un "—" que parece un error.
+const SinDato = ({ texto, ayuda, alinear = 'right' }: { texto: string; ayuda: string; alinear?: 'left' | 'right' }) => (
+  <span title={ayuda} style={{ display: 'block', textAlign: alinear, fontSize: 11.5, fontWeight: 400, color: '#9aa39c', cursor: 'help' }}>{texto}</span>
+);
 const Sub = ({ children }: { children: ReactNode }) => <div style={{ fontSize: 11, color: '#9aa39c', fontWeight: 400 }}>{children}</div>;
 const Vacio = ({ texto }: { texto?: string }) => <div style={{ padding: 20, color: '#9aa39c', fontSize: 13, textAlign: 'center' }}>{texto ?? 'Cargando…'}</div>;
 
 const negro: CSSProperties = { color: '#263238', fontWeight: 600 };
-const grande: CSSProperties = { fontSize: 15, color: '#1f2a24' };
 const flecha: CSSProperties = { background: 'none', border: 'none', fontSize: 18, lineHeight: 1, color: '#3a4a41', padding: '6px 10px', cursor: 'pointer' };
 const fechaInput: CSSProperties = { border: '1px solid #d9e1db', background: '#fff', borderRadius: 8, padding: '7px 10px', fontSize: 13, color: '#263238' };
 const tabla: CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 460 };
