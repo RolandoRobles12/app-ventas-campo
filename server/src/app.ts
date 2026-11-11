@@ -20,6 +20,7 @@ import { visitasRouter } from './routes/visitas.js';
 import { ubicacionesRouter } from './routes/ubicaciones.js';
 import { progresoRouter } from './routes/progreso.js';
 import { metricasRouter } from './routes/metricas.js';
+import { tableroRouter } from './routes/tablero.js';
 import { mapaRouter } from './routes/mapa.js';
 import { seguimientoRouter } from './routes/seguimiento.js';
 import { llamadasRouter } from './routes/llamadas.js';
@@ -43,6 +44,7 @@ app.use('/api/vendedores', requireAdmin, vendedoresRouter);
 app.use('/api/equipo', requireAdmin, equipoRouter);
 app.use('/api/rutas', requireAdmin, rutasRouter);
 app.use('/api/metricas', requireAdmin, metricasRouter);
+app.use('/api/tablero', requireAdmin, tableroRouter);
 app.use('/api/mapa', requireAdmin, mapaRouter);
 app.use('/api/seguimiento', requireAdmin, seguimientoRouter);
 // Mixtos: la app del vendedor también usa algunas rutas de estos routers

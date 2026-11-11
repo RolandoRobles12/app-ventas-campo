@@ -23,7 +23,7 @@ interface VisitaMetrica {
   esNegocioNuevo?: boolean;
 }
 
-interface PlaneadoMetrica {
+export interface PlaneadoMetrica {
   vendedorId: string;
   estado: string;
   fechaPlan: string;
@@ -45,7 +45,7 @@ async function visitasEnRango(ids: string[] | null, start: Date, end: Date): Pro
 
 // Negocios que la ruta planeó para el periodo. Se lee por fecha (un solo
 // rango) y se filtra el vendedor en memoria.
-async function planeadosEnRango(desde: string, hasta: string, ids: Set<string>): Promise<PlaneadoMetrica[]> {
+export async function planeadosEnRango(desde: string, hasta: string, ids: Set<string>): Promise<PlaneadoMetrica[]> {
   if (desde > hasta) return [];
   const snap = await db.collection('prospectos')
     .where('fechaPlan', '>=', desde).where('fechaPlan', '<=', hasta)

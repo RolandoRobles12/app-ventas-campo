@@ -9,6 +9,12 @@ const icono = (children: ReactNode) => (
 
 const SECCIONES: { titulo: string; items: { to: string; label: string; icon: ReactNode }[] }[] = [
   {
+    titulo: 'General',
+    items: [
+      { to: '/tablero', label: 'Tablero', icon: icono(<><rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" /><rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" /></>) },
+    ],
+  },
+  {
     titulo: 'Operación',
     items: [
       { to: '/resumen', label: 'Resumen', icon: icono(<><path d="M3 3v18h18" /><rect x="7" y="10" width="3" height="8" /><rect x="12" y="6" width="3" height="12" /><rect x="17" y="13" width="3" height="5" /></>) },
@@ -95,6 +101,7 @@ export function TopBar({ userEmail, onSignOut, onAyuda }: { userEmail: string; o
 // Recorrido del panel: qué es cada pantalla. Sale solo la primera vez (por
 // navegador) y se vuelve a ver con "¿Cómo funciona?".
 const PASOS_ADMIN: PasoRecorrido[] = [
+  { objetivo: 'nav/tablero', titulo: 'Tablero', texto: 'Los números clave para cualquier persona: solicitudes confirmadas en HubSpot, su aprobación, negocios visitados contra la meta de la ruta, conversión y qué tanto de lo que se marca en campo existe en HubSpot. Por día, semana o mes.' },
   { objetivo: 'nav/resumen', titulo: 'Resumen', texto: 'Cómo va la operación en el periodo: visitas, cumplimiento de las rutas, visitas hechas en el negocio y alertas de quién necesita atención.' },
   { objetivo: 'nav/en-vivo', titulo: 'En vivo', texto: 'Dónde está cada vendedor ahorita, cuántas visitas lleva hoy y cuándo dio señal por última vez.' },
   { objetivo: 'nav/visitas', titulo: 'Visitas', texto: 'Cada visita con su foto, su resultado y si se hizo en el negocio (GPS a 50 m o menos). Toca un negocio para ver todo su historial.' },
@@ -160,7 +167,7 @@ export function Chrome({ children }: { children: ReactNode }) {
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#eef3ee', position: 'relative', color: '#202723' }}>
       <TopBar userEmail={email} onSignOut={signOutUser} onAyuda={() => setBienvenida(true)} />
-      {bienvenida && <Bienvenida onCerrar={cerrarBienvenida} onRecorrido={() => { cerrarBienvenida(); navigate('/resumen'); setRecorrido(true); }} />}
+      {bienvenida && <Bienvenida onCerrar={cerrarBienvenida} onRecorrido={() => { cerrarBienvenida(); navigate('/tablero'); setRecorrido(true); }} />}
       {recorrido && <Recorrido pasos={PASOS_ADMIN} onTerminar={() => setRecorrido(false)} color="#157347" />}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <Sidebar />
