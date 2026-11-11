@@ -35,6 +35,23 @@ interface VisitaTablero {
   createdAt: number;
   negocio: string;
   ubicacionValida: boolean | null;
+  // Si no se pudo comprobar que estuvo en el negocio, por qué (ver motivoSinComprobar()).
+  sinComprobar: MotivoSinComprobar | null;
+}
+
+// Una visita solo se puede comprobar si la tablet mandó GPS y el negocio
+// tiene una ubicación que no salió del propio vendedor (la del DENUE):
+// - nuevo: negocio que el vendedor registró en campo; su única ubicación es
+//   el GPS de esa misma visita, así que compararla consigo misma siempre
+//   daría "sí estuvo" (inflaría el número).
+// - sin_gps: la tablet no mandó ubicación al guardar.
+// - sin_ubicacion: negocio de la ruta agregado a mano en el planeador, con
+//   dirección escrita pero sin coordenadas.
+type MotivoSinComprobar = 'nuevo' | 'sin_gps' | 'sin_ubicacion';
+function motivoSinComprobar(v: { ubicacionValida?: boolean | null; esNegocioNuevo?: boolean; gpsAccuracy?: number | null }): MotivoSinComprobar | null {
+  if (v.ubicacionValida != null) return null;
+  if (v.esNegocioNuevo) return 'nuevo';
+  return v.gpsAccuracy == null ? 'sin_gps' : 'sin_ubicacion';
 }
 
 export interface PlaneadoMetrica {
@@ -139,7 +156,7 @@ const ultimoDia = (r: Rango) => fechaMx(new Date(r.end - 1));
 // ---------- Lecturas ----------
 
 async function visitasEnRango(ids: string[] | null, r: { start: number; end: number }, soloSolicitudes = false): Promise<VisitaTablero[]> {
-  const campos = ['vendedorId', 'resultado', 'createdAt', 'negocioId', 'prospectoId', 'ubicacionValida'];
+  const campos = ['vendedorId', 'resultado', 'createdAt', 'negocioId', 'prospectoId', 'ubicacionValida', 'esNegocioNuevo', 'gpsAccuracy'];
   const base = (q: FirebaseFirestore.Query) => {
     const x = soloSolicitudes ? q.where('resultado', '==', SOLICITUD) : q;
     return x.where('createdAt', '>=', Timestamp.fromMillis(r.start)).where('createdAt', '<', Timestamp.fromMillis(r.end)).select(...campos);
@@ -147,10 +164,14 @@ async function visitasEnRango(ids: string[] | null, r: { start: number; end: num
   const consultas = ids ? chunkArray(ids).map((c) => db.collection('visitas').where('vendedorId', 'in', c)) : [db.collection('visitas')];
   const snaps = await Promise.all(consultas.map((q) => base(q).get()));
   return snaps.flatMap((s) => s.docs.map((d) => {
-    const v = d.data() as { vendedorId: string; resultado: string; createdAt: Timestamp; negocioId?: string | null; prospectoId?: string | null; ubicacionValida?: boolean | null };
+    const v = d.data() as {
+      vendedorId: string; resultado: string; createdAt: Timestamp; negocioId?: string | null; prospectoId?: string | null;
+      ubicacionValida?: boolean | null; esNegocioNuevo?: boolean; gpsAccuracy?: number | null;
+    };
     return {
       id: d.id, vendedorId: v.vendedorId, resultado: v.resultado, createdAt: v.createdAt.toMillis(),
       negocio: v.negocioId || v.prospectoId || `visita:${d.id}`, ubicacionValida: v.ubicacionValida ?? null,
+      sinComprobar: motivoSinComprobar(v),
     };
   }));
 }
@@ -261,11 +282,15 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
   const interesados = new Set<string>();
   let validables = 0;
   let validas = 0;
+  const sinComprobar = { nuevo: 0, sinGps: 0, sinUbicacion: 0 };
   for (const v of visitas) {
     const u = ultima.get(v.negocio);
     if (!u || v.createdAt > u.createdAt) ultima.set(v.negocio, v);
     if (CON_INTERES.has(v.resultado)) interesados.add(v.negocio);
     if (v.ubicacionValida != null) { validables++; if (v.ubicacionValida) validas++; }
+    if (v.sinComprobar === 'nuevo') sinComprobar.nuevo++;
+    else if (v.sinComprobar === 'sin_gps') sinComprobar.sinGps++;
+    else if (v.sinComprobar === 'sin_ubicacion') sinComprobar.sinUbicacion++;
   }
   const negociosVisitados = ultima.size;
   const noValidos = [...ultima.values()].filter((v) => v.resultado === NO_VALIDO).length;
@@ -285,8 +310,11 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
     aprobacion: s.aprobadas != null ? pct1(s.aprobadas, s.aprobadas + (s.rechazadas ?? 0)) : null,
     confirmacion: s.confirmadasVisitas != null ? pct1(s.confirmadasVisitas, s.marcadas) : null,
     // Visitas hechas en el negocio (GPS a 50 m o menos), de las que se pueden comprobar.
+    // Las que no se pueden comprobar no cuentan ni a favor ni en contra; se
+    // dice cuántas son y por qué.
     validables,
     enNegocio: pct1(validas, validables),
+    sinComprobar,
   };
 }
 

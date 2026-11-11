@@ -106,7 +106,7 @@ export function Visitas() {
         return [
           d.toLocaleDateString('es-MX'), d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }), v.vendedorNombre, v.vendedorActivo ? 'Sí' : 'No', v.producto,
           v.nombreNegocio, v.direccion, v.esNegocioNuevo ? 'Sí' : 'No', v.resultado, v.notas ?? '', (v.fotos ?? []).length,
-          v.ubicacionValida == null ? '' : v.ubicacionValida ? 'Sí' : 'No', v.distanciaValidacionMetros ?? '', v.lat ?? '', v.lng ?? '',
+          v.ubicacionValida == null ? (v.esNegocioNuevo ? 'No se puede medir (negocio nuevo)' : 'No se puede medir (sin GPS o sin ubicación)') : v.ubicacionValida ? 'Sí' : 'No', v.distanciaValidacionMetros ?? '', v.lat ?? '', v.lng ?? '',
         ].map(celdaCsv).join(',');
       });
       // BOM para que Excel abra bien los acentos.
@@ -259,7 +259,12 @@ export function Visitas() {
               <div><span style={resultadoBadgeStyle(v.resultado)}>{v.resultado}</span></div>
               <div>
                 {v.ubicacionValida === null ? (
-                  <span title="No se puede comprobar: negocio nuevo o sin GPS" style={{ color: '#9aa39c' }}>No aplica</span>
+                  // No cuenta ni a favor ni en contra: se dice por qué no se puede medir.
+                  v.esNegocioNuevo ? (
+                    <span title="Negocio que el vendedor registró en campo: su única ubicación es la que mandó la tablet en esta visita, así que no hay contra qué comparar." style={{ color: '#8a978f', cursor: 'help' }}>Negocio nuevo<div style={{ fontSize: 11, color: '#9aa39c' }}>no se puede medir</div></span>
+                  ) : (
+                    <span title="La tablet no mandó GPS al guardar, o el negocio se agregó a mano a la ruta sin coordenadas: no hay contra qué comparar." style={{ color: '#8a978f', cursor: 'help' }}>Sin GPS o sin ubicación<div style={{ fontSize: 11, color: '#9aa39c' }}>no se puede medir</div></span>
+                  )
                 ) : (
                   <span title="Distancia entre el GPS de la tablet y el negocio al guardar la visita" style={{ color: v.ubicacionValida ? '#1c7a4f' : '#c0392b', fontWeight: 600 }}>
                     {v.ubicacionValida ? '✓ Sí' : '✕ No'} <span style={{ fontWeight: 400, color: '#8a978f' }}>· a {v.distanciaValidacionMetros} m</span>

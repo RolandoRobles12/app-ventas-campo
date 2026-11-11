@@ -431,7 +431,7 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
     });
   }, [data, orden, hsOk]);
   const yaNo = data.porVendedor.filter((v) => !v.activo).length;
-  const cols = 'minmax(190px, 2fr) 60px minmax(120px, 1.1fr) 80px 80px 90px 90px 80px 105px';
+  const cols = 'minmax(180px, 2fr) 60px minmax(120px, 1.1fr) 80px 85px 95px 85px 130px 95px';
   return (
     <Card
       titulo="Por vendedor"
@@ -485,23 +485,53 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
                 {f.confirmadasVisitas != null && f.marcadas ? `${num(f.confirmadasVisitas)} de ${num(f.marcadas)}`
                   : <SinDato texto="sin solicitudes" ayuda="No marcó ninguna visita como «Hizo solicitud» en el periodo." />}
               </div>
-              <div style={celdaNum}>
-                {f.enNegocio != null ? <>{pctTxt(f.enNegocio)}<Sub>de {num(f.validables)} {f.validables === 1 ? 'visita' : 'visitas'}</Sub></>
-                  : f.visitas
-                    ? <SinDato texto="no se puede comprobar" ayuda={`Sus ${num(f.visitas)} visitas fueron a negocios nuevos (los registra el vendedor y no traen una ubicación oficial contra la cual comparar) o la tablet no tenía GPS al guardarlas.`} />
-                    : <SinDato texto="sin visitas" ayuda="No visitó ningún negocio en el periodo." />}
-              </div>
+              <div style={celdaNum}><EnNegocio f={f} /></div>
               <div style={{ textAlign: 'right', color: '#5a665f', fontSize: 12.5 }}>{f.ultimaVisita ? haceCuanto(f.ultimaVisita) : <SinDato texto="sin visitas" ayuda="No visitó ningún negocio en el periodo." />}</div>
             </div>
           ))}
         </div>
       </div>
       <div style={{ padding: '10px 20px 8px', fontSize: 11.5, color: '#8a978f', lineHeight: 1.5 }}>
-        <b style={{ color: '#6f7d75' }}>En el negocio:</b> visitas guardadas con la tablet a 50 m o menos del negocio. Solo se puede comprobar en negocios
-        de la ruta (traen la ubicación oficial del DENUE) y si la tablet tenía GPS; los negocios nuevos que registra el vendedor no cuentan. Debajo de cada
-        porcentaje está sobre cuántas visitas se calculó.
+        <b style={{ color: '#6f7d75' }}>En el negocio:</b> de las visitas que se pueden comprobar, cuántas se guardaron con la tablet a 50 m o menos del negocio.
+        Se comprueba contra la ubicación oficial del negocio (DENUE), así que no se pueden medir las visitas a <b style={{ color: '#6f7d75' }}>negocios nuevos</b> (su única
+        ubicación es la que manda el propio vendedor: siempre daría "sí"), a negocios <b style={{ color: '#6f7d75' }}>agregados a mano</b> en la ruta (no tienen coordenadas)
+        ni las que se guardaron <b style={{ color: '#6f7d75' }}>sin GPS</b>. Esas no cuentan ni a favor ni en contra; debajo de cada porcentaje se dice cuántas son
+        («3 nuevos · 1 a mano · 2 sin GPS»).
       </div>
     </Card>
+  );
+}
+
+// "3 nuevos · 1 a mano · 2 sin GPS" (la nota al pie de la tabla explica cada uno).
+function motivosTxt(sc: BloqueTablero['sinComprobar']): string {
+  return [
+    sc.nuevo && `${num(sc.nuevo)} ${sc.nuevo === 1 ? 'nuevo' : 'nuevos'}`,
+    sc.sinUbicacion && `${num(sc.sinUbicacion)} a mano`,
+    sc.sinGps && `${num(sc.sinGps)} sin GPS`,
+  ].filter(Boolean).join(' · ');
+}
+
+const AYUDA_SIN_COMPROBAR = 'Solo se puede comprobar contra la ubicación oficial del negocio (DENUE). Los negocios nuevos solo tienen la ubicación que manda el propio vendedor (compararla consigo misma siempre daría "sí"), los agregados a mano en la ruta no tienen coordenadas, y sin GPS no hay dónde estaba la tablet. Esas visitas no cuentan ni a favor ni en contra.';
+
+// "En el negocio" de un vendedor: el % solo con lo comprobable y, debajo,
+// cuántas visitas quedaron fuera y por qué; nunca una celda vacía.
+function EnNegocio({ f }: { f: VendedorTablero }) {
+  const fuera = f.sinComprobar.nuevo + f.sinComprobar.sinGps + f.sinComprobar.sinUbicacion;
+  if (!f.visitas) return <SinDato texto="sin visitas" ayuda="No visitó ningún negocio en el periodo." />;
+  if (f.enNegocio == null) {
+    return (
+      <span title={AYUDA_SIN_COMPROBAR} style={{ display: 'block', textAlign: 'right', fontSize: 11.5, fontWeight: 400, color: '#6f7d75', cursor: 'help', lineHeight: 1.35 }}>
+        no se pueden medir
+        <span style={{ display: 'block', color: '#9aa39c' }}>{motivosTxt(f.sinComprobar)}</span>
+      </span>
+    );
+  }
+  return (
+    <span title={fuera ? AYUDA_SIN_COMPROBAR : 'Visitas guardadas con la tablet a 50 m o menos del negocio.'} style={{ cursor: 'help' }}>
+      {pctTxt(f.enNegocio)}
+      <Sub>de {num(f.validables)} {f.validables === 1 ? 'comprobable' : 'comprobables'}</Sub>
+      {fuera > 0 && <Sub>no se miden: {motivosTxt(f.sinComprobar)}</Sub>}
+    </span>
   );
 }
 
@@ -530,7 +560,8 @@ function RequiereAtencion({ data, rutas }: { data: TableroData; rutas: EstadoRut
     { titulo: 'Su ruta se acaba en ≤2 días', nombres: deRuta.filter((r) => r.pendientes > 0 && r.diasRestantes != null && r.diasRestantes <= 2).map((r) => nombre(r.vendedorId)), link: '/rutas?filtro=por_vencer', accion: 'Renovar rutas' },
     { titulo: 'Con 5+ paradas atrasadas', nombres: deRuta.filter((r) => r.atrasadas >= 5).sort((x, y) => y.atrasadas - x.atrasadas).map((r) => `${nombre(r.vendedorId)} (${r.atrasadas})`), link: '/rutas', accion: 'Ver rutas' },
     { titulo: 'Sin visitas en el periodo', nombres: filas.filter((f) => f.visitas === 0).map((f) => f.nombre), link: '/en-vivo', accion: 'Ver en vivo' },
-    { titulo: 'Menos de la mitad de sus visitas en el negocio', nombres: filas.filter((f) => f.enNegocio != null && f.enNegocio < 50).map((f) => `${f.nombre} (${pctTxt(f.enNegocio)})`), link: '/visitas', accion: 'Revisar visitas' },
+    // Con 1 o 2 visitas comprobables un 0% no dice nada: se pide un mínimo.
+    { titulo: 'Menos de la mitad de sus visitas en el negocio', nombres: filas.filter((f) => f.enNegocio != null && f.validables >= 3 && f.enNegocio < 50).map((f) => `${f.nombre} (${pctTxt(f.enNegocio)} de ${num(f.validables)})`), link: '/visitas', accion: 'Revisar visitas' },
     { titulo: 'Menos de la mitad de sus solicitudes en HubSpot', nombres: filas.filter((f) => f.confirmacion != null && f.marcadas >= 2 && f.confirmacion < 50).map((f) => `${f.nombre} (${num(f.confirmadasVisitas)} de ${num(f.marcadas)})`), link: '/visitas', accion: 'Revisar visitas' },
   ].filter((x) => x.nombres.length);
   const [abierto, setAbierto] = useState(false);

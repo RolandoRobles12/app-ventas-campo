@@ -77,6 +77,8 @@ export interface BloqueTablero {
   aprobadas: number | null; rechazadas: number | null; enProceso: number | null;
   conversion: number | null; aprobacion: number | null; confirmacion: number | null;
   validables: number; enNegocio: number | null;
+  // Visitas que no se pueden comprobar (no cuentan en enNegocio), por motivo.
+  sinComprobar: { nuevo: number; sinGps: number; sinUbicacion: number };
 }
 export interface RangoTablero { desde: string; hasta: string; inicio: string; fin: string }
 export interface VendedorTablero extends BloqueTablero {
