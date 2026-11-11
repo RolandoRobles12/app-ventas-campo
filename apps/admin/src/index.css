@@ -30,3 +30,6 @@ button { cursor: pointer; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .screen { animation: fadeUp .28s cubic-bezier(.22,1,.36,1); }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+.tile-click { transition: border-color .12s, box-shadow .12s; }
+.tile-click:hover { border-color: #9fd0b4 !important; box-shadow: 0 2px 8px rgba(21,115,71,.08); }
+.link-ver-visitas:hover { text-decoration: underline; text-underline-offset: 3px; }
