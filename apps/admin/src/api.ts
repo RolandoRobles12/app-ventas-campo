@@ -85,6 +85,28 @@ export interface MetricasResumen {
   }[];
 }
 
+export type VistaTablero = 'dia' | 'semana' | 'mes';
+export interface BloqueTablero {
+  visitas: number; negociosVisitados: number; negociosReales: number; noValidos: number; interesados: number;
+  meta: number; metaVisitados: number;
+  // null mientras HubSpot no está conectado o falló.
+  marcadas: number; confirmadasVisitas: number | null; solicitudes: number | null;
+  aprobadas: number | null; rechazadas: number | null; enProceso: number | null;
+  conversion: number | null; aprobacion: number | null; confirmacion: number | null;
+}
+export interface RangoTablero { desde: string; hasta: string; inicio: string; fin: string }
+export interface Tablero {
+  vista: VistaTablero; hoy: string; enCurso: boolean;
+  periodo: RangoTablero; anterior: RangoTablero;
+  actual: BloqueTablero; previo: BloqueTablero;
+  hubspot: { estado: 'ok' | 'sin_configurar' | 'error'; mensaje?: string; dealsSinVisita: number | null; vendedoresSinCuenta: string[] };
+  porProducto: {
+    productoId: string; producto: string; negociosVisitados: number; meta: number;
+    solicitudes: number | null; conversion: number | null; aprobacion: number | null; aprobadas: number | null; rechazadas: number | null;
+  }[];
+  tendencia: { desde: string; hasta: string; parcial: boolean; marcadas: number; solicitudes: number | null; aprobadas: number | null; rechazadas: number | null }[];
+}
+
 export interface EnVivoItem {
   id: string; nombre: string; iniciales: string; color: string; producto: string; zona: string | null;
   estado: 'en_ruta' | 'inactivo' | 'sin_actividad';
@@ -189,6 +211,7 @@ export const api = {
 
   prospectos: (vendedorId: string) => req<Prospecto[]>(`/prospectos/vendedor/${vendedorId}`),
 
+  tablero: (f: { vista: VistaTablero; fecha: string; productoIds?: string[] }) => req<Tablero>(`/tablero${qs(f)}`),
   metricas: (f: Filtro & { todo?: boolean }) => req<MetricasResumen>(`/metricas/resumen${qs({ ...f, todo: f.todo ? '1' : undefined })}`),
   enVivo: (f: { productoIds?: string[]; vendedorIds?: string[] }) => req<{ hoy: string; items: EnVivoItem[] }>(`/seguimiento${qs(f)}`),
   mapaCalor: (f: Filtro) => req<MapaCalorResponse>(`/mapa/calor${qs({ ...f })}`),

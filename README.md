@@ -6,7 +6,7 @@ Implementación real (no prototipo) de una **app web para vendedores de campo** 
 
 ```
 apps/seller   → App del vendedor (React + Vite, pensada para tablets Android). Mi ruta, Mapa, Historial y el registro de visita.
-apps/admin    → Admin web (React + Vite, para laptop/PC). Resumen, En vivo, Visitas, Rutas (planeador), Equipo, Administradores.
+apps/admin    → Admin web (React + Vite, para laptop/PC). Tablero, Resumen, En vivo, Visitas, Rutas (planeador), Equipo, Administradores.
 server        → API (Express + TypeScript + Firestore). Integraciones reales de DENUE (INEGI), Google Maps y la base de colaboradores de aviva-recruiting.
 packages/ui   → Tokens de diseño compartidos (colores, tipografía), login y cargador de Google Maps usados por ambas apps.
 functions     → Cloud Functions: `api` (envuelve `server`) y la sincronización programada del equipo.
@@ -105,6 +105,7 @@ correo de la cuenta de Google contra Firestore vía `GET /api/auth/me`:
 Copia `.env.example` a `server/.env` y completa:
 
 - **Base de colaboradores de aviva-recruiting** (altas y bajas del equipo) — ver la sección "Equipo: base de colaboradores" abajo.
+- **HubSpot (solo lectura)** — `HUBSPOT_TOKEN` en `server/.env` y en `functions/.env`: token de una Private App con `crm.objects.deals.read` y `crm.objects.owners.read`. Lo usa solo el Tablero para confirmar solicitudes y su aprobación (ver "Admin" abajo). Sin él, el Tablero lo avisa y muestra las solicitudes marcadas en campo sin confirmar.
 - **DENUE (INEGI)** — `DENUE_TOKEN`. Es de donde salen los negocios de cada ruta. Sin él, el planeador de "Rutas" muestra un aviso claro en vez de inventar prospectos; con el token, consulta el API real de INEGI (`Buscar` por giro, siempre con coordenadas+radio, máximo 5 km).
 - **Google Maps (Geocoding)** — `GOOGLE_MAPS_API_KEY` en `server/.env` (Geocoding API habilitada en Google Cloud). Solo hace falta si el admin escribe una zona sin elegir una sugerencia del buscador: el servidor geocodifica ese texto antes de consultar el DENUE (el DENUE no acepta texto libre de ubicación). Elegir una sugerencia o hacer clic en el mapa no la necesita.
 - **Google Maps (mapas visuales)** — `VITE_GOOGLE_MAPS_API_KEY` en `apps/admin/.env` **y** en `apps/seller/.env` (copia el `.env.example` de cada app; habilita **"Maps JavaScript API"** y **"Places API"**; puede ser la misma clave, restringida por HTTP referrer a los dominios de cada app). El loader (`loadGoogleMaps`) vive en `packages/ui`. Sin esta variable, las pantallas de mapa muestran un aviso en vez de un mapa en blanco. Se usa en:
@@ -188,6 +189,15 @@ Configuración (en `server/.env` y `functions/.env`):
 
 ### Admin (laptop/PC)
 
+- **Tablero** (pantalla de inicio): los 5 números clave para cualquier persona, no solo quien opera las rutas. Cada tarjeta dice *qué cuenta* y la operación con la que se llegó al número, a la vista.
+  - **Solicitudes** (HubSpot): visitas marcadas como *Hizo solicitud* que tienen un deal en el pipeline de campo (`890269050`) cuyo deal owner es el mismo vendedor (se empata por correo con `GET /crm/v3/owners`), creado entre 30 min antes y 30 min después de la visita. Cada negocio cuenta una vez; cada deal confirma una sola visita.
+  - **Aprobación** (HubSpot): aprobadas ÷ (aprobadas + rechazadas), con `hs_v2_date_entered_1341410960` (Aprobado) y `hs_v2_date_entered_1341410959` (Rechazado). Es el estado de hoy de las solicitudes del periodo; las que siguen en revisión no cuentan y, si menos de la mitad tiene respuesta, se marca como *preliminar* y no se compara.
+  - **Negocios visitados** contra la **meta de la ruta** (los negocios que se le planearon a cada vendedor para esos días).
+  - **Conversión**: solicitudes ÷ negocios reales visitados (sin cerrados o inexistentes).
+  - **Confirmadas en HubSpot**: de las solicitudes marcadas en campo, cuántas sí existen en HubSpot; también dice cuántos deals de estos vendedores no tienen visita.
+  - Por **día, semana o mes**, navegando hacia atrás con ‹ ›; vista y fecha van en la URL, así que el enlace se puede compartir. Un periodo en curso se compara contra el anterior **cortado en el mismo punto de avance** (hoy hasta esta hora vs el mismo día de la semana pasada a la misma hora; del 1 al 11 vs del 1 al 11 del mes pasado). Un periodo cerrado, completo contra completo.
+  - Debajo: el embudo visitado → real → interesado → solicitud → aprobada, solicitudes de los últimos 8 periodos (con las aprobadas) y los mismos números por producto.
+  - HubSpot se consulta **solo al abrir el Tablero** (nada se copia a Firestore; ver `server/src/integrations/hubspot.ts`) y la respuesta se reutiliza 15 min. Sin `HUBSPOT_TOKEN` o si HubSpot falla, el Tablero lo dice y sigue mostrando los números de visitas.
 - **Resumen**: indicadores del periodo elegido en el filtro de fechas (presets, rango personalizado de hasta un año, o "Todo" desde la primera visita): visitas vs periodo anterior, cumplimiento de ruta, visitas por vendedor al día, % de **visitas hechas en el negocio** y vendedores con visitas; visitas por día (o por semana en periodos largos), resultado de las visitas, un bloque de **"Requiere atención"** y el desempeño por vendedor ordenable. Cada indicador que no es obvio tiene un ícono ⓘ con su explicación.
   - *Visitas hechas en el negocio*: al guardar una visita la tablet manda su GPS; si estaba a 50 m o menos del negocio, cuenta. Solo se puede comprobar en negocios de la ruta (del DENUE, con ubicación exacta) y cuando hubo GPS; los negocios nuevos no cuentan.
 - **En vivo**: dónde está cada vendedor hoy, visitas contra lo planeado, última visita y quién no ha empezado; al elegir a uno se ve su recorrido GPS del día. Se actualiza cada minuto.
@@ -196,7 +206,7 @@ Configuración (en `server/.env` y `functions/.env`):
 - **Guía del panel**: la primera vez (por navegador) sale una explicación de qué hace el vendedor con la app y un recorrido por cada pantalla; se vuelve a ver con *¿Cómo funciona?* arriba a la derecha.
 - **Rutas**: estado de la ruta de cada vendedor (sin ruta / se acaba pronto / con ruta) y el **planeador**: zona (buscador, clic en el mapa o zonas dibujadas), giros y ritmo (visitas por día, días de trabajo, duración) → **Generar ruta**. El servidor trae los negocios del DENUE, quita los que ya trae otro vendedor del mismo producto o que se visitaron en los últimos 90 días, los ordena en un recorrido corto (vecino más cercano + 2-opt) y los reparte por día (`fechaPlan` + número de parada). La vista previa se puede editar antes de publicar. Al publicar reemplazando lo pendiente, las citas que el vendedor ya agendó por teléfono (de hoy en adelante) se conservan. La configuración se guarda, así que **Renovar** (uno o varios vendedores a la vez) arma el siguiente periodo con un clic.
 - **Equipo**: conexión con la base de colaboradores, productos de campo (y qué giros busca cada uno) y el equipo activo con filtros (producto, vendedor, hub manager, zona, búsqueda) y el estado de la ruta de cada uno.
-- Se quitaron *Dashboard*, *Mapa de Leads*, *Seguimiento* y *Reportes* (su contenido quedó en Resumen, En vivo y Visitas) y *CRM · Prospectos* junto con la integración de HubSpot (ya estaba apagada por costos). La colección `crmDeals` se queda en Firestore tal cual.
+- Se quitaron *Dashboard*, *Mapa de Leads*, *Seguimiento* y *Reportes* (su contenido quedó en Resumen, En vivo y Visitas) y *CRM · Prospectos* junto con la integración de HubSpot (ya estaba apagada por costos). HubSpot volvió solo como lectura para el Tablero, sin sincronizar nada. La colección `crmDeals` se queda en Firestore tal cual.
 
 ### Historial: quien ya no está activo y cada negocio
 

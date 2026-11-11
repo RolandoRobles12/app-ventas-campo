@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { Tablero } from './pages/Tablero';
 import { AuthProvider, RequireAuth } from '@aviva/ui';
 import { SessionProvider, useSession } from './session';
 import { FiltersProvider } from './filters';
@@ -25,7 +26,8 @@ function AppShell() {
       <FiltersProvider>
         <Chrome>
           <Routes>
-            <Route path="/" element={<Navigate to="/resumen" replace />} />
+            <Route path="/" element={<Navigate to="/tablero" replace />} />
+            <Route path="/tablero" element={<Tablero />} />
             <Route path="/resumen" element={<Resumen />} />
             <Route path="/en-vivo" element={<EnVivo />} />
             <Route path="/visitas" element={<Visitas />} />
@@ -34,7 +36,7 @@ function AppShell() {
             <Route path="/rutas/:vendedorId" element={<Planeador />} />
             <Route path="/equipo" element={<Equipo />} />
             <Route path="/usuarios" element={<Usuarios />} />
-            <Route path="*" element={<Navigate to="/resumen" replace />} />
+            <Route path="*" element={<Navigate to="/tablero" replace />} />
           </Routes>
         </Chrome>
       </FiltersProvider>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, type EnVivoItem, type RecorridoVendedor } from '../api';
 import { useFilters } from '../filters';
 import { FilterBar, PageHeader } from '../components/FilterBar';
@@ -18,7 +19,8 @@ const ESTADOS = {
 // Cómo va el día de cada vendedor, ahora mismo: dónde está, cuántas visitas
 // lleva contra las que le tocan hoy y quién no ha empezado.
 export function EnVivo() {
-  const { fProductos, fVendedores } = useFilters();
+  const { fProductos, fVendedores, setFVendedores, setFRango } = useFilters();
+  const navigate = useNavigate();
   const [items, setItems] = useState<EnVivoItem[]>([]);
   const [cargado, setCargado] = useState(false);
   const [actualizado, setActualizado] = useState<string | null>(null);
@@ -58,6 +60,15 @@ export function EnVivo() {
   const planHoy = items.reduce((s, i) => s + i.planHoy, 0);
   const planHoyVisitados = items.reduce((s, i) => s + i.planHoyVisitados, 0);
 
+  // Lleva a "Visitas" con las de hoy, del vendedor elegido o de todos los del
+  // filtro actual. Los filtros son compartidos entre pantallas, así que en
+  // Visitas se ven ya puestos (y se pueden quitar ahí mismo).
+  const verVisitasHoy = (vendedorId?: string) => {
+    if (vendedorId) setFVendedores([vendedorId]);
+    setFRango('hoy');
+    navigate('/visitas');
+  };
+
   const pins = useMemo<MapPin[]>(() => items
     .filter((i) => i.posicion && (!seleccion || i.id === seleccion))
     .map((i) => ({
@@ -83,7 +94,10 @@ export function EnVivo() {
         <Resumen etiqueta="En ruta ahora" valor={conteo.en_ruta} color="#1c7a4f" />
         <Resumen etiqueta="Sin señal reciente" valor={conteo.inactivo} color="#94500f" />
         <Resumen etiqueta="No han empezado" valor={conteo.sin_actividad} color="#5a665f" />
-        <Resumen etiqueta="Visitas hoy" valor={visitasHoy} color="#263238" extra={planHoy ? `${planHoyVisitados} de ${planHoy} paradas planeadas` : undefined} />
+        <Resumen
+          etiqueta="Visitas hoy" valor={visitasHoy} color="#263238" extra={planHoy ? `${planHoyVisitados} de ${planHoy} paradas planeadas` : undefined}
+          onClick={() => verVisitasHoy()} accion="Ver visitas de hoy →"
+        />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.25fr) minmax(360px, 1fr)', gap: 14, alignItems: 'start' }}>
@@ -131,7 +145,22 @@ export function EnVivo() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
                   <span style={{ fontSize: 20, fontWeight: 600, color: '#263238', fontVariantNumeric: 'tabular-nums' }}>{i.visitasHoy}</span>
-                  <span style={{ fontSize: 12.5, color: '#6f7d75' }}>{meta ? `de ${meta} visitas planeadas` : 'visitas hoy · sin ruta para hoy'}</span>
+                  <span style={{ fontSize: 12.5, color: '#6f7d75', flex: 1 }}>{meta ? `de ${meta} visitas planeadas` : 'visitas hoy · sin ruta para hoy'}</span>
+                  {i.visitasHoy > 0 && (
+                    // Un <span> y no un <a>/<button>: la tarjeta entera ya es
+                    // un botón (selecciona al vendedor en el mapa) y no se
+                    // pueden anidar elementos interactivos.
+                    <span
+                      role="link" tabIndex={0}
+                      onClick={(ev) => { ev.stopPropagation(); verVisitasHoy(i.id); }}
+                      onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); verVisitasHoy(i.id); } }}
+                      title={`Ver las visitas de hoy de ${i.nombre}, con fotos y ubicación`}
+                      className="link-ver-visitas"
+                      style={{ fontSize: 12.5, fontWeight: 600, color: '#157347', whiteSpace: 'nowrap', cursor: 'pointer' }}
+                    >
+                      Ver visitas →
+                    </span>
+                  )}
                 </div>
                 {meta > 0 && (
                   <div style={{ height: 6, background: '#edf1ee', borderRadius: 3, marginTop: 6, overflow: 'hidden' }}>
@@ -153,12 +182,24 @@ export function EnVivo() {
   );
 }
 
-function Resumen({ etiqueta, valor, color, extra }: { etiqueta: string; valor: number; color: string; extra?: string }) {
-  return (
-    <div style={{ background: '#fff', border: '1px solid #e3eae5', borderRadius: 12, padding: '12px 16px' }}>
-      <div style={{ fontSize: 12.5, color: '#5a665f' }}>{etiqueta}</div>
+function Resumen({ etiqueta, valor, color, extra, onClick, accion }: {
+  etiqueta: string; valor: number; color: string; extra?: string; onClick?: () => void; accion?: string;
+}) {
+  const contenido = (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12.5, color: '#5a665f' }}>
+        <span>{etiqueta}</span>
+        {accion && <span style={{ fontWeight: 600, color: '#157347' }}>{accion}</span>}
+      </div>
       <div style={{ fontSize: 26, fontWeight: 600, color, marginTop: 2 }}>{valor}</div>
       {extra && <div style={{ fontSize: 12, color: '#6f7d75' }}>{extra}</div>}
-    </div>
+    </>
+  );
+  const estilo: React.CSSProperties = { background: '#fff', border: '1px solid #e3eae5', borderRadius: 12, padding: '12px 16px' };
+  if (!onClick) return <div style={estilo}>{contenido}</div>;
+  return (
+    <button onClick={onClick} className="tile-click" style={{ ...estilo, textAlign: 'left', font: 'inherit', cursor: 'pointer', width: '100%' }}>
+      {contenido}
+    </button>
   );
 }

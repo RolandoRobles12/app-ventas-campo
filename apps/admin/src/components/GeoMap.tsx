@@ -9,10 +9,27 @@ export interface Recorrido { vendedorId: string; nombre: string; color: string; 
 // Centro de la zona metropolitana de Guadalajara mientras no hay puntos que encuadrar.
 const DEFAULT_CENTER = { lat: 20.6597, lng: -103.3496 };
 
-// Misma rampa secuencial YlOrRd (ColorBrewer) que ya se usaba con Leaflet.heat
-// y luego con el HeatmapLayer de Google.
-const HEAT_GRADIENT = [
-  'rgba(255,255,178,0)', '#ffffb2', '#fecc5c', '#fd8d3c', '#f03b20', '#bd0026',
+// Rampa secuencial YlOrRd (ColorBrewer) extendida hasta un vino oscuro: sin
+// el amarillo pálido del inicio (#ffffb2), que en el mapa base claro casi no
+// se distinguía, y con un tono más oscuro arriba para que las zonas de más
+// visitas resalten sobre las de densidad media. Se exporta para que la
+// leyenda de la pantalla use exactamente los mismos colores.
+export const HEAT_GRADIENT = [
+  'rgba(254,217,118,0)', '#fed976', '#feb24c', '#fd8d3c', '#f03b20', '#bd0026', '#800026',
+];
+
+// Mapa base apagado (casi gris, sin negocios ni transporte) para cuando se
+// pinta el heatmap: sobre el mapa a color de Google (parques verdes, agua
+// azul, cientos de íconos de negocios) los tonos amarillo/naranja se
+// confundían con el fondo. Las calles, colonias y nombres de ciudades se
+// quedan para poder ubicar las zonas.
+const ESTILO_ATENUADO: google.maps.MapTypeStyle[] = [
+  { stylers: [{ saturation: -90 }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+  { featureType: 'road', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { featureType: 'water', stylers: [{ lightness: 25 }] },
+  { featureType: 'landscape', stylers: [{ lightness: 15 }] },
 ];
 
 // Radio de influencia de cada visita en METROS reales, no en pixeles fijos:
@@ -22,17 +39,27 @@ const HEAT_GRADIENT = [
 // correcto". Calculando el radio en pixeles a partir de esta distancia real
 // (ver metersPerPixel en draw()), el círculo encoge/crece con el zoom igual
 // que lo haría cualquier otro elemento geográfico del mapa.
-const HEAT_RADIUS_METERS = 120;
-const HEAT_MIN_RADIUS_PX = 4;
-const HEAT_MAX_RADIUS_PX = 70;
+//
+// Con un piso en pixeles: al alejar el mapa (todo el país, un estado), 120 m
+// medían 1-2 px y cada visita quedaba como un puntito imperceptible. Con el
+// piso, las visitas de una misma colonia o ciudad se juntan en una mancha
+// visible: a esa escala lo que interesa es qué ZONAS se trabajan, no el
+// negocio exacto (para eso se acerca el mapa y vuelve a mandar el radio real).
+const HEAT_RADIUS_METERS = 150;
+const HEAT_MIN_RADIUS_PX = 13;
+const HEAT_MAX_RADIUS_PX = 60;
 const HEAT_BLUR_RATIO = 0.85; // el difuminado es proporcional al radio, no un valor fijo
-const HEAT_OPACITY = 0.75;
+const HEAT_OPACITY = 0.85;
 // Referencia ABSOLUTA de "cuántas visitas en el mismo punto = máxima
 // densidad", no relativa al máximo del conjunto de datos que se esté viendo:
 // si se normalizara contra el máximo local (como hacía la versión anterior),
 // una sola visita siempre se pintaría como "alta densidad" por ser el
 // máximo de un conjunto de 1 — se vea como se vea el resto del mapa.
 const HEAT_MAX_PESO_REFERENCIA = 10;
+// Intensidad de un punto con UNA sola visita. Antes era 1/10: una visita
+// suelta se pintaba casi transparente y desaparecía en el mapa. Con este piso
+// se ve (como "pocas visitas") y la escala de ahí a 10 se mantiene.
+const HEAT_MIN_INTENSIDAD = 0.3;
 
 // google.maps.visualization.HeatmapLayer ya no existe: Google la quitó del
 // runtime de la Maps JavaScript API a partir de v3.65 (antes solo estaba
@@ -163,7 +190,8 @@ function getHeatmapOverlayClass(): HeatmapOverlayCtor {
         const r = radiusPx + blurPx;
         if (x < -r || y < -r || x > width + r || y > height + r) continue;
 
-        this.ctx.globalAlpha = Math.min(1, p.peso / HEAT_MAX_PESO_REFERENCIA);
+        const t = Math.min(1, Math.max(0, (p.peso - 1) / (HEAT_MAX_PESO_REFERENCIA - 1)));
+        this.ctx.globalAlpha = HEAT_MIN_INTENSIDAD + (1 - HEAT_MIN_INTENSIDAD) * t;
         this.ctx.drawImage(this.dotTemplate(radiusPx, blurPx), x - r, y - r);
       }
       this.ctx.globalAlpha = 1;
@@ -194,7 +222,10 @@ function pinIconUrl(color: string): string {
 // `encuadre`: si se da, el mapa solo se reencuadra cuando cambia ese valor
 // (para pantallas que refrescan datos solos y no deben mover el mapa que el
 // usuario ya acomodó); sin él, se reencuadra cada vez que cambian los datos.
-export function GeoMap({ heatPoints, pins, recorridos, height, encuadre }: { heatPoints?: HeatPoint[]; pins?: MapPin[]; recorridos?: Recorrido[]; height: number | string; encuadre?: string }) {
+//
+// `atenuado`: mapa base en gris (ver ESTILO_ATENUADO), para que el heatmap
+// resalte.
+export function GeoMap({ heatPoints, pins, recorridos, height, encuadre, atenuado = false }: { heatPoints?: HeatPoint[]; pins?: MapPin[]; recorridos?: Recorrido[]; height: number | string; encuadre?: string; atenuado?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const heatRef = useRef<HeatmapOverlay | null>(null);
@@ -230,6 +261,11 @@ export function GeoMap({ heatPoints, pins, recorridos, height, encuadre }: { hea
       .catch((err) => !cancelled && setError(err.message));
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    mapRef.current?.setOptions({ styles: atenuado ? ESTILO_ATENUADO : null });
+  }, [atenuado, ready]);
 
   useEffect(() => {
     const map = mapRef.current;

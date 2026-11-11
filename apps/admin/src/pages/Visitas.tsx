@@ -3,7 +3,7 @@ import { api, type VisitaListItem, type MapaCalorResponse, type RecorridoVendedo
 import { useFilters } from '../filters';
 import { FilterBar, PageHeader } from '../components/FilterBar';
 import { MultiSelectDropdown } from '../components/MultiSelectDropdown';
-import { GeoMap } from '../components/GeoMap';
+import { GeoMap, HEAT_GRADIENT } from '../components/GeoMap';
 import { HistorialNegocio } from '../components/HistorialNegocio';
 import { prodBadgeStyle, resultadoBadgeStyle } from '../badges';
 
@@ -169,7 +169,7 @@ export function Visitas() {
             compite en el nivel raíz de la página y puede quedar encima de
             dropdowns/menús que se abren más arriba, bloqueando sus clics. */}
         <div style={{ position: 'relative', zIndex: 0, height: 440, borderRadius: 10, overflow: 'hidden', background: '#e7ece4' }}>
-          <GeoMap heatPoints={showCalor ? (calor?.puntos ?? []) : []} recorridos={showRutas ? rutas : []} height={440} />
+          <GeoMap heatPoints={showCalor ? (calor?.puntos ?? []) : []} recorridos={showRutas ? rutas : []} height={440} atenuado={showCalor} />
           {showRutas && rutasError && (
             <div style={{ position: 'absolute', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.85)', color: '#5a665f', fontSize: 12.5, fontWeight: 600, textAlign: 'center', padding: '0 40px' }}>
               {rutasError}
@@ -183,10 +183,20 @@ export function Visitas() {
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, marginTop: 12 }}>
           {showCalor && (
-            <div style={{ display: 'flex', gap: 16, fontSize: 11.5, color: '#8a978f' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#f03b20' }} />Alta densidad</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fd8d3c' }} />Media</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fecc5c' }} />Baja</span>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px 18px', fontSize: 11.5, color: '#6f7d75' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                Pocas visitas
+                <span style={{ width: 140, height: 9, borderRadius: 5, background: `linear-gradient(to right, ${HEAT_GRADIENT.slice(1).join(', ')})` }} />
+                Muchas visitas
+              </span>
+              {calor && calor.visitasTotales > 0 && (
+                <span title="Las visitas sin GPS (y sin un negocio de la ruta con ubicación) no se pueden pintar en el mapa.">
+                  {calor.visitasConUbicacion === calor.visitasTotales
+                    ? `${calor.visitasTotales.toLocaleString('es-MX')} visitas en el mapa`
+                    : `${calor.visitasConUbicacion.toLocaleString('es-MX')} de ${calor.visitasTotales.toLocaleString('es-MX')} visitas tienen ubicación y están en el mapa`}
+                </span>
+              )}
+              <span style={{ color: '#9aa39c' }}>Acerca el mapa para ver calle por calle</span>
             </div>
           )}
           {showRutas && rutas.length > 0 && (
