@@ -2,13 +2,16 @@ import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
 import { resolveVendedorIds, getVendedoresDocs } from './_filters.js';
 import { isEmptyRestriction, parseCsvParam, toIso } from '../firestore-helpers.js';
-import { hoyMx, inicioDiaMx } from '../fechas.js';
+import { diaSemana, hoyMx, inicioDiaMx } from '../fechas.js';
+import { configGuardada, etiquetaZonas } from '../rutas/planificador.js';
 import { productosPorId, type VendedorDoc } from './vendedores.js';
 
 // "En vivo": cómo va hoy cada vendedor activo — dónde está, cuántas visitas
 // lleva contra las que le tocan hoy y cuál fue la última. Incluye a quienes
 // no han empezado, para que el admin vea de un vistazo quién falta.
 export const seguimientoRouter = Router();
+
+const esPropio = (v: { esNegocioNuevo?: boolean; propio?: boolean }) => !!v.esNegocioNuevo && v.propio !== false;
 
 interface UbicacionDoc {
   lat: number;
@@ -18,6 +21,9 @@ interface UbicacionDoc {
 
 interface VisitaDoc {
   nombreNegocio: string;
+  esNegocioNuevo?: boolean;
+  // false = negocio "nuevo" que ya era de alguien (no cuenta para la meta).
+  propio?: boolean;
   resultado: string;
   createdAt: Timestamp;
 }
@@ -48,7 +54,7 @@ seguimientoRouter.get('/', async (req, res) => {
     const [ubicacionSnap, visitasSnap, planHoy, planHoyVisitados] = await Promise.all([
       db.collection('ubicaciones').where('vendedorId', '==', v.id).orderBy('createdAt', 'desc').limit(1).get(),
       db.collection('visitas').where('vendedorId', '==', v.id).where('createdAt', '>=', inicioHoy)
-        .select('nombreNegocio', 'resultado', 'createdAt').get(),
+        .select('nombreNegocio', 'resultado', 'createdAt', 'esNegocioNuevo', 'propio').get(),
       plan.count().get(),
       plan.where('estado', '==', 'visitado').count().get(),
     ]);
@@ -57,9 +63,11 @@ seguimientoRouter.get('/', async (req, res) => {
     const ultimaVisita = visitas[visitas.length - 1];
     const senal = ubicacion?.createdAt.toMillis() ?? 0;
     const actividadHoy = visitas.length > 0 || senal >= inicioHoy.toMillis();
+    const config = configGuardada(v.rutaConfig);
+    const trabajaHoy = planHoy.data().count > 0 || !!config?.dias.includes(diaSemana(hoy));
     return {
       id: v.id, nombre: v.nombre, iniciales: v.iniciales, color: v.color,
-      producto: productos.get(v.productoId) ?? '—', zona: v.rutaConfig?.zona.etiqueta || v.zona || v.ciudad || null,
+      producto: productos.get(v.productoId) ?? '—', zona: etiquetaZonas(configGuardada(v.rutaConfig)) || v.zona || v.ciudad || null,
       estado: senal >= umbralActivo ? 'en_ruta' : actividadHoy ? 'inactivo' : 'sin_actividad',
       ultimaSenal: ubicacion ? toIso(ubicacion.createdAt) : null,
       // La posición solo si es de hoy: la de ayer confunde en el mapa en vivo.
@@ -67,6 +75,10 @@ seguimientoRouter.get('/', async (req, res) => {
       visitasHoy: visitas.length,
       planHoy: planHoy.data().count,
       planHoyVisitados: planHoyVisitados.data().count,
+      // Meta de negocios nuevos que encuentra él (ver RutaConfig.propiosPorDia).
+      nuevosHoy: visitas.filter((x) => x.esNegocioNuevo).length,
+      propiosHoy: visitas.filter(esPropio).length,
+      metaPropios: trabajaHoy ? config?.propiosPorDia ?? 0 : 0,
       primeraVisita: visitas[0] ? toIso(visitas[0].createdAt) : null,
       ultimaVisita: ultimaVisita ? { nombre: ultimaVisita.nombreNegocio, resultado: ultimaVisita.resultado, hora: toIso(ultimaVisita.createdAt) } : null,
     };

@@ -4,6 +4,7 @@ import { chunkArray, parseCsvParam } from '../firestore-helpers.js';
 import { diasEntre, esFechaIso, fechaMx, hoyMx, inicioDiaMx, sumarDias, diaSemana } from '../fechas.js';
 import { getVendedoresDocs, resolveVendedorIds } from './_filters.js';
 import { productosPorId, type VendedorDoc } from './vendedores.js';
+import { configGuardada } from '../rutas/planificador.js';
 import { dealsDeCampo, hubspotConfigurado, ownersPorEmail, type DealCampo } from '../integrations/hubspot.js';
 
 // Tablero: el embudo de campo (meta de la ruta → visitados → reales → con
@@ -37,6 +38,10 @@ interface VisitaTablero {
   ubicacionValida: boolean | null;
   // Si no se pudo comprobar que estuvo en el negocio, por qué (ver motivoSinComprobar()).
   sinComprobar: MotivoSinComprobar | null;
+  // Negocio que el vendedor encontró en la calle, y si cuenta para su meta
+  // de propios (no cuenta si ya era de alguien).
+  nuevo: boolean;
+  propio: boolean;
 }
 
 // Una visita solo se puede comprobar si la tablet mandó GPS y el negocio
@@ -156,7 +161,7 @@ const ultimoDia = (r: Rango) => fechaMx(new Date(r.end - 1));
 // ---------- Lecturas ----------
 
 async function visitasEnRango(ids: string[] | null, r: { start: number; end: number }, soloSolicitudes = false): Promise<VisitaTablero[]> {
-  const campos = ['vendedorId', 'resultado', 'createdAt', 'negocioId', 'prospectoId', 'ubicacionValida', 'esNegocioNuevo', 'gpsAccuracy'];
+  const campos = ['vendedorId', 'resultado', 'createdAt', 'negocioId', 'prospectoId', 'ubicacionValida', 'esNegocioNuevo', 'propio', 'gpsAccuracy'];
   const base = (q: FirebaseFirestore.Query) => {
     const x = soloSolicitudes ? q.where('resultado', '==', SOLICITUD) : q;
     return x.where('createdAt', '>=', Timestamp.fromMillis(r.start)).where('createdAt', '<', Timestamp.fromMillis(r.end)).select(...campos);
@@ -166,12 +171,13 @@ async function visitasEnRango(ids: string[] | null, r: { start: number; end: num
   return snaps.flatMap((s) => s.docs.map((d) => {
     const v = d.data() as {
       vendedorId: string; resultado: string; createdAt: Timestamp; negocioId?: string | null; prospectoId?: string | null;
-      ubicacionValida?: boolean | null; esNegocioNuevo?: boolean; gpsAccuracy?: number | null;
+      ubicacionValida?: boolean | null; esNegocioNuevo?: boolean; propio?: boolean; gpsAccuracy?: number | null;
     };
     return {
       id: d.id, vendedorId: v.vendedorId, resultado: v.resultado, createdAt: v.createdAt.toMillis(),
       negocio: v.negocioId || v.prospectoId || `visita:${d.id}`, ubicacionValida: v.ubicacionValida ?? null,
       sinComprobar: motivoSinComprobar(v),
+      nuevo: !!v.esNegocioNuevo, propio: !!v.esNegocioNuevo && v.propio !== false,
     };
   }));
 }
@@ -274,7 +280,22 @@ function solicitudesDe(solicitudes: VisitaTablero[], ctx: Contexto) {
   };
 }
 
-function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeados: PlaneadoMetrica[], ctx: Contexto) {
+// Meta de negocios nuevos del periodo: los que cada vendedor debe encontrar
+// por día (su config actual) por cada día que tuvo ruta planeada.
+function metaPropiosDe(planeados: PlaneadoMetrica[], propiosPorDia: Map<string, number>): number {
+  const dias = new Map<string, Set<string>>();
+  for (const p of planeados) {
+    if (!propiosPorDia.get(p.vendedorId)) continue;
+    const s = dias.get(p.vendedorId) ?? new Set<string>();
+    s.add(p.fechaPlan);
+    dias.set(p.vendedorId, s);
+  }
+  let total = 0;
+  for (const [id, s] of dias) total += s.size * (propiosPorDia.get(id) ?? 0);
+  return total;
+}
+
+function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeados: PlaneadoMetrica[], ctx: Contexto, metaPropios = 0) {
   // Por negocio, el resultado de su última visita del periodo dice si era
   // un negocio real; con que alguna visita haya mostrado interés, cuenta
   // como interesado.
@@ -293,6 +314,10 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
     else if (v.sinComprobar === 'sin_ubicacion') sinComprobar.sinUbicacion++;
   }
   const negociosVisitados = ultima.size;
+  const rutaVisitados = new Set(visitas.filter((v) => !v.nuevo).map((v) => v.negocio)).size;
+  const propios = new Set(visitas.filter((v) => v.propio).map((v) => v.negocio)).size;
+  const metaRuta = planeados.length;
+  const meta = metaRuta + metaPropios;
   const noValidos = [...ultima.values()].filter((v) => v.resultado === NO_VALIDO).length;
   const negociosReales = negociosVisitados - noValidos;
   const s = solicitudesDe(solicitudes, ctx);
@@ -302,9 +327,15 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
     negociosReales,
     noValidos,
     interesados: interesados.size,
-    meta: planeados.length,
+    // Meta = lo planeado en la ruta + los negocios nuevos que debían encontrar.
+    // Visitas de ruta de más no compensan los nuevos que falten (ni al revés).
+    meta,
+    metaRuta,
+    metaPropios,
+    rutaVisitados,
+    propios,
     metaVisitados: planeados.filter((p) => p.estado === 'visitado').length,
-    avanceMeta: pct1(negociosVisitados, planeados.length),
+    avanceMeta: pct1(Math.min(rutaVisitados, metaRuta) + Math.min(propios, metaPropios), meta),
     ...s,
     conversion: s.solicitudes != null ? pct1(s.solicitudes, negociosReales) : null,
     aprobacion: s.aprobadas != null ? pct1(s.aprobadas, s.aprobadas + (s.rechazadas ?? 0)) : null,
@@ -360,6 +391,8 @@ tableroRouter.get('/', async (req, res) => {
     Promise.all(tramosACont.map((t) => (vacio ? 0 : contarVisitas(idsConsulta, t)))),
   ]);
   const solo = <T extends { vendedorId: string }>(l: T[]) => l.filter((v) => idsSet.has(v.vendedorId));
+  const propiosPorDia = new Map(vendedores.map((v) => [v.id, configGuardada(v.rutaConfig)?.propiosPorDia ?? 0]));
+  const metaP = (plan: PlaneadoMetrica[]) => metaPropiosDe(plan, propiosPorDia);
   const act = solo(visitasAct);
   const solicitudes = solo(solicitudesTodas);
 
@@ -399,7 +432,7 @@ tableroRouter.get('/', async (req, res) => {
   const productosConDatos = [...new Set([...act, ...planAct].map((x) => productoDe.get(x.vendedorId) ?? ''))].filter(Boolean);
   const porProducto = productosConDatos.map((pid) => {
     const de = <T extends { vendedorId: string }>(l: T[]) => l.filter((x) => productoDe.get(x.vendedorId) === pid);
-    return { productoId: pid, producto: nombresProducto.get(pid) ?? '—', ...bloque(de(act), de(solAct), de(planAct), ctx) };
+    return { productoId: pid, producto: nombresProducto.get(pid) ?? '—', ...bloque(de(act), de(solAct), de(planAct), ctx, metaP(de(planAct))) };
   }).sort((a, b) => (b.solicitudes ?? 0) - (a.solicitudes ?? 0) || b.negociosVisitados - a.negociosVisitados);
 
   // Por vendedor: el equipo activo, más quien ya no está activo pero
@@ -416,7 +449,7 @@ tableroRouter.get('/', async (req, res) => {
         producto: nombresProducto.get(v.productoId) ?? '—', activo: v.estado !== 'Baja',
         sinUsuarioHubspot: ctx.hubspotOk && !ownerDe.has(v.id),
         ultimaVisita: propias.length ? new Date(Math.max(...propias.map((x) => x.createdAt))).toISOString() : null,
-        ...bloque(propias, solPorVendedor.get(v.id) ?? [], planPorVendedor.get(v.id) ?? [], ctx),
+        ...bloque(propias, solPorVendedor.get(v.id) ?? [], planPorVendedor.get(v.id) ?? [], ctx, metaP(planPorVendedor.get(v.id) ?? [])),
       };
     })
     .sort((a, b) => (b.solicitudes ?? b.marcadas) - (a.solicitudes ?? a.marcadas) || b.negociosVisitados - a.negociosVisitados || a.nombre.localeCompare(b.nombre));
@@ -427,8 +460,8 @@ tableroRouter.get('/', async (req, res) => {
     vista, hoy, enCurso, tendenciaPor,
     periodo: describir(actual),
     anterior: describir(previo),
-    actual: bloque(act, solAct, planAct, ctx),
-    previo: bloque(solo(visitasPrev), enRango(solicitudes, previo), planPrev, ctx),
+    actual: bloque(act, solAct, planAct, ctx, metaP(planAct)),
+    previo: bloque(solo(visitasPrev), enRango(solicitudes, previo), planPrev, ctx, metaP(planPrev)),
     hubspot,
     porProducto,
     porVendedor,

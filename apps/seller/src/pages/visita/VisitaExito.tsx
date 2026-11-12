@@ -6,13 +6,15 @@ import { rutaEnCache, useCambiosDeRuta } from '../../offline';
 import { agruparRuta, siguienteParada, textoDistancia } from '../../ruta';
 import { etiquetaDia } from '../../fechas';
 import { resultadoUI } from '../../resultados';
-import { IconCheck, IconReloj, IconSiguiente } from '../../icons';
+import { IconCheck, IconInfo, IconReloj, IconSiguiente } from '../../icons';
 
 interface Estado {
   nombre: string;
   resultado: string;
   fotos?: number;
   pendiente?: boolean;
+  // El "negocio nuevo" ya era de alguien: no cuenta para su meta de nuevos.
+  duplicado?: 'en_tu_ruta' | 'ruta_de_otro' | 'visitado_reciente' | null;
   reagendarPara?: string | null;
   // Visita de práctica del onboarding: no se guardó nada.
   practica?: boolean;
@@ -54,6 +56,20 @@ export function VisitaExito() {
           <span style={{ color: '#e07a26', flex: 'none', display: 'flex' }}><IconReloj size={24} /></span>
           <span style={{ fontSize: 15, fontWeight: 600, color: '#8a5a1e', lineHeight: 1.45 }}>
             Sin señal ahora mismo: la visita quedó guardada en la tablet y se enviará sola en cuanto haya conexión. No necesitas hacer nada.
+          </span>
+        </div>
+      )}
+
+      {s.duplicado && (
+        <div style={{ marginTop: 20, width: '100%', display: 'flex', alignItems: 'center', gap: 12, background: '#fff5ea', border: '2px solid #f3c99a', borderRadius: 16, padding: '14px 16px', textAlign: 'left' }}>
+          <span style={{ color: '#c96a1e', flex: 'none', display: 'flex' }}><IconInfo size={24} /></span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: '#8a5a1e', lineHeight: 1.45 }}>
+            <b style={{ display: 'block', fontWeight: 800 }}>
+              {s.duplicado === 'en_tu_ruta' ? 'Este negocio ya estaba en tu ruta.'
+                : s.duplicado === 'ruta_de_otro' ? 'Este negocio ya está asignado a otro compañero.'
+                  : 'Este negocio ya se visitó hace poco.'}
+            </b>
+            La visita se guardó, pero no cuenta como negocio nuevo para tu meta. Busca negocios que todavía nadie haya visitado.
           </span>
         </div>
       )}

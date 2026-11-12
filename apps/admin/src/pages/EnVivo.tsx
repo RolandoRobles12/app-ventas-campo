@@ -124,8 +124,11 @@ export function EnVivo() {
           {items.map((i) => {
             const e = ESTADOS[i.estado];
             const sel = seleccion === i.id;
-            const meta = i.planHoy;
-            const pct = meta ? Math.min(100, Math.round((i.visitasHoy / meta) * 100)) : 0;
+            // La meta junta lo planeado en la ruta y los negocios nuevos que
+            // debe encontrar; visitas de ruta de más no cubren los nuevos.
+            const meta = i.planHoy + (i.metaPropios ?? 0);
+            const hechas = Math.min(i.visitasHoy - (i.nuevosHoy ?? 0), i.planHoy) + Math.min(i.propiosHoy ?? 0, i.metaPropios ?? 0);
+            const pct = meta ? Math.min(100, Math.round((hechas / meta) * 100)) : 0;
             return (
               <button
                 key={i.id}
@@ -145,7 +148,11 @@ export function EnVivo() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
                   <span style={{ fontSize: 20, fontWeight: 600, color: '#263238', fontVariantNumeric: 'tabular-nums' }}>{i.visitasHoy}</span>
-                  <span style={{ fontSize: 12.5, color: '#6f7d75', flex: 1 }}>{meta ? `de ${meta} visitas planeadas` : 'visitas hoy · sin ruta para hoy'}</span>
+                  <span style={{ fontSize: 12.5, color: '#6f7d75', flex: 1 }}>
+                    {!meta ? 'visitas hoy · sin ruta para hoy'
+                      : i.metaPropios ? `visitas · ruta ${Math.min(Math.max(0, i.visitasHoy - i.nuevosHoy), i.planHoy)} de ${i.planHoy} · nuevos ${Math.min(i.propiosHoy, i.metaPropios)} de ${i.metaPropios}`
+                        : `de ${meta} visitas planeadas`}
+                  </span>
                   {i.visitasHoy > 0 && (
                     // Un <span> y no un <a>/<button>: la tarjeta entera ya es
                     // un botón (selecciona al vendedor en el mapa) y no se

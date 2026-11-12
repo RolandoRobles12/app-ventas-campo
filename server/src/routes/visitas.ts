@@ -7,6 +7,8 @@ import { esFechaIso, fechaMx, sumarDias } from '../fechas.js';
 import { resolveVendedorIds } from './_filters.js';
 import { esNegocioIdValido, negocioIdDe } from '../negocios.js';
 import { llamadasDeNegocio, normalizarTelefono } from './llamadas.js';
+import { evaluarPunto, zonasDeVendedor } from '../zonasRestringidas.js';
+import { buscarDuplicado, type MotivoDuplicado } from '../duplicados.js';
 
 export const visitasRouter = Router();
 
@@ -35,6 +37,9 @@ export interface VisitaDoc {
   negocioId?: string | null;
   prospectoId: string | null;
   esNegocioNuevo: boolean;
+  // Solo en negocios nuevos: false si en realidad ya era de alguien (estaba
+  // en una ruta o se visitó hace poco). No cuenta para la meta de propios.
+  propio?: boolean;
   nombreNegocio: string;
   direccion: string;
   resultado: string;
@@ -78,6 +83,8 @@ function shape(id: string, v: VisitaDoc) {
     negocioId: v.negocioId ?? null,
     prospectoId: v.prospectoId,
     esNegocioNuevo: v.esNegocioNuevo,
+    // Negocio nuevo que cuenta para la meta (null si venía en la ruta).
+    propio: v.esNegocioNuevo ? v.propio !== false : null,
     nombreNegocio: v.nombreNegocio,
     direccion: v.direccion,
     resultado: v.resultado,
@@ -165,15 +172,23 @@ export async function visitasDeNegocio(negocioId: string, limite: number): Promi
 // se resuelve a los vendedores de esos productos), uno o varios resultados,
 // y rango de fechas. Paginado con cursor (no offset), porque la colección
 // crece sin límite.
+// Origen del negocio visitado: 'nuevo' (lo encontró el vendedor en la calle)
+// o 'ruta' (venía en su ruta: del DENUE o agregado por el admin).
+export const ORIGENES_VISITA = ['nuevo', 'ruta'] as const;
+const origenDe = (v: { esNegocioNuevo?: boolean }) => (v.esNegocioNuevo ? 'nuevo' : 'ruta');
+
 visitasRouter.get('/', requireAdmin, async (req, res) => {
-  const { vendedorIds, productoIds, resultados, desde, hasta, cursor, limit } = req.query as {
-    vendedorIds?: string; productoIds?: string; resultados?: string;
+  const { vendedorIds, productoIds, resultados, origenes, desde, hasta, cursor, limit } = req.query as {
+    vendedorIds?: string; productoIds?: string; resultados?: string; origenes?: string;
     desde?: string; hasta?: string; cursor?: string; limit?: string;
   };
 
   const vendedorIdList = parseCsvParam(vendedorIds);
   const productoIdList = parseCsvParam(productoIds);
   const resultadoList = parseCsvParam(resultados);
+  const origenList = parseCsvParam(origenes).filter((o) => (ORIGENES_VISITA as readonly string[]).includes(o));
+  // Los dos orígenes juntos = sin filtro.
+  const filtraOrigen = origenList.length === 1;
   const pageSize = Math.max(1, Math.min(100, parseInt(limit || '', 10) || 20));
   const rango = parseDateRangeQuery(desde, hasta);
   const cur = cursor ? decodeCursor(cursor) : null;
@@ -182,11 +197,11 @@ visitasRouter.get('/', requireAdmin, async (req, res) => {
   if (isEmptyRestriction(ids)) return res.json({ items: [], nextCursor: null });
 
   const idChunks = ids ? chunkArray(ids) : [null];
-  // Se pide de más cuando hay filtro de resultado porque Firestore no permite
-  // combinar el 'in' de vendedorId con otro filtro de igualdad en la misma
-  // consulta sin un índice dedicado; en vez de eso, resultado se filtra en
+  // Se pide de más cuando hay filtro de resultado u origen porque Firestore no
+  // permite combinar el 'in' de vendedorId con otro filtro de igualdad en la
+  // misma consulta sin un índice dedicado; en vez de eso, se filtra en
   // memoria después de traer los datos (mismo patrón que ya usa /evidencias).
-  const overfetch = resultadoList.length ? pageSize * 3 : pageSize;
+  const overfetch = resultadoList.length || filtraOrigen ? pageSize * 3 : pageSize;
 
   const chunkResults = await Promise.all(idChunks.map(async (chunkIds) => {
     let query: FirebaseFirestore.Query = db.collection('visitas');
@@ -198,23 +213,36 @@ visitasRouter.get('/', requireAdmin, async (req, res) => {
     return snap.docs;
   }));
 
-  // Top-K merge: cada bloque ya viene ordenado desc por (createdAt, id), así
-  // que cualquier fila que pertenezca al top global también está entre las
-  // primeras de su propio bloque — basta con juntarlos todos y reordenar.
-  const merged = chunkResults.flat().sort((a, b) => {
+  // Top-K merge: cada bloque ya viene ordenado desc por (createdAt, id).
+  const desc = (a: FirebaseFirestore.QueryDocumentSnapshot, b: FirebaseFirestore.QueryDocumentSnapshot) => {
     const ta = (a.data().createdAt as Timestamp).toMillis();
     const tb = (b.data().createdAt as Timestamp).toMillis();
     if (tb !== ta) return tb - ta;
     return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
-  });
+  };
+  const merged = chunkResults.flat().sort(desc);
 
-  let visitas = merged.map((d) => ({ id: d.id, ...(d.data() as VisitaDoc) }));
+  // Un bloque que llegó al límite puede tener más visitas después de su
+  // última: lo leído solo está completo hasta la más reciente de esas
+  // "fronteras". Lo de después se lee en la siguiente página.
+  const fronteras = chunkResults.filter((c) => c.length >= overfetch).map((c) => c[c.length - 1]).sort(desc);
+  const frontera = fronteras[0] ?? null;
+  const completos = frontera ? merged.slice(0, merged.indexOf(frontera) + 1) : merged;
+
+  let visitas = completos.map((d) => ({ id: d.id, ...(d.data() as VisitaDoc) }));
   if (resultadoList.length) visitas = visitas.filter((v) => resultadoList.includes(v.resultado));
+  if (filtraOrigen) visitas = visitas.filter((v) => origenDe(v) === origenList[0]);
 
-  const hasMore = visitas.length > pageSize;
-  const pagina = visitas.slice(0, pageSize);
-  const ultimo = pagina[pagina.length - 1];
-  const nextCursor = hasMore && ultimo ? encodeCursor(ultimo.createdAt, ultimo.id) : null;
+  let pagina = visitas;
+  let nextCursor: string | null = null;
+  if (visitas.length > pageSize) {
+    pagina = visitas.slice(0, pageSize);
+    const ultimo = pagina[pagina.length - 1];
+    nextCursor = encodeCursor(ultimo.createdAt, ultimo.id);
+  } else if (frontera) {
+    // Con filtro, una página puede quedar corta: se sigue desde la frontera.
+    nextCursor = encodeCursor(frontera.data().createdAt as Timestamp, frontera.id);
+  }
 
   res.json({ items: await conVendedor(pagina), nextCursor });
 });
@@ -303,7 +331,19 @@ visitasRouter.post('/', async (req, res) => {
   const gpsLng = parseCoord(lng, -180, 180);
   const hasGps = gpsLat != null && gpsLng != null;
 
+  // Donde el vendedor no puede ir no se registra nada. Si el GPS cae cerca
+  // del borde (dentro del margen de su precisión) se deja pasar: puede estar
+  // afuera. La app del vendedor aplica la misma regla antes de enviar.
+  if (hasGps) {
+    const enZona = evaluarPunto({ lat: gpsLat!, lng: gpsLng! }, parseCoord(gpsAccuracy, 0, 100000), await zonasDeVendedor(vendedorId));
+    if (enZona?.estado === 'dentro') {
+      const motivo = enZona.zona.mostrarMotivo && enZona.zona.motivo ? ` (${enZona.zona.motivo})` : '';
+      return res.status(403).json({ error: 'ZONA_RESTRINGIDA', message: `Estás en una zona donde no puedes visitar negocios${motivo}. Esta visita no se puede registrar.` });
+    }
+  }
+
   const esNuevo = esNegocioNuevo === 'true' || esNegocioNuevo === '1';
+  let duplicado: MotivoDuplicado | null = null;
   // El vendedor puede capturar o corregir el teléfono del negocio en la visita.
   const telefonoCapturado = normalizarTelefono(telefono);
   const createdAt = parseCapturadoEn(capturadoEn) ?? Timestamp.now();
@@ -318,6 +358,8 @@ visitasRouter.post('/', async (req, res) => {
   if (esNuevo && !prospecto) {
     const nombre = nombreNegocio || 'Nuevo negocio';
     const dir = direccion || 'Ubicación actual';
+    // Antes de crearlo, para no encontrarse a sí mismo.
+    duplicado = await buscarDuplicado(vendedorId, { nombre, direccion: dir, lat: gpsLat, lng: gpsLng });
     const data: ProspectoDoc & { vendedorId: string; negocioId: string; giro?: string; telefono: string | null; origen: string; estado: string; visitadoEn: Timestamp; createdAt: Timestamp } = {
       vendedorId, negocioId: negocioIdDe({ nombre, direccion: dir, lat: gpsLat, lng: gpsLng }),
       nombre, direccion: dir,
@@ -376,6 +418,7 @@ visitasRouter.post('/', async (req, res) => {
     negocioId: prospecto?.negocioId ?? negocioIdDe({ nombre: nombreFinal, direccion: direccionFinal, lat: gpsLat, lng: gpsLng }),
     prospectoId: prospecto?.id ?? null,
     esNegocioNuevo: esNuevo,
+    ...(esNuevo ? { propio: !duplicado } : {}),
     nombreNegocio: nombreFinal,
     direccion: direccionFinal,
     resultado,
@@ -393,5 +436,6 @@ visitasRouter.post('/', async (req, res) => {
   };
   const ref = await db.collection('visitas').add(visitaData);
 
-  res.status(201).json(shape(ref.id, visitaData));
+  // `duplicado`: la app le avisa que este negocio no cuenta como nuevo.
+  res.status(201).json({ ...shape(ref.id, visitaData), duplicado });
 });

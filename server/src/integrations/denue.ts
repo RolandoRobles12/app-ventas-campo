@@ -286,6 +286,9 @@ export async function consultarDenue(opts: {
   // semanas comparten zona/giros, la segunda consulta traiga negocios
   // distintos en vez de repetir (y de paso vaciar) el mismo top-N del DENUE.
   excluir?: string[];
+  // Zonas donde el vendedor no puede ir: lo que cae dentro se descarta antes
+  // del recorte, para que la ruta igual traiga la cantidad pedida.
+  fuera?: PuntoGeo[][];
 }): Promise<DenueProspecto[]> {
   const token = process.env.DENUE_TOKEN;
   if (!token) {
@@ -381,6 +384,11 @@ export async function consultarDenue(opts: {
     ? dentroDeZona.filter((p) => !excluidos.has(p.negocioId))
     : dentroDeZona;
 
-  sinRepetidos.sort((a, b) => (a.distanciaKm ?? Infinity) - (b.distanciaKm ?? Infinity));
-  return sinRepetidos.slice(0, cantidad);
+  const prohibidas = (opts.fuera || []).filter((p) => p.length >= 3);
+  const permitidos = prohibidas.length
+    ? sinRepetidos.filter((p) => p.lat == null || p.lng == null || !puntoEnAlgunPoligono({ lat: p.lat, lng: p.lng }, prohibidas))
+    : sinRepetidos;
+
+  permitidos.sort((a, b) => (a.distanciaKm ?? Infinity) - (b.distanciaKm ?? Infinity));
+  return permitidos.slice(0, cantidad);
 }

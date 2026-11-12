@@ -7,7 +7,7 @@ export interface Vendedor {
   color: string;
   producto: string;
   zona: string | null;
-  rutaConfig: { visitasPorDia: number; dias: number[]; zona: { etiqueta: string } } | null;
+  rutaConfig: { visitasPorDia: number; propiosPorDia?: number; dias: number[]; zonas: { etiqueta: string }[] } | null;
   // Cuándo vio el recorrido de bienvenida (null: todavía no).
   onboardingVisto?: string | null;
 }
@@ -65,9 +65,14 @@ export interface VisitaReciente {
   notas: string | null;
   fotos: number;
   esNegocioNuevo: boolean;
+  // Negocio nuevo que cuenta para su meta (false: ya era de alguien).
+  propio?: boolean | null;
   ubicacionValida: boolean | null;
   createdAt: string;
 }
+
+// Por qué un "negocio nuevo" no cuenta para la meta: ya era de alguien.
+export type MotivoDuplicado = 'en_tu_ruta' | 'ruta_de_otro' | 'visitado_reciente';
 
 // Una visita anterior al mismo negocio, de este vendedor o de otro.
 export interface Antecedente {
@@ -82,6 +87,11 @@ export interface Progreso {
   hoy: string;
   visitasHoy: number;
   visitasPorDia: number | null;
+  // Meta de negocios nuevos de hoy (0: no tiene) y cuántos lleva. Servidores
+  // anteriores no los mandan.
+  propiosPorDia?: number;
+  nuevosHoy?: number;
+  propiosHoy?: number;
   racha: number;
   semana: { fecha: string; visitas: number }[];
   recientes: VisitaReciente[];
@@ -120,7 +130,9 @@ export const api = {
   antecedentes: (vendedorId: string, prospectoIds: string[]) =>
     req<Record<string, Antecedente[]>>(`/prospectos/vendedor/${vendedorId}/antecedentes?ids=${prospectoIds.map(encodeURIComponent).join(',')}`),
   registrarVisita: (data: Record<string, unknown>) =>
-    req<{ id: string }>('/visitas', { method: 'POST', body: JSON.stringify(data) }),
+    req<{ id: string; duplicado?: MotivoDuplicado | null }>('/visitas', { method: 'POST', body: JSON.stringify(data) }),
+  zonasRestringidas: (vendedorId: string) =>
+    req<{ id: string; puntos: { lat: number; lng: number }[]; mensaje: string | null }[]>(`/zonas-restringidas/vendedor/${vendedorId}`),
   registrarLlamada: (data: NuevaLlamada) =>
     req<{ id: string }>('/llamadas', { method: 'POST', body: JSON.stringify(data) }),
   marcarOnboarding: () => req<void>('/auth/onboarding', { method: 'POST' }),

@@ -16,7 +16,7 @@ const PRODUCTOS = [
 ] as const;
 
 const ruta = (etiqueta: string, lat: number, lng: number, giros: string[]) => ({
-  zona: { etiqueta, lat, lng, radioMetros: 2000, poligonos: null }, giros, visitasPorDia: 8, dias: [1, 2, 3, 4, 5, 6], semanas: 1,
+  zonas: [{ etiqueta, lat, lng, radioMetros: 2000, poligono: null }], giros, visitasPorDia: 8, propiosPorDia: 0, dias: [1, 2, 3, 4, 5, 6], semanas: 1,
 });
 
 const VENDEDORES = [

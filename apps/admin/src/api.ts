@@ -3,20 +3,32 @@ import { getIdToken } from '@aviva/ui';
 export interface Producto { id: string; nombre: string; esDeCampo: boolean; giros: string[]; }
 export interface ZonaPunto { lat: number; lng: number }
 
-export interface ZonaRuta {
+// Una zona de búsqueda de la ruta: círculo (centro + radio) o contorno
+// dibujado. Una ruta puede juntar varias zonas vecinas.
+export interface AreaRuta {
   etiqueta: string;
   lat: number | null;
   lng: number | null;
   radioMetros: number;
-  poligonos: ZonaPunto[][] | null;
+  poligono: ZonaPunto[] | null;
 }
 export interface RutaConfig {
-  zona: ZonaRuta;
+  zonas: AreaRuta[];
   giros: string[];
+  // Meta total del día; de ella, `propiosPorDia` son negocios nuevos que
+  // encuentra el vendedor (la ruta trae la diferencia).
   visitasPorDia: number;
+  propiosPorDia: number;
   dias: number[];
   semanas: number;
 }
+
+// Zona donde uno o varios vendedores no pueden visitar ni prospectar.
+export interface ZonaRestringida {
+  id: string; nombre: string; motivo: string | null; mostrarMotivo: boolean;
+  puntos: ZonaPunto[]; vendedorIds: string[]; actualizadoEn: string | null;
+}
+export type ZonaRestringidaNueva = Omit<ZonaRestringida, 'id' | 'actualizadoEn'>;
 
 export interface Vendedor {
   id: string; nombre: string; iniciales: string; color: string; email: string | null;
@@ -50,7 +62,7 @@ export interface ItemRuta {
 }
 export interface RutaGenerada {
   items: ItemRuta[]; fechas: string[]; necesarios: number; encontrados: number;
-  centro: ZonaPunto; radioMetros: number;
+  centro: ZonaPunto; centros: ZonaPunto[];
 }
 
 export interface ReporteSync {
@@ -71,7 +83,9 @@ export interface EstadoEquipo {
 export type VistaTablero = 'dia' | 'semana' | 'mes' | 'rango';
 export interface BloqueTablero {
   visitas: number; negociosVisitados: number; negociosReales: number; noValidos: number; interesados: number;
-  meta: number; metaVisitados: number; avanceMeta: number | null;
+  // meta = metaRuta (planeados) + metaPropios (negocios nuevos a encontrar).
+  meta: number; metaRuta: number; metaPropios: number; rutaVisitados: number; propios: number;
+  metaVisitados: number; avanceMeta: number | null;
   // null mientras HubSpot no está conectado o falló.
   marcadas: number; confirmadasVisitas: number | null; solicitudes: number | null;
   aprobadas: number | null; rechazadas: number | null; enProceso: number | null;
@@ -101,6 +115,8 @@ export interface EnVivoItem {
   estado: 'en_ruta' | 'inactivo' | 'sin_actividad';
   ultimaSenal: string | null; posicion: ZonaPunto | null;
   visitasHoy: number; planHoy: number; planHoyVisitados: number;
+  // Negocios nuevos de hoy (todos, y los que cuentan para su meta de nuevos).
+  nuevosHoy: number; propiosHoy: number; metaPropios: number;
   primeraVisita: string | null;
   ultimaVisita: { nombre: string; resultado: string; hora: string } | null;
 }
@@ -117,7 +133,10 @@ export interface RecorridoVendedor {
 export interface VisitaListItem {
   id: string; vendedorId: string; vendedorNombre: string; vendedorActivo: boolean; producto: string;
   negocioId: string | null; prospectoId: string | null;
-  esNegocioNuevo: boolean; nombreNegocio: string; direccion: string; resultado: string;
+  esNegocioNuevo: boolean;
+  // Negocio nuevo que cuenta para su meta (false: ya era de alguien); null si venía en la ruta.
+  propio?: boolean | null;
+  nombreNegocio: string; direccion: string; resultado: string;
   notas: string | null; fotos: string[]; lat: number | null; lng: number | null;
   ubicacionValida: boolean | null; distanciaValidacionMetros: number | null; createdAt: string;
 }
@@ -193,12 +212,19 @@ export const api = {
     req<{ hoy: string; items: EstadoRuta[] }>(`/rutas/estado${qs(f)}`),
   generarRuta: (vendedorId: string, data: { config: RutaConfig; inicio: string; reemplazarPendientes: boolean }) =>
     req<RutaGenerada>(`/rutas/${vendedorId}/generar`, post(data)),
-  publicarRuta: (vendedorId: string, data: { config: RutaConfig; inicio: string; items: ItemRuta[]; reemplazarPendientes: boolean; centro?: ZonaPunto }) =>
+  publicarRuta: (vendedorId: string, data: { config: RutaConfig; inicio: string; items: ItemRuta[]; reemplazarPendientes: boolean; centros?: ZonaPunto[] }) =>
     req<{ creados: number; eliminados: number; desde: string | null; hasta: string | null }>(`/rutas/${vendedorId}/publicar`, post(data)),
   renovarRuta: (vendedorId: string) =>
     req<{ creados: number; desde: string | null; hasta: string | null; necesarios: number; encontrados: number }>(`/rutas/${vendedorId}/renovar`, post()),
 
   prospectos: (vendedorId: string) => req<Prospecto[]>(`/prospectos/vendedor/${vendedorId}`),
+
+  zonasRestringidas: () => req<ZonaRestringida[]>('/zonas-restringidas'),
+  crearZonaRestringida: (data: ZonaRestringidaNueva) =>
+    req<{ zona: ZonaRestringida; quitados: number }>('/zonas-restringidas', post(data)),
+  // vendedorIds vacío = se borra la zona.
+  editarZonaRestringida: (id: string, data: Partial<ZonaRestringidaNueva>) =>
+    req<{ zona: ZonaRestringida | null; quitados: number }>(`/zonas-restringidas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   tablero: (f: { vista: VistaTablero; fecha?: string; desde?: string; hasta?: string; productoIds?: string[]; vendedorIds?: string[] }) =>
     req<Tablero>(`/tablero${qs(f)}`),
@@ -206,9 +232,9 @@ export const api = {
   mapaCalor: (f: Filtro) => req<MapaCalorResponse>(`/mapa/calor${qs({ ...f })}`),
   recorridos: (f: Filtro) => req<RecorridoVendedor[]>(`/ubicaciones/recorrido${qs({ ...f })}`),
 
-  visitas: (params: Filtro & { resultados?: string[]; cursor?: string; limit?: number }) =>
+  visitas: (params: Filtro & { resultados?: string[]; origenes?: string[]; cursor?: string; limit?: number }) =>
     req<VisitasResponse>(`/visitas${qs({
-      vendedorIds: params.vendedorIds, productoIds: params.productoIds, resultados: params.resultados,
+      vendedorIds: params.vendedorIds, productoIds: params.productoIds, resultados: params.resultados, origenes: params.origenes,
       desde: params.desde, hasta: params.hasta, cursor: params.cursor, limit: params.limit ? String(params.limit) : undefined,
     })}`),
   llamadas: (params: Filtro & { resultados?: string[] }) =>

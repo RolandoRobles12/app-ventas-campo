@@ -7,23 +7,39 @@ import { diaSemana, esFechaIso, sumarDias } from '../fechas.js';
 
 export interface PuntoGeo { lat: number; lng: number }
 
-export interface ZonaRuta {
+// Una zona de búsqueda: un círculo (centro + radio, o solo el texto que se
+// geocodifica) o un contorno dibujado a mano. Una ruta puede juntar varias
+// zonas vecinas; el recorrido de cada día pasa por todas.
+export interface AreaRuta {
   // Lo que el admin eligió en el buscador ("Col. Centro, Tlaquepaque, Jal.").
   etiqueta: string;
   lat: number | null;
   lng: number | null;
   radioMetros: number;
-  // Una o varias zonas dibujadas a mano; si hay, mandan sobre el círculo.
-  poligonos: PuntoGeo[][] | null;
+  // Si hay contorno, manda sobre el círculo.
+  poligono: PuntoGeo[] | null;
 }
 
 export interface RutaConfig {
-  zona: ZonaRuta;
+  zonas: AreaRuta[];
   giros: string[];
+  // Meta total del día. De ella, `propiosPorDia` son negocios nuevos que el
+  // vendedor encuentra en la calle: la ruta trae solo la diferencia.
   visitasPorDia: number;
+  propiosPorDia: number;
   // 0 = domingo … 6 = sábado.
   dias: number[];
   semanas: number;
+}
+
+// Forma vieja (una sola zona: círculo o varios contornos), guardada en
+// vendedores.rutaConfig antes de poder juntar zonas. Se sigue leyendo.
+interface ZonaVieja {
+  etiqueta?: string;
+  lat?: number | null;
+  lng?: number | null;
+  radioMetros?: number;
+  poligonos?: PuntoGeo[][] | null;
 }
 
 export const DIAS_POR_DEFECTO = [1, 2, 3, 4, 5, 6];
@@ -32,6 +48,7 @@ export const RADIO_MIN = 300;
 export const RADIO_MAX = 5000;
 export const VISITAS_DIA_MAX = 40;
 export const SEMANAS_VALIDAS = [1, 2, 3, 4];
+export const MAX_ZONAS = 4;
 
 const esNumero = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
@@ -40,23 +57,54 @@ function puntoValido(p: unknown): p is PuntoGeo {
   return !!q && esNumero(q.lat) && esNumero(q.lng) && Math.abs(q.lat) <= 90 && Math.abs(q.lng) <= 180;
 }
 
+const radio = (v: unknown) => Math.min(RADIO_MAX, Math.max(RADIO_MIN, Math.round(Number(v) || 1500)));
+
+function zonasDeConfigVieja(z: ZonaVieja): Partial<AreaRuta>[] {
+  const poligonos = Array.isArray(z.poligonos) ? z.poligonos : [];
+  if (poligonos.length) return poligonos.map((p, i) => ({ etiqueta: i === 0 ? z.etiqueta : '', lat: null, lng: null, radioMetros: z.radioMetros, poligono: p }));
+  return [{ etiqueta: z.etiqueta, lat: z.lat, lng: z.lng, radioMetros: z.radioMetros, poligono: null }];
+}
+
+// Devuelve la zona saneada, null si viene vacía (se ignora) o un mensaje.
+function normalizarArea(raw: Partial<AreaRuta> | null | undefined, n: number): AreaRuta | null | string {
+  const a = raw ?? {};
+  const poligono = Array.isArray(a.poligono) ? a.poligono.filter(puntoValido).map(({ lat, lng }) => ({ lat, lng })) : [];
+  const tieneCentro = esNumero(a.lat) && esNumero(a.lng);
+  const etiqueta = typeof a.etiqueta === 'string' ? a.etiqueta.trim().slice(0, 200) : '';
+  if (poligono.length > 0 && poligono.length < 3) return `La zona ${n} dibujada necesita al menos 3 esquinas.`;
+  if (!poligono.length && !tieneCentro && !etiqueta) return null;
+  return {
+    etiqueta,
+    lat: tieneCentro ? a.lat! : null,
+    lng: tieneCentro ? a.lng! : null,
+    radioMetros: radio(a.radioMetros),
+    poligono: poligono.length ? poligono : null,
+  };
+}
+
 // Devuelve la config ya saneada, o un mensaje de error para el admin.
 export function normalizarConfig(raw: unknown): RutaConfig | string {
-  const c = raw as Partial<RutaConfig> | null;
+  const c = raw as (Partial<RutaConfig> & { zona?: ZonaVieja }) | null;
   if (!c || typeof c !== 'object') return 'Falta la configuración de la ruta.';
-  const z = (c.zona ?? {}) as Partial<ZonaRuta>;
-  const poligonos = Array.isArray(z.poligonos)
-    ? z.poligonos.filter((p) => Array.isArray(p) && p.length >= 3 && p.every(puntoValido)).map((p) => p.map(({ lat, lng }) => ({ lat, lng })))
-    : [];
-  const tieneCentro = esNumero(z.lat) && esNumero(z.lng);
-  const etiqueta = typeof z.etiqueta === 'string' ? z.etiqueta.trim().slice(0, 200) : '';
-  if (!poligonos.length && !tieneCentro && !etiqueta) return 'Elige la zona: busca una colonia, C.P. o municipio, o haz clic en el mapa.';
+  const crudas: Partial<AreaRuta>[] = Array.isArray(c.zonas) ? c.zonas : c.zona ? zonasDeConfigVieja(c.zona) : [];
+  const zonas: AreaRuta[] = [];
+  for (const [i, z] of crudas.entries()) {
+    const area = normalizarArea(z, i + 1);
+    if (typeof area === 'string') return area;
+    if (area) zonas.push(area);
+  }
+  if (!zonas.length) return 'Elige la zona: busca una colonia, C.P. o municipio, o haz clic en el mapa.';
+  if (zonas.length > MAX_ZONAS) return `Una ruta puede juntar hasta ${MAX_ZONAS} zonas.`;
 
   const giros = Array.isArray(c.giros) ? [...new Set(c.giros.filter((g): g is string => typeof g === 'string' && !!g.trim()))] : [];
   if (!giros.length) return 'Elige al menos un giro de negocio.';
 
   const visitasPorDia = Math.round(Number(c.visitasPorDia));
   if (!Number.isFinite(visitasPorDia) || visitasPorDia < 1 || visitasPorDia > VISITAS_DIA_MAX) return `Las visitas por día deben estar entre 1 y ${VISITAS_DIA_MAX}.`;
+  const propiosPorDia = Math.round(Number(c.propiosPorDia ?? 0));
+  if (!Number.isFinite(propiosPorDia) || propiosPorDia < 0 || propiosPorDia >= visitasPorDia) {
+    return 'Los negocios nuevos que encuentre él deben ser menos que las visitas por día.';
+  }
 
   const dias = Array.isArray(c.dias) ? [...new Set(c.dias.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort() : DIAS_POR_DEFECTO;
   if (!dias.length) return 'Elige al menos un día de trabajo.';
@@ -64,16 +112,25 @@ export function normalizarConfig(raw: unknown): RutaConfig | string {
   const semanas = Number(c.semanas);
   if (!SEMANAS_VALIDAS.includes(semanas)) return 'La duración debe ser de 1 a 4 semanas.';
 
-  return {
-    zona: {
-      etiqueta,
-      lat: tieneCentro ? z.lat! : null,
-      lng: tieneCentro ? z.lng! : null,
-      radioMetros: Math.min(RADIO_MAX, Math.max(RADIO_MIN, Math.round(Number(z.radioMetros) || 1500))),
-      poligonos: poligonos.length ? poligonos : null,
-    },
-    giros, visitasPorDia, dias, semanas,
-  };
+  return { zonas, giros, visitasPorDia, propiosPorDia, dias, semanas };
+}
+
+// La config guardada de un vendedor (de cualquier forma, vieja o nueva), ya
+// en la forma actual; null si no tiene o no es válida.
+export function configGuardada(raw: unknown): RutaConfig | null {
+  if (!raw) return null;
+  const c = normalizarConfig(raw);
+  return typeof c === 'string' ? null : c;
+}
+
+// Negocios que la ruta trae por día (el resto de la meta, los encuentra él).
+export const deRutaPorDia = (c: Pick<RutaConfig, 'visitasPorDia' | 'propiosPorDia'>) => c.visitasPorDia - (c.propiosPorDia || 0);
+
+// "Centro, Tlaquepaque +1" para listas y tablas.
+export function etiquetaZonas(c: RutaConfig | null): string | null {
+  if (!c?.zonas.length) return null;
+  const primera = c.zonas[0].etiqueta || (c.zonas[0].poligono ? 'Zona dibujada' : 'Punto en el mapa');
+  return c.zonas.length > 1 ? `${primera} +${c.zonas.length - 1}` : primera;
 }
 
 // Primer día >= `desde` que cae en uno de los días de trabajo.

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, type EstadoRuta, type ItemRuta, type Prospecto, type RutaConfig, type RutaGenerada, type Vendedor } from '../api';
+import { api, type EstadoRuta, type ItemRuta, type Prospecto, type RutaConfig, type RutaGenerada, type Vendedor, type ZonaRestringida } from '../api';
 import { useFilters } from '../filters';
 import { useToast } from '../toast';
 import { PlaceAutocompleteInput } from '../components/PlaceAutocompleteInput';
-import { PlannerMap, ZONA_COLORES, type LatLng } from '../components/PlannerMap';
+import { PlannerMap, ROJO_PROHIBIDA, ZONA_COLORES, type LatLng } from '../components/PlannerMap';
+import { ZonasProhibidas, type ZonaEnEdicion } from '../components/ZonasProhibidas';
+import { centroide, dentroDeAlguna } from '../lib/zonas';
 import { Aviso, Avatar, boton } from '../components/ui';
 import { prodBadgeStyle } from '../badges';
 import { diaSemana, etiquetaDia, sumarDias, toISODate } from '../lib/dateRanges';
@@ -12,6 +14,8 @@ import { diaSemana, etiquetaDia, sumarDias, toISODate } from '../lib/dateRanges'
 // Planeador de la ruta de un vendedor: tres decisiones (zona, giros, ritmo)
 // y un botón. El servidor busca los negocios en el DENUE, los ordena en un
 // recorrido corto y los reparte por día; aquí solo se revisa y se publica.
+// La zona puede juntar varias zonas vecinas, y aparte se marcan las zonas
+// donde el vendedor no puede ir.
 
 const DIAS_SEMANA = [
   { v: 1, l: 'L' }, { v: 2, l: 'M' }, { v: 3, l: 'M' }, { v: 4, l: 'J' }, { v: 5, l: 'V' }, { v: 6, l: 'S' }, { v: 0, l: 'D' },
@@ -35,14 +39,24 @@ function siguienteDiaDeTrabajo(desde: string, dias: number[]): string {
 }
 
 const textoRadio = (m: number) => (m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`);
+const MAX_ZONAS = 4;
 
-interface Config {
+// Una zona de la ruta: círculo (buscador o clic + radio) o contorno dibujado
+// (poligono != null, aunque esté vacío mientras se marcan las esquinas).
+interface Area {
   etiqueta: string;
   centro: LatLng | null;
   radio: number;
-  poligonos: LatLng[][];
+  poligono: LatLng[] | null;
+}
+const areaVacia = (dibujada = false, radio = 2000): Area => ({ etiqueta: '', centro: null, radio, poligono: dibujada ? [] : null });
+const areaLista = (a: Area) => (a.poligono ? a.poligono.length >= 3 : !!a.centro || !!a.etiqueta.trim());
+
+interface Config {
+  zonas: Area[];
   giros: string[];
   visitasPorDia: number;
+  propiosPorDia: number;
   dias: number[];
   semanas: number;
   inicio: string;
@@ -55,13 +69,17 @@ function configInicial(v: Vendedor, girosProducto: string[], estado: EstadoRuta 
   const hoy = toISODate(new Date());
   const inicio = siguienteDiaDeTrabajo(estado?.hasta && estado.hasta >= hoy ? sumarDias(estado.hasta, 1) : hoy, dias);
   const girosPrevios = (rc?.giros ?? v.giros).filter(Boolean);
+  const anteriores = v.rutaAnterior?.poligonos?.filter((p) => p.length >= 3) ?? [];
+  const zonas: Area[] = rc?.zonas.length
+    ? rc.zonas.map((z) => ({ etiqueta: z.etiqueta, centro: z.lat != null && z.lng != null ? { lat: z.lat, lng: z.lng } : null, radio: z.radioMetros, poligono: z.poligono }))
+    : anteriores.length
+      ? anteriores.map((p, i) => ({ ...areaVacia(true), etiqueta: i === 0 ? v.rutaAnterior?.etiqueta ?? '' : '', poligono: p }))
+      : [{ ...areaVacia(), etiqueta: v.rutaAnterior?.etiqueta ?? '' }];
   return {
-    etiqueta: rc?.zona.etiqueta ?? v.rutaAnterior?.etiqueta ?? '',
-    centro: rc?.zona.lat != null && rc?.zona.lng != null ? { lat: rc.zona.lat, lng: rc.zona.lng } : null,
-    radio: rc?.zona.radioMetros ?? 2000,
-    poligonos: rc?.zona.poligonos ?? v.rutaAnterior?.poligonos ?? [],
+    zonas,
     giros: girosPrevios.length ? girosPrevios : girosProducto,
     visitasPorDia: rc?.visitasPorDia ?? 10,
+    propiosPorDia: rc?.propiosPorDia ?? 0,
     dias,
     semanas: rc?.semanas ?? 1,
     inicio,
@@ -70,17 +88,19 @@ function configInicial(v: Vendedor, girosProducto: string[], estado: EstadoRuta 
 }
 
 function aRutaConfig(c: Config): RutaConfig {
-  const poligonos = c.poligonos.filter((p) => p.length >= 3);
   return {
-    zona: { etiqueta: c.etiqueta.trim(), lat: c.centro?.lat ?? null, lng: c.centro?.lng ?? null, radioMetros: c.radio, poligonos: poligonos.length ? poligonos : null },
-    giros: c.giros, visitasPorDia: c.visitasPorDia, dias: c.dias, semanas: c.semanas,
+    zonas: c.zonas.filter(areaLista).map((a) => ({
+      etiqueta: a.etiqueta.trim(), lat: a.poligono ? null : a.centro?.lat ?? null, lng: a.poligono ? null : a.centro?.lng ?? null,
+      radioMetros: a.radio, poligono: a.poligono,
+    })),
+    giros: c.giros, visitasPorDia: c.visitasPorDia, propiosPorDia: c.propiosPorDia, dias: c.dias, semanas: c.semanas,
   };
 }
 
 export function Planeador() {
   const { vendedorId } = useParams();
   const navigate = useNavigate();
-  const { productos, reload } = useFilters();
+  const { productos, vendedores, reload } = useFilters();
   const { showToast } = useToast();
 
   const [vendedor, setVendedor] = useState<Vendedor | null>(null);
@@ -89,9 +109,11 @@ export function Planeador() {
   const [girosDisponibles, setGirosDisponibles] = useState<string[]>([]);
   const [status, setStatus] = useState<{ denue: boolean; googleMaps: boolean } | null>(null);
   const [c, setC] = useState<Config | null>(null);
-  const [modoDibujo, setModoDibujo] = useState(false);
-  const [poligonoActivo, setPoligonoActivo] = useState(0);
+  const [areaActiva, setAreaActiva] = useState(0);
   const [verMasGiros, setVerMasGiros] = useState(false);
+  const [zonasR, setZonasR] = useState<ZonaRestringida[]>([]);
+  const [editandoR, setEditandoR] = useState<ZonaEnEdicion | null>(null);
+  const [eligiendoR, setEligiendoR] = useState(false);
 
   const [generando, setGenerando] = useState(false);
   const [error, setError] = useState('');
@@ -116,7 +138,28 @@ export function Planeador() {
     }).catch((err) => setError(err.message || 'No se pudo cargar el vendedor'));
     api.equipo().then((e) => setGirosDisponibles(e.girosDisponibles)).catch(() => {});
     api.rutasStatus().then(setStatus).catch(() => {});
-  }, [vendedorId]);
+    recargarZonasR();
+  }, [vendedorId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const recargarZonasR = () => api.zonasRestringidas().then(setZonasR).catch(() => {});
+  const suyasR = useMemo(() => zonasR.filter((z) => vendedorId && z.vendedorIds.includes(vendedorId)), [zonasR, vendedorId]);
+  // Una zona restringida nueva quita (en el servidor) los pendientes que
+  // quedaron dentro; aquí se quitan también de la vista previa y del mapa.
+  const alCambiarZonasR = () => {
+    if (!vendedorId) return;
+    api.prospectos(vendedorId).then((l) => setPendientes(l.filter((p) => p.estado === 'por_visitar'))).catch(() => {});
+    api.zonasRestringidas().then((todas) => {
+      const fuera = todas.filter((z) => z.vendedorIds.includes(vendedorId)).map((z) => z.puntos);
+      setItems((prev) => {
+        const quedan = prev.filter((i) => !dentroDeAlguna(i, fuera));
+        if (quedan.length === prev.length) return prev;
+        // Se renumeran las paradas de cada día.
+        const porDia = new Map<string, number>();
+        return quedan.sort((a, b) => a.fechaPlan.localeCompare(b.fechaPlan) || a.orden - b.orden)
+          .map((i) => { const n = (porDia.get(i.fechaPlan) ?? 0) + 1; porDia.set(i.fechaPlan, n); return { ...i, orden: n }; });
+      });
+    }).catch(() => {});
+  };
 
   const producto = productos.find((p) => p.id === vendedor?.productoId);
   const girosProducto = producto?.giros ?? [];
@@ -154,9 +197,20 @@ export function Planeador() {
   if (!vendedor || !c) return <div style={{ padding: 30, color: '#8a978f' }}>Cargando planeador…</div>;
 
   const set = (patch: Partial<Config>) => setC((prev) => (prev ? { ...prev, ...patch } : prev));
-  const hayPoligonos = c.poligonos.some((p) => p.length >= 3);
-  const zonaLista = hayPoligonos || !!c.centro || !!c.etiqueta.trim();
-  const listo = zonaLista && c.giros.length > 0 && fechas.length > 0;
+  const setArea = (i: number, cambio: Partial<Area>) => setC((prev) => (prev ? { ...prev, zonas: prev.zonas.map((a, j) => (j === i ? { ...a, ...cambio } : a)) } : prev));
+  const agregarArea = (dibujada: boolean) => {
+    set({ zonas: [...c.zonas, areaVacia(dibujada, c.zonas[c.zonas.length - 1]?.radio)] });
+    setAreaActiva(c.zonas.length);
+  };
+  const quitarArea = (i: number) => {
+    set({ zonas: c.zonas.filter((_, j) => j !== i) });
+    setAreaActiva((a) => Math.max(0, a > i ? a - 1 : Math.min(a, c.zonas.length - 2)));
+  };
+  const zonaLista = c.zonas.some(areaLista);
+  const zonasIncompletas = c.zonas.some((a) => a.poligono && a.poligono.length > 0 && a.poligono.length < 3);
+  const listo = zonaLista && !zonasIncompletas && c.giros.length > 0 && fechas.length > 0 && !editandoR;
+  const deRuta = c.visitasPorDia - c.propiosPorDia;
+  const primerCentro = c.zonas.map((a) => a.poligono?.length ? centroide(a.poligono) : a.centro).find(Boolean) ?? null;
   const todosLosGiros = [...new Set([...girosProducto, ...girosDisponibles, ...c.giros])];
   const girosVisibles = verMasGiros ? todosLosGiros : [...new Set([...girosProducto, ...c.giros])];
 
@@ -168,11 +222,10 @@ export function Planeador() {
       setPreview({ ...r, configUsada: configActual });
       setItems(r.items);
       setDiaSel(r.fechas[0] ?? null);
-      setModoDibujo(false);
       setManual((m) => ({ ...m, fecha: r.fechas[0] ?? '' }));
       setEncuadrar((n) => n + 1);
       setTimeout(() => refPreview.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-      if (!r.items.length) setError('El DENUE no encontró negocios nuevos con esos giros en esa zona. Prueba con un radio más grande u otros giros.');
+      if (!r.items.length) setError('El DENUE no encontró negocios nuevos con esos giros en esa zona. Prueba con un radio más grande, otra zona vecina u otros giros.');
     } catch (err: any) {
       setError(err.message || 'No se pudo generar la ruta');
     } finally {
@@ -185,7 +238,7 @@ export function Planeador() {
     setPublicando(true);
     try {
       const r = await api.publicarRuta(vendedor.id, {
-        config: aRutaConfig(c), inicio: c.inicio, items, reemplazarPendientes: c.reemplazar, centro: preview.centro,
+        config: aRutaConfig(c), inicio: c.inicio, items, reemplazarPendientes: c.reemplazar, centros: preview.centros,
       });
       reload();
       showToast(`Ruta de ${vendedor.nombre} publicada · ${r.creados} negocios${r.desde ? ` del ${etiquetaDia(r.desde, false)} al ${etiquetaDia(r.hasta!, false)}` : ''}${r.eliminados ? ` · se quitaron ${r.eliminados} pendientes anteriores` : ''}`);
@@ -234,61 +287,85 @@ export function Planeador() {
         <div className="adm-scroll" style={{ flex: 1, overflowY: 'auto', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 20 }}>
           {status && !status.denue && <Aviso tono="error">El DENUE no está configurado en el servidor (falta DENUE_TOKEN): no se pueden generar rutas.</Aviso>}
 
-          <Paso n={1} titulo="Zona" ok={zonaLista}>
-            <PlaceAutocompleteInput
-              value={c.etiqueta}
-              onChange={(t) => set({ etiqueta: t, centro: null })}
-              onPlaceSelected={(p) => { set({ etiqueta: p.description, centro: { lat: p.lat, lng: p.lng } }); setEncuadrar((n) => n + 1); }}
-              placeholder="Colonia, C.P., municipio o dirección del kiosco"
-              types={['geocode']}
-            />
-            <div style={{ fontSize: 12, color: '#8a978f', marginTop: 6 }}>
-              Elige una sugerencia de la lista, o haz clic en el mapa para poner el centro.
-              {status && !status.googleMaps && !c.centro && ' (Sin GOOGLE_MAPS_API_KEY en el servidor, el texto solo no basta: usa una sugerencia o el mapa.)'}
-            </div>
-            {!hayPoligonos && (
-              <div style={{ marginTop: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#3a4a41', fontWeight: 600 }}>
-                  <span>Radio de búsqueda</span><span>{textoRadio(c.radio)}</span>
-                </div>
-                <input type="range" min={500} max={5000} step={250} value={c.radio} onChange={(e) => set({ radio: Number(e.target.value) })} style={{ width: '100%', accentColor: '#157347' }} />
-              </div>
-            )}
-            <div style={{ marginTop: 10, border: '1px dashed #cdd8d0', borderRadius: 10, padding: '10px 12px' }}>
-              {!modoDibujo ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ flex: 1, fontSize: 12.5, color: '#5a665f' }}>
-                    {hayPoligonos ? `${c.poligonos.filter((p) => p.length >= 3).length} zona(s) dibujada(s): la búsqueda se limita a ellas.` : '¿Quieres una zona exacta? Dibújala en el mapa.'}
-                  </span>
-                  <button style={boton.suave} onClick={() => { setModoDibujo(true); if (!c.poligonos.length) set({ poligonos: [[]] }); setPoligonoActivo(Math.max(0, c.poligonos.length - 1)); }}>
-                    {hayPoligonos ? 'Editar zonas' : 'Dibujar zona'}
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <div style={{ fontSize: 12.5, color: '#3a4a41', lineHeight: 1.5 }}>
-                    Haz clic en el mapa para marcar las esquinas de la zona (mínimo 3). Arrastra un punto para ajustarlo.
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-                    {c.poligonos.map((z, i) => (
-                      <button
-                        key={i} onClick={() => setPoligonoActivo(i)}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1.5px solid ${i === poligonoActivo ? ZONA_COLORES[i % ZONA_COLORES.length] : '#e0e8e2'}`, background: '#fff', borderRadius: 8, padding: '5px 9px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-                      >
-                        <span style={{ width: 9, height: 9, borderRadius: '50%', background: ZONA_COLORES[i % ZONA_COLORES.length] }} />
-                        Zona {i + 1} · {z.length} pts
-                      </button>
+          <Paso n={1} titulo={c.zonas.length > 1 ? 'Zonas' : 'Zona'} ok={zonaLista && !zonasIncompletas}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {c.zonas.map((a, i) => {
+                const activa = i === areaActiva;
+                const color = ZONA_COLORES[i % ZONA_COLORES.length];
+                const resumen = a.poligono
+                  ? `Zona dibujada · ${a.poligono.length} ${a.poligono.length === 1 ? 'esquina' : 'esquinas'}`
+                  : `${a.etiqueta.trim() || (a.centro ? 'Punto en el mapa' : 'Sin elegir')}${a.centro || a.etiqueta.trim() ? ` · ${textoRadio(a.radio)}` : ''}`;
+                return (
+                  <div
+                    key={i} onClick={() => { if (!activa) setAreaActiva(i); }}
+                    style={{
+                      // Con una sola zona se ve como siempre (sin tarjeta).
+                      border: c.zonas.length > 1 || !activa ? `1.5px solid ${activa ? color : '#e3eae5'}` : 'none',
+                      borderRadius: 10, padding: c.zonas.length > 1 || !activa ? '9px 11px' : 0, cursor: activa ? 'default' : 'pointer', background: '#fff',
+                    }}
+                  >
+                    {(c.zonas.length > 1 || !activa) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: activa ? 9 : 0 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, flex: 'none' }} />
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: '#263238', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {activa ? `Zona ${i + 1}` : resumen}
+                        </span>
+                        {c.zonas.length > 1 && (
+                          <button onClick={(e) => { e.stopPropagation(); quitarArea(i); }} title="Quitar esta zona" style={{ width: 22, height: 22, border: 'none', background: '#f4f6f2', borderRadius: 6, cursor: 'pointer', color: '#c0392b', flex: 'none' }}>×</button>
+                        )}
+                      </div>
+                    )}
+                    {activa && (a.poligono ? (
+                      <div>
+                        <div style={{ fontSize: 12.5, color: '#3a4a41', lineHeight: 1.5 }}>
+                          Haz clic en el mapa para marcar las esquinas de la zona ({a.poligono.length} {a.poligono.length === 1 ? 'marcada' : 'marcadas'}, mínimo 3). Arrastra un punto para ajustarlo.
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                          <button style={boton.suave} disabled={!a.poligono.length} onClick={() => setArea(i, { poligono: a.poligono!.slice(0, -1) })}>Deshacer punto</button>
+                          <button style={boton.suave} onClick={() => setArea(i, { poligono: [] })} disabled={!a.poligono.length}>Borrar esquinas</button>
+                          <button style={{ ...boton.suave, marginLeft: 'auto' }} onClick={() => setArea(i, { poligono: null })}>Mejor buscar colonia</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <PlaceAutocompleteInput
+                          value={a.etiqueta}
+                          onChange={(t) => setArea(i, { etiqueta: t, centro: null })}
+                          onPlaceSelected={(p) => { setArea(i, { etiqueta: p.description, centro: { lat: p.lat, lng: p.lng } }); setEncuadrar((n) => n + 1); }}
+                          placeholder={i === 0 ? 'Colonia, C.P., municipio o dirección del kiosco' : 'Colonia vecina, C.P. o municipio'}
+                          types={['geocode']}
+                        />
+                        <div style={{ fontSize: 12, color: '#8a978f', marginTop: 6 }}>
+                          Elige una sugerencia de la lista, o haz clic en el mapa para poner el centro.
+                          {status && !status.googleMaps && !a.centro && ' (Sin GOOGLE_MAPS_API_KEY en el servidor, el texto solo no basta: usa una sugerencia o el mapa.)'}
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#3a4a41', fontWeight: 600 }}>
+                            <span>Radio de búsqueda</span><span>{textoRadio(a.radio)}</span>
+                          </div>
+                          <input type="range" min={500} max={5000} step={250} value={a.radio} onChange={(e) => setArea(i, { radio: Number(e.target.value) })} style={{ width: '100%', accentColor: '#157347' }} />
+                        </div>
+                        <button onClick={() => setArea(i, { poligono: [] })} style={{ background: 'none', border: 'none', color: '#157347', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+                          ¿Quieres una zona exacta? Dibújala en el mapa
+                        </button>
+                      </div>
                     ))}
                   </div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-                    <button style={boton.suave} onClick={() => { set({ poligonos: [...c.poligonos, []] }); setPoligonoActivo(c.poligonos.length); }}>+ Otra zona</button>
-                    <button style={boton.suave} disabled={!c.poligonos[poligonoActivo]?.length} onClick={() => set({ poligonos: c.poligonos.map((z, i) => (i === poligonoActivo ? z.slice(0, -1) : z)) })}>Deshacer punto</button>
-                    <button style={boton.peligro} onClick={() => { set({ poligonos: [] }); setPoligonoActivo(0); setModoDibujo(false); }}>Borrar zonas</button>
-                    <button style={boton.primario} onClick={() => { set({ poligonos: c.poligonos.filter((z) => z.length) }); setModoDibujo(false); }}>Listo</button>
-                  </div>
-                </div>
-              )}
+                );
+              })}
             </div>
+            {c.zonas.length < MAX_ZONAS && !editandoR && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12.5, color: '#5a665f' }}>Juntar otra zona vecina:</span>
+                <button style={{ ...boton.suave, padding: '6px 10px', fontSize: 12 }} onClick={() => agregarArea(false)}>+ Buscar colonia</button>
+                <button style={{ ...boton.suave, padding: '6px 10px', fontSize: 12 }} onClick={() => agregarArea(true)}>+ Dibujar</button>
+              </div>
+            )}
+            <ZonasProhibidas
+              vendedor={vendedor} vendedores={vendedores} zonas={zonasR} recargar={recargarZonasR}
+              editando={editandoR} setEditando={(z) => { setEditandoR(z); if (z) setEligiendoR(false); }}
+              eligiendo={eligiendoR} setEligiendo={setEligiendoR} referencia={primerCentro} onCambio={alCambiarZonasR}
+            />
           </Paso>
 
           <Paso n={2} titulo="Giros a visitar" ok={c.giros.length > 0}>
@@ -318,14 +395,25 @@ export function Planeador() {
               <div>
                 <Etiqueta>Visitas por día</Etiqueta>
                 <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #d9e1db', borderRadius: 8, overflow: 'hidden', width: 'fit-content' }}>
-                  <button style={stepper} onClick={() => set({ visitasPorDia: Math.max(1, c.visitasPorDia - 1) })}>−</button>
-                  <input type="number" min={1} max={40} value={c.visitasPorDia} onChange={(e) => set({ visitasPorDia: Math.max(1, Math.min(40, parseInt(e.target.value, 10) || 1)) })} style={{ width: 52, border: 'none', textAlign: 'center', fontSize: 15, fontWeight: 600, padding: '8px 0' }} />
+                  <button style={stepper} onClick={() => { const v = Math.max(1, c.visitasPorDia - 1); set({ visitasPorDia: v, propiosPorDia: Math.min(c.propiosPorDia, v - 1) }); }}>−</button>
+                  <input type="number" min={1} max={40} value={c.visitasPorDia} onChange={(e) => { const v = Math.max(1, Math.min(40, parseInt(e.target.value, 10) || 1)); set({ visitasPorDia: v, propiosPorDia: Math.min(c.propiosPorDia, v - 1) }); }} style={{ width: 52, border: 'none', textAlign: 'center', fontSize: 15, fontWeight: 600, padding: '8px 0' }} />
                   <button style={stepper} onClick={() => set({ visitasPorDia: Math.min(40, c.visitasPorDia + 1) })}>+</button>
                 </div>
               </div>
               <div>
                 <Etiqueta>Empieza</Etiqueta>
                 <input type="date" value={c.inicio} onChange={(e) => e.target.value && set({ inicio: e.target.value })} style={{ border: '1px solid #d9e1db', borderRadius: 8, padding: '8px 10px', fontSize: 13.5, width: '100%' }} />
+              </div>
+            </div>
+            <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ flex: 1, fontSize: 12.5, color: '#3a4a41', lineHeight: 1.4 }}>
+                <b>De ellas, negocios nuevos que encuentre él</b>
+                <div style={{ fontSize: 12, color: '#8a978f' }}>{c.propiosPorDia ? `La ruta trae ${deRuta} por día; los otros ${c.propiosPorDia} los registra él en la calle.` : 'Todo lo trae la ruta.'}</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #d9e1db', borderRadius: 8, overflow: 'hidden', flex: 'none' }}>
+                <button style={stepper} onClick={() => set({ propiosPorDia: Math.max(0, c.propiosPorDia - 1) })}>−</button>
+                <span style={{ width: 40, textAlign: 'center', fontSize: 15, fontWeight: 600 }}>{c.propiosPorDia}</span>
+                <button style={stepper} onClick={() => set({ propiosPorDia: Math.min(c.visitasPorDia - 1, c.propiosPorDia + 1) })}>+</button>
               </div>
             </div>
             <Etiqueta style={{ marginTop: 12 }}>Días de trabajo</Etiqueta>
@@ -352,7 +440,8 @@ export function Planeador() {
             </div>
             {fechas.length > 0 && (
               <div style={{ marginTop: 12, background: '#f2f8f4', borderRadius: 9, padding: '10px 12px', fontSize: 13, color: '#2f5f45', lineHeight: 1.5 }}>
-                <b>{fechas.length} días de trabajo</b>, del {etiquetaDia(fechas[0], false)} al {etiquetaDia(fechas[fechas.length - 1], false)}: se buscarán <b>{fechas.length * c.visitasPorDia} negocios</b>.
+                <b>{fechas.length} días de trabajo</b>, del {etiquetaDia(fechas[0], false)} al {etiquetaDia(fechas[fechas.length - 1], false)}: se buscarán <b>{fechas.length * deRuta} negocios</b>
+                {c.propiosPorDia ? <>, y él encontrará <b>{fechas.length * c.propiosPorDia} nuevos</b></> : null}.
               </div>
             )}
             {(estado?.pendientes ?? 0) > 0 && (
@@ -377,7 +466,7 @@ export function Planeador() {
               {desactualizada && <div style={{ marginBottom: 8 }}><Aviso tono="alerta">Cambiaste la configuración: vuelve a generar para aplicarla.</Aviso></div>}
               {faltantes > 0 && (
                 <div style={{ marginBottom: 8 }}>
-                  <Aviso tono="alerta">El DENUE encontró {preview.encontrados} de {preview.necesarios} negocios: los últimos días quedan cortos. Amplía el radio, agrega giros o baja las visitas por día.</Aviso>
+                  <Aviso tono="alerta">El DENUE encontró {preview.encontrados} de {preview.necesarios} negocios: los últimos días quedan cortos. Amplía el radio, junta otra zona vecina, agrega giros o baja las visitas por día.</Aviso>
                 </div>
               )}
               <div style={{ border: '1px solid #e6ece7', borderRadius: 10, overflow: 'hidden' }}>
@@ -391,7 +480,7 @@ export function Planeador() {
                       >
                         <span style={{ width: 10, height: 10, borderRadius: '50%', background: sel ? '#e07a26' : '#5fae86', flex: 'none' }} />
                         <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: '#263238', textTransform: 'capitalize' }}>{etiquetaDia(fecha, false)}</span>
-                        <span style={{ fontSize: 12.5, color: lista.length < c.visitasPorDia ? '#a8322a' : '#6f7d75' }}>{lista.length} {lista.length === 1 ? 'negocio' : 'negocios'}</span>
+                        <span style={{ fontSize: 12.5, color: lista.length < deRuta ? '#a8322a' : '#6f7d75' }}>{lista.length} {lista.length === 1 ? 'negocio' : 'negocios'}</span>
                       </button>
                       {sel && lista.map((it) => (
                         <div key={`${it.nombre}::${it.direccion}::${it.orden}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 12px 7px 32px', fontSize: 12.5, background: '#fffcf8' }}>
@@ -436,8 +525,13 @@ export function Planeador() {
 
       <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', border: '1px solid #e3eae5', background: '#e7ece4', zIndex: 0 }}>
         <PlannerMap
-          centro={c.centro} radioMetros={c.radio} onCentro={(p) => set({ centro: p, etiqueta: c.etiqueta || 'Punto elegido en el mapa' })}
-          modoDibujo={modoDibujo} poligonos={c.poligonos} poligonoActivo={poligonoActivo} onPoligonos={(z) => set({ poligonos: z })}
+          areas={c.zonas.map((z) => ({ centro: z.centro, radio: z.radio, poligono: z.poligono }))} areaActiva={areaActiva}
+          onArea={(i, cambio) => setArea(i, cambio.centro && !c.zonas[i].etiqueta.trim() ? { ...cambio, etiqueta: 'Punto elegido en el mapa' } : cambio)}
+          restringidas={[
+            ...suyasR.filter((z) => z.id !== editandoR?.id).map((z) => ({ id: z.id, nombre: z.nombre, puntos: z.puntos })),
+            ...(eligiendoR ? zonasR.filter((z) => !suyasR.includes(z)).map((z) => ({ id: z.id, nombre: z.nombre, puntos: z.puntos, tenue: true })) : []),
+          ]}
+          editandoRestringida={editandoR?.puntos ?? null} onEditandoRestringida={(pts) => setEditandoR((z) => (z ? { ...z, puntos: pts } : z))}
           existentes={existentes} preview={puntosPreview} diaSeleccionado={diaSel} onElegirDia={setDiaSel}
           encuadrarToken={encuadrar} alto="100%"
         />
@@ -445,7 +539,14 @@ export function Planeador() {
           {existentes.length > 0 && <Leyenda color="#8a978f" texto={`Ya en su ruta (${existentes.length})`} chico />}
           {preview && <Leyenda color="#5fae86" texto="Ruta nueva" chico />}
           {preview && <Leyenda color="#e07a26" texto={diaSel ? `${etiquetaDia(diaSel, false)}, en orden de visita` : 'Elige un día para ver su recorrido'} />}
-          {!preview && <span style={{ color: '#6f7d75' }}>{modoDibujo ? 'Clic: agregar esquina a la zona' : 'Clic: mover el centro de la búsqueda'}</span>}
+          {suyasR.length > 0 && <Leyenda color={ROJO_PROHIBIDA} texto="Donde no puede ir" chico />}
+          {(!preview || editandoR) && (
+            <span style={{ color: editandoR ? ROJO_PROHIBIDA : '#6f7d75', fontWeight: editandoR ? 600 : 400 }}>
+              {editandoR ? 'Clic: esquina de la zona donde no puede ir'
+                : c.zonas[areaActiva]?.poligono ? `Clic: esquina de la zona${c.zonas.length > 1 ? ` ${areaActiva + 1}` : ''}`
+                  : `Clic: centro de la zona${c.zonas.length > 1 ? ` ${areaActiva + 1}` : ''}`}
+            </span>
+          )}
         </div>
       </div>
     </div>

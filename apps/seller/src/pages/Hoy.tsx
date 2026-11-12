@@ -10,6 +10,8 @@ import { agruparRuta, comoLlegarUrl, horaCita, siguienteParada, textoDistancia, 
 import { agruparLlamadas } from '../llamadas';
 import { etiquetaDia, fechaLarga, fechaLocal } from '../fechas';
 import { useRecorrido } from '../recorrido';
+import { actualizarZonas, evaluarZona, useZonasRestringidas } from '../zonas';
+import { AvisoZona } from '../components/AvisoZona';
 import { Pantalla } from '../components/AppShell';
 import { ParadaFila } from '../components/ParadaFila';
 import { EstadoConexion } from '../components/EstadoConexion';
@@ -45,6 +47,9 @@ export function Hoy() {
   const [lista, setLista] = useState<Prospecto[] | null>(() => (vendedor ? rutaEnCache(vendedor.id) : null));
   const [progreso, setProgreso] = useState<Progreso | null>(() => (vendedor ? progresoEnCache(vendedor.id) : null));
   const [pendientesHoy, setPendientesHoy] = useState(0);
+  // De las que siguen en el teléfono, cuántas son negocios nuevos.
+  const [pendientesNuevosHoy, setPendientesNuevosHoy] = useState(0);
+  const zonas = useZonasRestringidas(vendedor?.id);
   const [cargando, setCargando] = useState(false);
   const [menu, setMenu] = useState(false);
   const ultimaCarga = useRef(0);
@@ -57,7 +62,12 @@ export function Hoy() {
     Promise.all([
       prospectosConCache(vendedor.id).then(setLista).catch(() => setLista((l) => l ?? [])),
       progresoConCache(vendedor.id).then((p) => p && setProgreso(p)),
-      listarVisitasPendientes().then((ps) => setPendientesHoy(ps.filter((p) => fechaLocal(new Date(p.capturadoEn)) === hoy).length)),
+      listarVisitasPendientes().then((ps) => {
+        const deHoy = ps.filter((p) => fechaLocal(new Date(p.capturadoEn)) === hoy);
+        setPendientesHoy(deHoy.length);
+        setPendientesNuevosHoy(deHoy.filter((p) => p.campos.esNegocioNuevo === 'true').length);
+      }),
+      actualizarZonas(vendedor.id),
     ]).finally(() => setCargando(false));
   }, [vendedor]);
 
@@ -78,8 +88,18 @@ export function Hoy() {
   if (!vendedor) return null;
 
   const hoyIso = fechaLocal();
-  const visitasHoy = (progreso?.hoy === hoyIso ? progreso.visitasHoy : 0) + pendientesHoy;
-  const meta = ruta.planeadosHoy || progreso?.visitasPorDia || vendedor.rutaConfig?.visitasPorDia || 0;
+  const progresoHoy = progreso?.hoy === hoyIso ? progreso : null;
+  const visitasHoy = (progresoHoy?.visitasHoy ?? 0) + pendientesHoy;
+  // La meta del día son dos: lo que trae su ruta y los negocios nuevos que
+  // debe encontrar él. Lo de más en una no cubre lo que falta en la otra.
+  const rc = vendedor.rutaConfig;
+  const metaNuevos = progresoHoy ? progresoHoy.propiosPorDia ?? 0 : rc?.dias.includes(new Date().getDay()) ? rc.propiosPorDia ?? 0 : 0;
+  const metaRuta = ruta.planeadosHoy || Math.max(0, (progreso?.visitasPorDia || rc?.visitasPorDia || 0) - metaNuevos);
+  // Las que siguen en el teléfono cuentan de una vez (si alguna ya era de
+  // alguien, se corrige al enviarse).
+  const nuevosHoy = (progresoHoy?.nuevosHoy ?? 0) + pendientesNuevosHoy;
+  const propiosHoy = (progresoHoy?.propiosHoy ?? 0) + pendientesNuevosHoy;
+  const enZona = evaluarZona(posicion, zonas);
   const siguiente: Parada | undefined = siguienteParada(ruta);
   const citasHoy = ruta.citasHoy.filter((p) => p !== siguiente);
   const restoHoy = ruta.hoy.filter((p) => p !== siguiente);
@@ -113,7 +133,13 @@ export function Hoy() {
 
       <div className="hoy-grid">
         <div className="hoy-col-fija" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <Avance visitas={visitasHoy} meta={meta} racha={progreso?.racha ?? 0} />
+          {enZona && <AvisoZona estado={enZona.estado} mensaje={enZona.zona.mensaje} />}
+          <Avance
+            visitas={visitasHoy} racha={progreso?.racha ?? 0}
+            ruta={{ hechas: Math.max(0, visitasHoy - nuevosHoy), meta: metaRuta }}
+            nuevos={{ hechas: propiosHoy, meta: metaNuevos }}
+            onNuevo={() => navigate('/visita/nueva')}
+          />
           {siguiente ? <SiguienteParada parada={siguiente} /> : lista && <SinRutaHoy hayProximos={ruta.proximos.length > 0} />}
           <button data-tour="nuevo" className="btn btn-secondary tap" onClick={() => navigate('/visita/nueva')} style={{ width: '100%' }}>
             <IconMas size={22} stroke={2.6} /> Registrar negocio nuevo
@@ -198,7 +224,7 @@ export function Hoy() {
               <span style={{ width: 52, height: 52, borderRadius: '50%', background: vendedor.color, color: '#fff', fontWeight: 800, fontSize: 19, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{vendedor.iniciales}</span>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--ink-900)' }}>{vendedor.nombre}</div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: '#6f7d75' }}>{[vendedor.producto, vendedor.rutaConfig?.zona.etiqueta || vendedor.zona].filter(Boolean).join(' · ')}</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#6f7d75' }}>{[vendedor.producto, vendedor.rutaConfig?.zonas?.[0]?.etiqueta || vendedor.zona].filter(Boolean).join(' · ')}</div>
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
@@ -226,17 +252,29 @@ export function Hoy() {
   );
 }
 
-function Avance({ visitas, meta, racha }: { visitas: number; meta: number; racha: number }) {
-  const pct = meta > 0 ? Math.min(100, Math.round((visitas / meta) * 100)) : 0;
-  const faltan = Math.max(0, meta - visitas);
+type Parte = { hechas: number; meta: number };
+
+function Avance({ visitas, racha, ruta, nuevos, onNuevo }: { visitas: number; racha: number; ruta: Parte; nuevos: Parte; onNuevo: () => void }) {
+  const conNuevos = nuevos.meta > 0;
+  // Sin meta de nuevos, la meta es la de siempre: todas las visitas cuentan.
+  const meta = ruta.meta + nuevos.meta;
+  const llevas = conNuevos ? Math.min(ruta.hechas, ruta.meta) + Math.min(nuevos.hechas, nuevos.meta) : visitas;
+  const faltanRuta = Math.max(0, ruta.meta - ruta.hechas);
+  const faltanNuevos = Math.max(0, nuevos.meta - nuevos.hechas);
+  const faltan = conNuevos ? faltanRuta + faltanNuevos : Math.max(0, meta - visitas);
+  const pct = meta > 0 ? Math.min(100, Math.round((llevas / meta) * 100)) : 0;
+  const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
   const mensaje = meta === 0
     ? (visitas > 0 ? '¡Buen trabajo! Sigue así.' : 'Registra tu primera visita del día.')
     : faltan === 0 ? '¡Cumpliste la meta de hoy!'
-      : faltan === 1 ? 'Te falta 1 visita para tu meta.' : `Te faltan ${faltan} visitas para tu meta.`;
+      : !conNuevos ? (faltan === 1 ? 'Te falta 1 visita para tu meta.' : `Te faltan ${faltan} visitas para tu meta.`)
+        : faltanRuta && faltanNuevos ? `Te faltan ${plural(faltanRuta, 'visita', 'visitas')} de tu ruta y ${plural(faltanNuevos, 'negocio nuevo', 'negocios nuevos')}.`
+          : faltanRuta ? `Te ${faltanRuta === 1 ? 'falta' : 'faltan'} ${plural(faltanRuta, 'visita', 'visitas')} de tu ruta.`
+            : `Ya terminaste tu ruta: te ${faltanNuevos === 1 ? 'falta' : 'faltan'} ${plural(faltanNuevos, 'negocio nuevo', 'negocios nuevos')}.`;
   return (
     <section data-tour="avance" className="card" style={{ padding: '18px 20px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span className="section-title" style={{ margin: 0 }}>Visitas de hoy</span>
+        <span className="section-title" style={{ margin: 0 }}>{conNuevos ? 'Tu meta de hoy' : 'Visitas de hoy'}</span>
         {racha > 0 && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--aviva-orange-100)', color: 'var(--aviva-orange-700)', padding: '6px 11px', borderRadius: 20, fontSize: 14, fontWeight: 800 }}>
             <IconFuego size={16} color="var(--aviva-orange-500)" /> {racha} {racha === 1 ? 'día' : 'días'} seguidos
@@ -244,16 +282,50 @@ function Avance({ visitas, meta, racha }: { visitas: number; meta: number; racha
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 8 }}>
-        <span style={{ fontSize: 52, fontWeight: 800, color: 'var(--ink-900)', lineHeight: 1 }}>{visitas}</span>
+        <span style={{ fontSize: 52, fontWeight: 800, color: 'var(--ink-900)', lineHeight: 1 }}>{llevas}</span>
         {meta > 0 && <span style={{ fontSize: 20, fontWeight: 700, color: '#8a978f' }}>de {meta}</span>}
       </div>
-      {meta > 0 && (
-        <div style={{ height: 14, borderRadius: 8, background: '#e6efe9', overflow: 'hidden', marginTop: 12 }}>
-          <div style={{ height: '100%', width: `${pct}%`, borderRadius: 8, background: faltan === 0 ? 'var(--aviva-green-500)' : 'var(--aviva-green-700)', transition: 'width .4s ease' }} />
+      {meta > 0 && !conNuevos && <Barra pct={pct} completa={faltan === 0} alto={14} />}
+      {conNuevos && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+          <FilaMeta titulo="De tu ruta" parte={ruta} />
+          <FilaMeta
+            titulo="Negocios nuevos" parte={nuevos}
+            accion={faltanNuevos > 0 ? (
+              <button className="tap" onClick={onNuevo} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 14, fontWeight: 800, color: 'var(--aviva-green-700)', background: 'var(--aviva-green-100)', borderRadius: 12, padding: '6px 10px', flex: 'none' }}>
+                <IconMas size={16} stroke={2.8} /> Registrar
+              </button>
+            ) : undefined}
+          />
         </div>
       )}
       <div style={{ fontSize: 15, fontWeight: 700, color: faltan === 0 && meta > 0 ? '#15703f' : '#3a4a41', marginTop: 10 }}>{mensaje}</div>
     </section>
+  );
+}
+
+function FilaMeta({ titulo, parte, accion }: { titulo: string; parte: Parte; accion?: React.ReactNode }) {
+  const pct = parte.meta > 0 ? Math.min(100, Math.round((parte.hechas / parte.meta) * 100)) : 100;
+  const completa = parte.hechas >= parte.meta;
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 32 }}>
+        <span style={{ flex: 1, fontSize: 15, fontWeight: 700, color: '#3a4a41' }}>{titulo}</span>
+        <span style={{ fontSize: 15, fontWeight: 800, color: completa ? '#15703f' : 'var(--ink-900)' }}>
+          {completa && parte.meta > 0 ? '✓ ' : ''}{Math.min(parte.hechas, parte.meta)} de {parte.meta}
+        </span>
+        {accion}
+      </div>
+      <Barra pct={pct} completa={completa} alto={10} />
+    </div>
+  );
+}
+
+function Barra({ pct, completa, alto }: { pct: number; completa: boolean; alto: number }) {
+  return (
+    <div style={{ height: alto, borderRadius: 8, background: '#e6efe9', overflow: 'hidden', marginTop: 6 }}>
+      <div style={{ height: '100%', width: `${pct}%`, borderRadius: 8, background: completa ? 'var(--aviva-green-500)' : 'var(--aviva-green-700)', transition: 'width .4s ease' }} />
+    </div>
   );
 }
 

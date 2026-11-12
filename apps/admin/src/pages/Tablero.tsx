@@ -273,7 +273,10 @@ const COLORES = ['#9aa8a0', '#7cc49c', '#5cb283', '#3b9a68', '#157347', '#0d3d24
 
 function Embudo({ a, p, hsOk, corto }: { a: BloqueTablero; p: BloqueTablero; hsOk: boolean; corto: string }) {
   const etapas: { n: number | null; prev: number | null; l: string; det: string; fuente?: boolean; sinFlecha?: boolean }[] = [
-    { n: a.meta, prev: p.meta, l: 'Meta de la ruta', det: 'negocios planeados para estos días' },
+    {
+      n: a.meta, prev: p.meta, l: a.metaPropios ? 'Meta' : 'Meta de la ruta',
+      det: a.metaPropios ? `${num(a.metaRuta)} planeados en la ruta + ${num(a.metaPropios)} nuevos que encuentran ellos` : 'negocios planeados para estos días',
+    },
     { n: a.negociosVisitados, prev: p.negociosVisitados, l: 'Visitados', det: 'negocios distintos, en persona' },
     { n: a.negociosReales, prev: p.negociosReales, l: 'Reales', det: a.noValidos ? `sin ${num(a.noValidos)} cerrados o que no existen` : 'ninguno cerrado o inexistente' },
     { n: a.interesados, prev: p.interesados, l: 'Con interés', det: 'solicitud, información o volver otro día' },
@@ -317,7 +320,9 @@ function Tasas({ a, p, hsOk }: { a: BloqueTablero; p: BloqueTablero; hsOk: boole
   const tasas: { k: string; v: number | null; prev: number | null; f: string; nota?: ReactNode; sinComparar?: boolean }[] = [
     {
       k: 'Avance de la meta', v: a.avanceMeta, prev: p.avanceMeta,
-      f: a.meta ? `${num(a.negociosVisitados)} negocios visitados de ${num(a.meta)} planeados en la ruta` : 'No hay ruta planeada para estos días',
+      f: !a.meta ? 'No hay ruta planeada para estos días'
+        : a.metaPropios ? `${num(a.rutaVisitados)} de ${num(a.metaRuta)} negocios de la ruta y ${num(a.propios)} de ${num(a.metaPropios)} negocios nuevos (lo de más en uno no cubre lo que falta en el otro)`
+          : `${num(a.rutaVisitados)} negocios visitados de ${num(a.metaRuta)} planeados en la ruta`,
     },
     {
       k: 'Conversión', v: a.conversion, prev: p.conversion,
@@ -468,7 +473,9 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
               <div style={celdaNum}>{f.meta ? num(f.meta) : <SinDato texto="sin ruta" ayuda="No tenía negocios planeados en su ruta para estos días." />}</div>
               <div>
                 {f.meta ? <BarraAvance pct={f.avanceMeta} /> : <SinDato texto="sin ruta" alinear="left" ayuda="No tenía negocios planeados en su ruta para estos días, así que no hay meta contra la cual medir." />}
-                <div style={{ fontSize: 11, color: '#9aa39c', marginTop: 2 }}>{num(f.negociosVisitados)} visitados</div>
+                <div style={{ fontSize: 11, color: '#9aa39c', marginTop: 2 }}>
+                  {f.metaPropios ? `ruta ${num(f.rutaVisitados)}/${num(f.metaRuta)} · nuevos ${num(f.propios)}/${num(f.metaPropios)}` : `${num(f.negociosVisitados)} visitados`}
+                </div>
               </div>
               <div style={celdaNum}>{num(hsOk ? f.solicitudes : f.marcadas)}</div>
               <div style={celdaNum}>
