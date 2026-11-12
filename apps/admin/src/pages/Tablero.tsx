@@ -227,6 +227,8 @@ export function Tablero() {
           ) : <Vacio />}
         </Card>
 
+        {data && a && p && <OperacionEquipo data={data} a={a} p={p} />}
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(440px, 100%), 1fr))', gap: 14, marginTop: 14 }}>
           {data ? <Tendencia data={data} hsOk={hsOk} /> : <Card><Vacio /></Card>}
           <Card titulo="Por producto" subtitulo="El mismo embudo, separado por el producto de cada vendedor">
@@ -344,6 +346,57 @@ function Tasas({ a, p, hsOk }: { a: BloqueTablero; p: BloqueTablero; hsOk: boole
         );
       })}
     </div>
+  );
+}
+
+// ---------- Operación del equipo ----------
+
+// Cómo trabaja el equipo con la app: si la usa, si cumple la ruta y si las
+// visitas se comprueban en el negocio. Cada número trae su base y la
+// comparación contra el periodo anterior, en puntos.
+function OperacionEquipo({ data, a, p }: { data: TableroData; a: BloqueTablero; p: BloqueTablero }) {
+  const ad = data.adopcion;
+  const fuera = a.sinComprobar.nuevo + a.sinComprobar.sinGps + a.sinComprobar.sinUbicacion;
+  const items: { k: string; v: number | null; prev: number | null; base: string; def: string; nota?: string }[] = [
+    {
+      k: 'Adopción', v: ad.actual.pct, prev: ad.previo.pct,
+      base: `${num(ad.actual.con)} de ${num(ad.actual.activos)} vendedores activos`,
+      def: 'Vendedores de campo activos que registraron al menos una visita en el periodo.',
+    },
+    {
+      k: 'Cumplimiento de ruta', v: a.cumplimientoRuta, prev: p.cumplimientoRuta,
+      base: a.meta ? `${num(a.metaVisitados)} de ${num(a.meta)} negocios planeados` : 'sin ruta planeada para estos días',
+      def: 'De los negocios que la ruta les planeó para estos días, cuántos ya se visitaron.',
+    },
+    {
+      k: 'Visitas comprobadas en el negocio', v: a.enNegocio, prev: p.enNegocio,
+      base: a.validables ? `${num(a.validas)} de ${num(a.validables)} visitas comprobables` : 'ninguna visita se pudo comprobar',
+      def: 'Visitas guardadas con la tablet a 50 m o menos del negocio (ubicación oficial del DENUE).',
+      nota: fuera ? `No se miden ${num(fuera)}: ${[
+        a.sinComprobar.nuevo && `${num(a.sinComprobar.nuevo)} a negocios nuevos`,
+        a.sinComprobar.sinUbicacion && `${num(a.sinComprobar.sinUbicacion)} a negocios agregados a mano`,
+        a.sinComprobar.sinGps && `${num(a.sinComprobar.sinGps)} sin GPS`,
+      ].filter(Boolean).join(', ')}.` : undefined,
+    },
+  ];
+  return (
+    <Card titulo="Operación del equipo" subtitulo="Si el equipo usa la app, si cumple la ruta y si las visitas se comprueban en el negocio" style={{ marginTop: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 14 }}>
+        {items.map((t) => {
+          const c = cambio(t.v, t.prev, 'puntos');
+          return (
+            <div key={t.k} style={{ borderLeft: '3px solid #dcebe1', paddingLeft: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#157347', letterSpacing: '.04em', textTransform: 'uppercase' }}>{t.k}</div>
+              <div style={{ fontSize: 28, fontWeight: 600, color: '#1f2a24', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{pctTxt(t.v)}</div>
+              <div style={{ fontSize: 12.5, color: '#3a4a41' }}>{t.base}</div>
+              {c && <div style={{ fontSize: 12, color: '#8a978f', marginTop: 2 }}><b style={{ color: colorTono(c.tono), fontWeight: 600 }}>{c.texto}</b> vs {pctTxt(t.prev)} antes</div>}
+              <div style={{ fontSize: 11.5, color: '#6f7d75', marginTop: 6, lineHeight: 1.4 }}>{t.def}</div>
+              {t.nota && <div style={{ fontSize: 11.5, color: '#8a978f', marginTop: 3, lineHeight: 1.4 }}>{t.nota} No cuentan ni a favor ni en contra.</div>}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
   );
 }
 

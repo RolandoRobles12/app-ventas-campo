@@ -71,12 +71,12 @@ export interface EstadoEquipo {
 export type VistaTablero = 'dia' | 'semana' | 'mes' | 'rango';
 export interface BloqueTablero {
   visitas: number; negociosVisitados: number; negociosReales: number; noValidos: number; interesados: number;
-  meta: number; metaVisitados: number; avanceMeta: number | null;
+  meta: number; metaVisitados: number; avanceMeta: number | null; cumplimientoRuta: number | null;
   // null mientras HubSpot no está conectado o falló.
   marcadas: number; confirmadasVisitas: number | null; solicitudes: number | null;
   aprobadas: number | null; rechazadas: number | null; enProceso: number | null;
   conversion: number | null; aprobacion: number | null; confirmacion: number | null;
-  validables: number; enNegocio: number | null;
+  validables: number; validas: number; enNegocio: number | null;
   // Visitas que no se pueden comprobar (no cuentan en enNegocio), por motivo.
   sinComprobar: { nuevo: number; sinGps: number; sinUbicacion: number };
 }
@@ -93,6 +93,7 @@ export interface Tablero {
   porProducto: (BloqueTablero & { productoId: string; producto: string })[];
   porVendedor: VendedorTablero[];
   equipo: { activos: number; conVisitas: number };
+  adopcion: { actual: { con: number; activos: number; pct: number | null }; previo: { con: number; activos: number; pct: number | null } };
   tendencia: { desde: string; hasta: string; parcial: boolean; visitas: number; marcadas: number; solicitudes: number | null; aprobadas: number | null; rechazadas: number | null }[];
 }
 

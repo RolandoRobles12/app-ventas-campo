@@ -305,6 +305,8 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
     meta: planeados.length,
     metaVisitados: planeados.filter((p) => p.estado === 'visitado').length,
     avanceMeta: pct1(negociosVisitados, planeados.length),
+    // De los negocios planeados para estos días, cuántos ya se visitaron.
+    cumplimientoRuta: pct1(planeados.filter((p) => p.estado === 'visitado').length, planeados.length),
     ...s,
     conversion: s.solicitudes != null ? pct1(s.solicitudes, negociosReales) : null,
     aprobacion: s.aprobadas != null ? pct1(s.aprobadas, s.aprobadas + (s.rechazadas ?? 0)) : null,
@@ -313,6 +315,7 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
     // Las que no se pueden comprobar no cuentan ni a favor ni en contra; se
     // dice cuántas son y por qué.
     validables,
+    validas,
     enNegocio: pct1(validas, validables),
     sinComprobar,
   };
@@ -421,6 +424,12 @@ tableroRouter.get('/', async (req, res) => {
     })
     .sort((a, b) => (b.solicitudes ?? b.marcadas) - (a.solicitudes ?? a.marcadas) || b.negociosVisitados - a.negociosVisitados || a.nombre.localeCompare(b.nombre));
 
+  const activos = new Set(vendedores.filter((v) => v.estado !== 'Baja').map((v) => v.id));
+  const adopcion = (visitas: VisitaTablero[]) => {
+    const con = new Set(visitas.filter((v) => activos.has(v.vendedorId)).map((v) => v.vendedorId)).size;
+    return { con, activos: activos.size, pct: pct1(con, activos.size) };
+  };
+
   const describir = (r: Rango) => ({ desde: r.desde, hasta: r.hasta, inicio: new Date(r.start).toISOString(), fin: new Date(r.end).toISOString() });
 
   res.json({
@@ -432,7 +441,10 @@ tableroRouter.get('/', async (req, res) => {
     hubspot,
     porProducto,
     porVendedor,
-    equipo: { activos: vendedores.filter((v) => v.estado !== 'Baja').length, conVisitas: porVendedor.filter((v) => v.activo && v.visitas > 0).length },
+    equipo: { activos: activos.size, conVisitas: adopcion(act).con },
+    // Adopción: vendedores activos de hoy que registraron al menos una visita
+    // en el periodo (y en el anterior, contra el mismo equipo).
+    adopcion: { actual: adopcion(act), previo: adopcion(solo(visitasPrev)) },
     tendencia: tendencia.map((r, i) => {
       const s = solicitudesDe(enRango(solicitudes, r), ctx);
       const visitas = vista === 'rango' || i === tendencia.length - 1 ? enRango(act, r).length : conteos[i];
