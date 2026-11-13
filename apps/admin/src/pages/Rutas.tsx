@@ -7,6 +7,7 @@ import { FilterBar, PageHeader } from '../components/FilterBar';
 import { Aviso, Avatar, Card, boton } from '../components/ui';
 import { prodBadgeStyle } from '../badges';
 import { etiquetaDia } from '../lib/dateRanges';
+import { etiquetaZonas } from '../lib/zonas';
 
 type Filtro = 'todos' | 'sin_ruta' | 'por_vencer' | 'con_ruta';
 
@@ -172,8 +173,12 @@ export function Rutas() {
                 </div>
               </div>
               <div style={{ color: '#5a665f', minWidth: 0 }}>
-                <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.rutaConfig?.zona.etiqueta || v.zona || '—'}</div>
-                {v.rutaConfig && <div style={{ fontSize: 11.5, color: '#9aa39c' }}>{v.rutaConfig.visitasPorDia} visitas/día · {v.rutaConfig.giros.length} giros</div>}
+                <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{etiquetaZonas(v.rutaConfig) || v.zona || '—'}</div>
+                {v.rutaConfig && (
+                  <div style={{ fontSize: 11.5, color: '#9aa39c' }}>
+                    {v.rutaConfig.visitasPorDia} visitas/día{v.rutaConfig.propiosPorDia ? ` (${v.rutaConfig.propiosPorDia} nuevos)` : ''} · {v.rutaConfig.giros.length} giros
+                  </div>
+                )}
               </div>
               <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{e?.hoy ?? 0}</div>
               <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>

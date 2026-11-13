@@ -5,16 +5,20 @@ import { diasEntre, esFechaIso, hoyMx, sumarDias } from '../fechas.js';
 import { centroYRadioDePoligonos, consultarDenue, isDenueConfigured, type UbicacionGps } from '../integrations/denue.js';
 import { geocodificar, isGoogleMapsConfigured } from '../integrations/googleMaps.js';
 import {
-  fechasDeTrabajo, normalizarConfig, ordenarRuta, repartirPorDias, siguienteDiaDeTrabajo, type RutaConfig,
+  configGuardada, deRutaPorDia, etiquetaZonas, fechasDeTrabajo, normalizarConfig, ordenarRuta, repartirPorDias, siguienteDiaDeTrabajo,
+  type AreaRuta, type RutaConfig,
 } from '../rutas/planificador.js';
+import { dentroDeAlguna, poligonosDeVendedor } from '../zonasRestringidas.js';
 import type { VendedorDoc } from './vendedores.js';
 import { negocioIdDe } from '../negocios.js';
 
 // Planeación de rutas (solo admin). La idea es que armar la ruta de un
-// vendedor sean tres decisiones —zona, giros y ritmo— y un clic:
-//   - POST /:id/generar   → vista previa: consulta el DENUE, quita negocios que
-//                            ya trae otro vendedor del mismo producto, ordena un
-//                            recorrido corto y lo reparte por día. No escribe nada.
+// vendedor sean tres decisiones —zona(s), giros y ritmo— y un clic:
+//   - POST /:id/generar   → vista previa: consulta el DENUE en cada zona, quita
+//                            negocios que ya trae otro vendedor del mismo
+//                            producto y los que caen donde él no puede ir,
+//                            ordena un recorrido corto y lo reparte por día.
+//                            No escribe nada.
 //   - POST /:id/publicar  → guarda la ruta (la vista previa, ya editada) y la
 //                            configuración para poder renovarla después.
 //   - POST /:id/renovar   → genera y publica el siguiente periodo con la
@@ -91,9 +95,8 @@ function claveProspecto(p: { negocioId?: string; nombre: string; direccion: stri
   return p.negocioId || negocioIdDe(p);
 }
 
-async function resolverUbicacion(config: RutaConfig): Promise<UbicacionGps> {
-  const z = config.zona;
-  if (z.poligonos?.length) return centroYRadioDePoligonos(z.poligonos);
+async function resolverUbicacion(z: AreaRuta): Promise<UbicacionGps> {
+  if (z.poligono) return centroYRadioDePoligonos([z.poligono]);
   if (z.lat != null && z.lng != null) return { lat: z.lat, lng: z.lng, radioMetros: z.radioMetros };
   try {
     const geo = await geocodificar(z.etiqueta);
@@ -108,37 +111,64 @@ async function resolverUbicacion(config: RutaConfig): Promise<UbicacionGps> {
   }
 }
 
+// Junta los resultados de varias zonas alternándolas (el más cercano de
+// cada una, luego el segundo…), para que ninguna se quede fuera si entre
+// todas hay más negocios de los que se necesitan.
+export function intercalar<T extends { negocioId: string }>(listas: T[][], cantidad: number): T[] {
+  const out: T[] = [];
+  const vistos = new Set<string>();
+  for (let i = 0; out.length < cantidad && listas.some((l) => i < l.length); i++) {
+    for (const l of listas) {
+      const x = l[i];
+      if (!x || vistos.has(x.negocioId) || out.length >= cantidad) continue;
+      vistos.add(x.negocioId);
+      out.push(x);
+    }
+  }
+  return out;
+}
+
 async function generar(vendedor: VendedorDoc & { id: string }, config: RutaConfig, inicio: string, reemplazar: boolean) {
   if (!isDenueConfigured()) {
     throw new ErrorRuta(501, 'DENUE_NOT_CONFIGURED', 'El DENUE no está configurado en el servidor (falta DENUE_TOKEN).');
   }
   const fechas = fechasDeTrabajo(inicio, config.semanas, config.dias);
   if (!fechas.length) throw new ErrorRuta(400, 'SIN_DIAS', 'No hay días de trabajo en ese periodo.');
-  const necesarios = fechas.length * config.visitasPorDia;
+  const porDia = deRutaPorDia(config);
+  const necesarios = fechas.length * porDia;
 
-  const [ubicacion, excluir] = await Promise.all([
-    resolverUbicacion(config),
+  const [ubicaciones, excluir, fuera] = await Promise.all([
+    Promise.all(config.zonas.map(resolverUbicacion)),
     exclusiones(vendedor.productoId, vendedor.id, reemplazar),
+    poligonosDeVendedor(vendedor.id),
   ]);
 
-  let resultados;
+  let porZona;
   try {
-    resultados = await consultarDenue({
-      giros: config.giros, cantidad: necesarios, ubicacion,
-      poligonos: config.zona.poligonos ?? undefined, excluir: [...excluir],
-    });
+    // Una consulta por zona: cada una respeta el tope de 5 km del DENUE.
+    porZona = await Promise.all(config.zonas.map((z, i) => consultarDenue({
+      giros: config.giros, cantidad: necesarios, ubicacion: ubicaciones[i],
+      poligonos: z.poligono ? [z.poligono] : undefined, excluir: [...excluir], fuera,
+    })));
   } catch (err: any) {
     throw new ErrorRuta(502, 'DENUE_REQUEST_FAILED', err?.message || 'Error consultando el DENUE');
   }
+  const resultados = intercalar(porZona, necesarios);
 
-  const centro = { lat: ubicacion.lat, lng: ubicacion.lng };
-  const items: ItemRuta[] = repartirPorDias(ordenarRuta(resultados, centro), fechas, config.visitasPorDia).map((r) => ({
+  // El recorrido arranca en la primera zona (normalmente, la del kiosco).
+  const centro = { lat: ubicaciones[0].lat, lng: ubicaciones[0].lng };
+  const items: ItemRuta[] = repartirPorDias(ordenarRuta(resultados, centro), fechas, porDia).map((r) => ({
     negocioId: r.negocioId, denueId: r.denueId, nombre: r.nombre, direccion: r.direccion, giro: r.giro, telefono: r.telefono ?? null,
     lat: r.lat ?? null, lng: r.lng ?? null, distanciaKm: r.distanciaKm ?? null,
     fechaPlan: r.fechaPlan, orden: r.orden,
   }));
-  console.log(`Ruta generada para ${vendedor.id}: ${items.length}/${necesarios} negocios, ${fechas.length} días desde ${inicio}, ${excluir.size} excluidos`);
-  return { items, fechas, necesarios, encontrados: resultados.length, centro, radioMetros: ubicacion.radioMetros ?? config.zona.radioMetros };
+  console.log(`Ruta generada para ${vendedor.id}: ${items.length}/${necesarios} negocios en ${config.zonas.length} zona(s), ${fechas.length} días desde ${inicio}, ${excluir.size} excluidos, ${fuera.length} zonas restringidas`);
+  return {
+    items, fechas, necesarios, encontrados: resultados.length, centro,
+    // Centro ya resuelto de cada zona: al publicar se guarda para que
+    // renovar no vuelva a geocodificar.
+    centros: ubicaciones.map((u) => ({ lat: u.lat, lng: u.lng })),
+  };
 }
 
 function itemValido(i: unknown): i is ItemRuta {
@@ -167,13 +197,21 @@ async function borrarPendientes(vendedorId: string): Promise<{ eliminados: numbe
   return { eliminados: borrar.length, conservados };
 }
 
-async function publicar(vendedorId: string, config: RutaConfig, items: ItemRuta[], reemplazar: boolean, centro?: { lat: number; lng: number }) {
-  // Si la zona se eligió por texto o por polígono, se guarda también el
-  // centro ya resuelto: la próxima renovación no vuelve a geocodificar.
-  const configGuardada: RutaConfig = centro && config.zona.lat == null
-    ? { ...config, zona: { ...config.zona, lat: centro.lat, lng: centro.lng } }
-    : config;
-  await db.collection('vendedores').doc(vendedorId).update({ rutaConfig: configGuardada, giros: config.giros });
+type Centro = { lat: number; lng: number };
+const centroValido = (c: any): c is Centro => !!c && Number.isFinite(c.lat) && Number.isFinite(c.lng);
+
+async function publicar(vendedorId: string, config: RutaConfig, itemsRaw: ItemRuta[], reemplazar: boolean, centros: (Centro | null)[] = []) {
+  // Si una zona se eligió solo por texto, se guarda también su centro ya
+  // resuelto: la próxima renovación no vuelve a geocodificar.
+  const aGuardar: RutaConfig = {
+    ...config,
+    zonas: config.zonas.map((z, i) => (z.lat == null && !z.poligono && centroValido(centros[i]) ? { ...z, lat: centros[i]!.lat, lng: centros[i]!.lng } : z)),
+  };
+  await db.collection('vendedores').doc(vendedorId).update({ rutaConfig: aGuardar, giros: config.giros });
+
+  // Una zona restringida creada después de la vista previa también aplica.
+  const fuera = await poligonosDeVendedor(vendedorId);
+  const items = fuera.length ? itemsRaw.filter((i) => !dentroDeAlguna(i, fuera)) : itemsRaw;
 
   const borrado = reemplazar ? await borrarPendientes(vendedorId) : null;
   const eliminados = borrado?.eliminados ?? 0;
@@ -250,7 +288,7 @@ rutasRouter.get('/estado', async (req, res) => {
     const pendientes = (await pend(v.id).count().get()).data().count;
     const base = {
       vendedorId: v.id, pendientes, conFecha: 0, sinFecha: 0, atrasadas: 0, hoy: 0, hasta: null as string | null,
-      tieneConfig: !!v.rutaConfig, zona: v.rutaConfig?.zona.etiqueta || null, visitasPorDia: v.rutaConfig?.visitasPorDia ?? null,
+      tieneConfig: !!v.rutaConfig, zona: etiquetaZonas(configGuardada(v.rutaConfig)), visitasPorDia: v.rutaConfig?.visitasPorDia ?? null,
       diasRestantes: null as number | null,
     };
     if (!pendientes) return base;
@@ -294,8 +332,8 @@ rutasRouter.post('/:vendedorId/publicar', async (req, res) => {
     if (!items.length) return res.status(400).json({ error: 'SIN_NEGOCIOS', message: 'La ruta no tiene negocios.' });
     const vendedor = await leerVendedor(req.params.vendedorId);
     if (vendedor.estado === 'Baja') return res.status(400).json({ error: 'VENDEDOR_BAJA', message: 'Ese vendedor está dado de baja.' });
-    const centro = req.body?.centro && Number.isFinite(req.body.centro.lat) && Number.isFinite(req.body.centro.lng) ? req.body.centro : undefined;
-    res.json(await publicar(vendedor.id, config, items, req.body?.reemplazarPendientes === true, centro));
+    const centros = Array.isArray(req.body?.centros) ? req.body.centros.map((c: unknown) => (centroValido(c) ? c : null)) : [];
+    res.json(await publicar(vendedor.id, config, items, req.body?.reemplazarPendientes === true, centros));
   } catch (err) {
     return responderError(res, err);
   }
@@ -318,7 +356,7 @@ rutasRouter.post('/:vendedorId/renovar', async (req, res) => {
     if (!generada.items.length) {
       return res.status(404).json({ error: 'SIN_RESULTADOS', message: 'El DENUE ya no encontró negocios nuevos en su zona: amplía el radio o cambia los giros en el planeador.' });
     }
-    const publicado = await publicar(vendedor.id, config, generada.items, false, generada.centro);
+    const publicado = await publicar(vendedor.id, config, generada.items, false, generada.centros);
     res.json({ ...publicado, necesarios: generada.necesarios, encontrados: generada.encontrados });
   } catch (err) {
     return responderError(res, err);

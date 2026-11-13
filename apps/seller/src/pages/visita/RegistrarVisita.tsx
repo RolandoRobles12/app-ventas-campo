@@ -9,6 +9,8 @@ import { comoLlegarUrl, distanciaMetros, textoDistancia } from '../../ruta';
 import { etiquetaDia, fechaLocal, sumarDias } from '../../fechas';
 import { RESULTADOS_UI, resultadoUI } from '../../resultados';
 import { telHref, textoTelefono } from '../../llamadas';
+import { evaluarZona, useZonasRestringidas } from '../../zonas';
+import { AvisoZona } from '../../components/AvisoZona';
 import { IconAtras, IconCamara, IconCheck, IconInfo, IconMas, IconNavegar, IconPin, IconTelefono, IconX } from '../../icons';
 
 const GIROS = ['Abarrotes', 'Ferretería', 'Papelería', 'Alimentos', 'Belleza', 'Taller', 'Servicios', 'Otro'];
@@ -59,6 +61,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
   const navigate = useNavigate();
   const location = useLocation();
   const gps = useGps();
+  const zonas = useZonasRestringidas(vendedor?.id);
 
   // La lista manda el negocio en el estado de navegación: abre al instante y
   // sin depender de la red. El caché es el respaldo si se entra por URL.
@@ -120,6 +123,11 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
     );
   }
 
+  // Donde no puede ir, no se registra (el servidor también lo rechaza). En
+  // el borde, con GPS impreciso, solo se advierte.
+  const enZona = !practica && gps.status === 'ok' ? evaluarZona(gps.fix, zonas) : null;
+  const bloqueada = enZona?.estado === 'dentro';
+
   const faltaNombre = nueva && !nombre.trim();
   const faltaResultado = !resultado;
   const faltaFoto = fotos.length === 0;
@@ -139,6 +147,10 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
   const agregarNota = (n: string) => setNotas((prev) => (prev.includes(n) ? prev : prev ? `${prev.trim()}. ${n}` : n));
 
   const guardar = async () => {
+    if (bloqueada) {
+      setError('Estás en una zona donde no puedes visitar negocios: esta visita no se puede registrar aquí.');
+      return;
+    }
     if (faltantes.length) {
       setIntento(true);
       setError('');
@@ -174,13 +186,13 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
     }
     const capturadoEn = Date.now();
 
-    const terminar = (pendiente: boolean) => {
+    const terminar = (pendiente: boolean, duplicado: string | null = null) => {
       if (!nueva) {
         marcarVisitaLocal(vendedor.id, prospecto!.id, resultado === REAGENDA
           ? { estado: 'por_visitar', fechaPlan: reagendarPara, reagendado: true }
           : { estado: 'visitado' });
       }
-      navigate('/visita/exito', { replace: true, state: { nombre: nombreNegocio, resultado, fotos: fotos.length, pendiente, reagendarPara: resultado === REAGENDA ? reagendarPara : null } });
+      navigate('/visita/exito', { replace: true, state: { nombre: nombreNegocio, resultado, fotos: fotos.length, pendiente, duplicado, reagendarPara: resultado === REAGENDA ? reagendarPara : null } });
     };
 
     // Sin señal, la visita no se pierde: queda en la tablet (IndexedDB) y
@@ -196,8 +208,8 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
         return;
       }
       const urls = await subirFotos(vendedor.id, fotos.map((f) => f.file));
-      await api.registrarVisita({ ...campos, capturadoEn, fotos: urls });
-      terminar(false);
+      const r = await api.registrarVisita({ ...campos, capturadoEn, fotos: urls });
+      terminar(false, r.duplicado ?? null);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -228,6 +240,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
       </header>
 
       <div style={{ flex: 1, width: '100%', maxWidth: 860, margin: '0 auto', padding: '16px 16px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {enZona && <AvisoZona estado={enZona.estado} mensaje={enZona.zona.mensaje} />}
         {practica && (
           <section style={{ display: 'flex', gap: 12, alignItems: 'flex-start', background: '#fdf4e7', border: '2px solid #f6d6b3', borderRadius: 18, padding: 16 }}>
             <span style={{ flex: 'none', color: '#c96a1e', display: 'flex', marginTop: 1 }}><IconInfo size={24} /></span>
@@ -406,9 +419,9 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
             onClick={guardar}
             disabled={guardando}
             className="btn tap"
-            style={{ width: '100%', minHeight: 62, fontSize: 19, background: faltantes.length ? '#9fb5a8' : 'var(--aviva-green-700)', color: '#fff' }}
+            style={{ width: '100%', minHeight: 62, fontSize: 19, background: bloqueada ? '#c9a39d' : faltantes.length ? '#9fb5a8' : 'var(--aviva-green-700)', color: '#fff' }}
           >
-            {guardando ? 'Guardando…' : faltantes.length ? `Falta: ${faltantes.join(', ')}` : <><IconCheck size={24} stroke={3} /> {practica ? 'Guardar visita (práctica)' : 'Guardar visita'}</>}
+            {guardando ? 'Guardando…' : bloqueada ? 'No puedes registrar visitas en esta zona' : faltantes.length ? `Falta: ${faltantes.join(', ')}` : <><IconCheck size={24} stroke={3} /> {practica ? 'Guardar visita (práctica)' : 'Guardar visita'}</>}
           </button>
         </div>
       </footer>

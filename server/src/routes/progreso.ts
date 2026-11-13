@@ -3,7 +3,7 @@ import { db, Timestamp } from '../db.js';
 import { toIso } from '../firestore-helpers.js';
 import { puedeActuarComoVendedor, vendedorAjeno } from '../auth.js';
 import { diaSemana, fechaMx, hoyMx, inicioDiaMx, sumarDias } from '../fechas.js';
-import { DIAS_POR_DEFECTO } from '../rutas/planificador.js';
+import { DIAS_POR_DEFECTO, configGuardada } from '../rutas/planificador.js';
 import type { VendedorDoc } from './vendedores.js';
 
 // Avance del vendedor para su app: visitas de hoy, racha y lo que registró
@@ -22,6 +22,7 @@ interface VisitaDoc {
   notas: string | null;
   fotos?: string[];
   esNegocioNuevo?: boolean;
+  propio?: boolean;
   ubicacionValida?: boolean | null;
   createdAt: Timestamp;
 }
@@ -83,12 +84,21 @@ progresoRouter.get('/:vendedorId', async (req, res) => {
     porDia.set(f, (porDia.get(f) ?? 0) + 1);
   }
 
-  const racha = await calcularRacha(vendedorId, porDia, vendedor?.rutaConfig?.dias ?? DIAS_POR_DEFECTO, hoy);
+  const config = configGuardada(vendedor?.rutaConfig);
+  const racha = await calcularRacha(vendedorId, porDia, config?.dias ?? DIAS_POR_DEFECTO, hoy);
+  const deHoy = visitas.filter((v) => fechaMx(v.createdAt.toDate()) === hoy);
 
   res.json({
     hoy,
     visitasHoy: porDia.get(hoy) ?? 0,
-    visitasPorDia: vendedor?.rutaConfig?.visitasPorDia ?? null,
+    visitasPorDia: config?.visitasPorDia ?? null,
+    // Meta de negocios nuevos que encuentra él (0 si no tiene, o si hoy no
+    // es uno de sus días de trabajo). La app la suma a lo planeado en la ruta.
+    propiosPorDia: config && config.dias.includes(diaSemana(hoy)) ? config.propiosPorDia : 0,
+    // Negocios nuevos de hoy: todos, y los que cuentan para la meta (los que
+    // ya eran de alguien no cuentan).
+    nuevosHoy: deHoy.filter((v) => v.esNegocioNuevo).length,
+    propiosHoy: deHoy.filter((v) => v.esNegocioNuevo && v.propio !== false).length,
     racha,
     semana: Array.from({ length: 7 }, (_, i) => {
       const fecha = sumarDias(hoy, i - 6);
@@ -103,6 +113,7 @@ progresoRouter.get('/:vendedorId', async (req, res) => {
       notas: v.notas,
       fotos: (v.fotos ?? []).length,
       esNegocioNuevo: !!v.esNegocioNuevo,
+      propio: v.esNegocioNuevo ? v.propio !== false : null,
       ubicacionValida: v.ubicacionValida ?? null,
       createdAt: toIso(v.createdAt),
     })),

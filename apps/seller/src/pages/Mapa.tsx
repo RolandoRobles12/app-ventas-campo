@@ -6,6 +6,8 @@ import { useUbicacion } from '../ubicacion';
 import { prospectosConCache, rutaEnCache, useCambiosDeRuta } from '../offline';
 import { agruparRuta, comoLlegarUrl, textoDistancia, type Parada } from '../ruta';
 import { IconNavegar, IconPin, IconX } from '../icons';
+import { evaluarZona, useZonasRestringidas } from '../zonas';
+import { AvisoZona } from '../components/AvisoZona';
 import type { Prospecto } from '../api';
 
 type Filtro = 'hoy' | 'todo';
@@ -26,6 +28,9 @@ export function Mapa() {
   const contenedor = useRef<HTMLDivElement>(null);
   const mapa = useRef<google.maps.Map | null>(null);
   const marcadores = useRef<google.maps.Marker[]>([]);
+  const zonasDibujadas = useRef<google.maps.Polygon[]>([]);
+  const zonas = useZonasRestringidas(vendedor?.id);
+  const enZona = evaluarZona(posicion, zonas);
   const yo = useRef<google.maps.Marker | null>(null);
   const encuadrado = useRef(false);
   const [listo, setListo] = useState(false);
@@ -96,6 +101,17 @@ export function Mapa() {
     yo.current.setPosition(posicion);
   }, [posicion, listo]);
 
+  // Zonas donde no puede visitar: en rojo, sin tapar los negocios.
+  useEffect(() => {
+    const m = mapa.current;
+    if (!m || !listo) return;
+    zonasDibujadas.current.forEach((z) => z.setMap(null));
+    zonasDibujadas.current = zonas.filter((z) => z.puntos.length >= 3).map((z) => new google.maps.Polygon({
+      map: m, paths: z.puntos, clickable: false, zIndex: 0,
+      fillColor: '#c62828', fillOpacity: 0.2, strokeColor: '#c62828', strokeOpacity: 0.9, strokeWeight: 2,
+    }));
+  }, [zonas, listo]);
+
   const centrarEnMi = () => {
     if (mapa.current && posicion) { mapa.current.panTo(posicion); mapa.current.setZoom(16); }
   };
@@ -121,6 +137,16 @@ export function Mapa() {
           </button>
         )}
       </div>
+
+      {(enZona || zonas.length > 0) && !seleccion && (
+        <div style={{ position: 'absolute', left: 12, right: 12, bottom: 12, maxWidth: 560, margin: '0 auto' }}>
+          {enZona ? <AvisoZona estado={enZona.estado} mensaje={enZona.zona.mensaje} /> : (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', borderRadius: 12, padding: '8px 12px', fontSize: 14, fontWeight: 700, color: '#7a2a22', boxShadow: '0 2px 6px rgba(0,0,0,.12)' }}>
+              <span style={{ width: 14, height: 14, borderRadius: 3, background: 'rgba(198,40,40,.25)', border: '2px solid #c62828' }} /> Zonas donde no puedes visitar
+            </div>
+          )}
+        </div>
+      )}
 
       {seleccion && (
         <div className="aparecer" style={{ position: 'absolute', left: 12, right: 12, bottom: 12, maxWidth: 560, margin: '0 auto' }}>

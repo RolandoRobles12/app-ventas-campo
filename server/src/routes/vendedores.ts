@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, Timestamp } from '../db.js';
 import { toIso } from '../firestore-helpers.js';
-import type { RutaConfig } from '../rutas/planificador.js';
+import { configGuardada, type RutaConfig } from '../rutas/planificador.js';
 
 export const vendedoresRouter = Router();
 
@@ -68,7 +68,8 @@ export function shapeVendedor(id: string, v: VendedorDoc, productoNombre?: strin
     fuente: v.fuente ?? null,
     bajaEn: toIso(v.bajaEn ?? null),
     bajaMotivo: v.bajaMotivo ?? null,
-    rutaConfig: v.rutaConfig ?? null,
+    // Siempre en la forma actual (varias zonas), aunque se haya guardado con la vieja.
+    rutaConfig: configGuardada(v.rutaConfig),
     onboardingVisto: toIso(v.onboardingVisto ?? null),
     // Para precargar el planeador cuando aún no hay rutaConfig.
     rutaAnterior: v.rutaConfig ? null : {

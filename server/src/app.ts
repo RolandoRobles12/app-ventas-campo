@@ -23,6 +23,7 @@ import { tableroRouter } from './routes/tablero.js';
 import { mapaRouter } from './routes/mapa.js';
 import { seguimientoRouter } from './routes/seguimiento.js';
 import { llamadasRouter } from './routes/llamadas.js';
+import { zonasRestringidasRouter } from './routes/zonasRestringidas.js';
 
 export const app = express();
 const origins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -55,6 +56,8 @@ app.use('/api/visitas', visitasRouter);
 app.use('/api/ubicaciones', ubicacionesRouter);
 app.use('/api/progreso', progresoRouter);
 app.use('/api/llamadas', llamadasRouter);
+// La app del vendedor lee las suyas; crearlas y editarlas es solo de admin.
+app.use('/api/zonas-restringidas', zonasRestringidasRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);

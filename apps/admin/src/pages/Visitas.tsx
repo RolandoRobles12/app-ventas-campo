@@ -8,6 +8,12 @@ import { HistorialNegocio } from '../components/HistorialNegocio';
 import { prodBadgeStyle, resultadoBadgeStyle } from '../badges';
 
 const PAGE_SIZE = 20;
+// Origen del negocio: lo encontró el vendedor en la calle, o venía en su ruta.
+const ORIGENES = [
+  { value: 'nuevo', label: 'Negocios nuevos (de calle)' },
+  { value: 'ruta', label: 'Prospectos de la ruta (DENUE)' },
+];
+
 const RESULTADOS = [
   'Se realizó solicitud', 'Se dejó información', 'Se reagenda visita',
   'Cliente no interesado', 'No es un negocio válido o existente',
@@ -28,6 +34,7 @@ const gridCols = '54px 2fr 1.2fr 1.1fr 1.5fr 1.15fr .95fr';
 export function Visitas() {
   const { fProductos, fVendedores, fDesde, fHasta } = useFilters();
   const [selResultados, setSelResultados] = useState<string[]>([]);
+  const [selOrigenes, setSelOrigenes] = useState<string[]>([]);
 
   const [items, setItems] = useState<VisitaListItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -72,7 +79,7 @@ export function Visitas() {
       // filtros a la vez solo complicaría la resolución en el servidor.
       vendedorIds: fVendedores.length ? fVendedores : undefined,
       productoIds: fVendedores.length ? undefined : fProductos,
-      resultados: selResultados,
+      resultados: selResultados, origenes: selOrigenes,
       desde: fDesde, hasta: fHasta,
       cursor, limit: PAGE_SIZE,
     }).then((r) => {
@@ -81,7 +88,7 @@ export function Visitas() {
     }).catch(() => {
       if (primeraPagina) setItems([]);
     }).finally(() => { setLoading(false); setLoadingMore(false); });
-  }, [fProductos, fVendedores, selResultados, fDesde, fHasta]);
+  }, [fProductos, fVendedores, selResultados, selOrigenes, fDesde, fHasta]);
 
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -95,17 +102,18 @@ export function Visitas() {
         const r = await api.visitas({
           vendedorIds: fVendedores.length ? fVendedores : undefined,
           productoIds: fVendedores.length ? undefined : fProductos,
-          resultados: selResultados, desde: fDesde, hasta: fHasta, cursor, limit: 100,
+          resultados: selResultados, origenes: selOrigenes, desde: fDesde, hasta: fHasta, cursor, limit: 100,
         });
         filas.push(...r.items);
         cursor = r.nextCursor ?? undefined;
       } while (cursor && filas.length < MAX_EXPORTAR);
-      const encabezado = ['Fecha', 'Hora', 'Vendedor', 'Vendedor activo hoy', 'Producto', 'Negocio', 'Dirección', 'Negocio nuevo', 'Resultado', 'Notas', 'Fotos', 'Hecha en el negocio', 'Distancia al negocio (m)', 'Latitud', 'Longitud'];
+      const encabezado = ['Fecha', 'Hora', 'Vendedor', 'Vendedor activo hoy', 'Producto', 'Negocio', 'Dirección', 'Origen', 'Cuenta como negocio nuevo', 'Resultado', 'Notas', 'Fotos', 'Hecha en el negocio', 'Distancia al negocio (m)', 'Latitud', 'Longitud'];
       const lineas = filas.map((v) => {
         const d = new Date(v.createdAt);
         return [
           d.toLocaleDateString('es-MX'), d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }), v.vendedorNombre, v.vendedorActivo ? 'Sí' : 'No', v.producto,
-          v.nombreNegocio, v.direccion, v.esNegocioNuevo ? 'Sí' : 'No', v.resultado, v.notas ?? '', (v.fotos ?? []).length,
+          v.nombreNegocio, v.direccion, v.esNegocioNuevo ? 'Negocio nuevo' : 'Ruta (DENUE)',
+          v.esNegocioNuevo ? (v.propio === false ? 'No, ya era de alguien' : 'Sí') : '', v.resultado, v.notas ?? '', (v.fotos ?? []).length,
           v.ubicacionValida == null ? (v.esNegocioNuevo ? 'No se puede medir (negocio nuevo)' : 'No se puede medir (sin GPS o sin ubicación)') : v.ubicacionValida ? 'Sí' : 'No', v.distanciaValidacionMetros ?? '', v.lat ?? '', v.lng ?? '',
         ].map(celdaCsv).join(',');
       });
@@ -135,16 +143,25 @@ export function Visitas() {
       />
       <FilterBar
         extra={
-          <MultiSelectDropdown
-            label="Resultado"
-            options={RESULTADOS.map((r) => ({ value: r, label: r }))}
-            selected={selResultados}
-            onChange={setSelResultados}
-            placeholder="Todos los resultados"
-          />
+          <>
+            <MultiSelectDropdown
+              label="Origen"
+              options={ORIGENES}
+              selected={selOrigenes}
+              onChange={setSelOrigenes}
+              placeholder="Nuevos y de ruta"
+            />
+            <MultiSelectDropdown
+              label="Resultado"
+              options={RESULTADOS.map((r) => ({ value: r, label: r }))}
+              selected={selResultados}
+              onChange={setSelResultados}
+              placeholder="Todos los resultados"
+            />
+          </>
         }
-        extraActivo={selResultados.length > 0}
-        onLimpiarExtra={() => setSelResultados([])}
+        extraActivo={selResultados.length > 0 || selOrigenes.length > 0}
+        onLimpiarExtra={() => { setSelResultados([]); setSelOrigenes([]); }}
       />
 
       <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, padding: '20px 22px', marginBottom: 16 }}>
@@ -248,7 +265,15 @@ export function Visitas() {
                     {v.nombreNegocio}
                   </button>
                 ) : <div style={{ fontWeight: 600, color: '#263238' }}>{v.nombreNegocio}</div>}
-                <div style={{ fontSize: 11, color: '#8a978f', marginTop: 1 }}>{v.direccion}</div>
+                <div style={{ fontSize: 11, color: '#8a978f', marginTop: 1 }}>
+                  {v.esNegocioNuevo && (
+                    <span
+                      title={v.propio === false ? 'Lo registró como nuevo, pero ya estaba en una ruta o se visitó hace poco: no cuenta para su meta de negocios nuevos.' : 'Negocio que el vendedor encontró en la calle.'}
+                      style={{ fontSize: 10.5, fontWeight: 600, color: v.propio === false ? '#94500f' : '#1d4f8f', background: v.propio === false ? '#fdecdb' : '#e6eef9', borderRadius: 999, padding: '1px 7px', marginRight: 6, cursor: 'help' }}
+                    >{v.propio === false ? 'Nuevo · ya era de alguien' : 'Nuevo'}</span>
+                  )}
+                  {v.direccion}
+                </div>
                 {v.notas && <div style={{ fontSize: 11, color: '#9aa39c', marginTop: 2, fontStyle: 'italic' }}>&ldquo;{v.notas}&rdquo;</div>}
               </div>
               <div style={{ color: v.vendedorActivo ? '#3a4a41' : '#6f7d75' }}>
