@@ -169,6 +169,7 @@ export function Rutas() {
                 <Avatar color={v.color} iniciales={v.iniciales} />
                 <div style={{ minWidth: 0 }}>
                   <Link to={`/rutas/${v.id}`} style={{ fontWeight: 600, color: '#263238' }}>{v.nombre}</Link>
+                  {v.prueba && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: '#7b1da3', background: '#f3e6f9', borderRadius: 999, padding: '1px 7px' }}>Prueba</span>}
                   <div><span style={prodBadgeStyle(v.producto)}>{v.producto}</span></div>
                 </div>
               </div>

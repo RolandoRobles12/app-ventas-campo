@@ -38,6 +38,8 @@ export interface Vendedor {
   hubManagerNombre: string | null; headNombre: string | null;
   fuente: string | null; bajaEn: string | null; bajaMotivo: string | null;
   rutaConfig: RutaConfig | null;
+  // Vendedor de prueba de un admin: no cuenta en los indicadores.
+  prueba?: boolean;
   rutaAnterior: { etiqueta: string; poligonos: ZonaPunto[][] | null } | null;
 }
 
@@ -252,6 +254,8 @@ export const api = {
       vendedorIds: params.vendedorIds, productoIds: params.productoIds, resultados: params.resultados, desde: params.desde, hasta: params.hasta,
     })}`),
   citas: (f: { productoIds?: string[]; vendedorIds?: string[] }) => req<CitaProxima[]>(`/llamadas/citas${qs(f)}`),
+  crearVendedorPrueba: (data: { email: string; productoId: string; nombre?: string }) => req<{ id: string }>('/equipo/prueba', post(data)),
+  borrarVendedorPrueba: (id: string) => req<{ borrados: Record<string, number> }>(`/equipo/prueba/${id}`, { method: 'DELETE' }),
   revisarUbicacion: (visitaId: string, accion: 'aceptar' | 'descartar') =>
     req<{ ok: boolean; negocios?: number }>(`/visitas/${visitaId}/ubicacion`, post({ accion })),
   config: () => req<{ radioCercoMetros: number }>('/config'),

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, type EstadoEquipo, type EstadoRuta, type ReporteSync } from '../api';
+import { api, type EstadoEquipo, type EstadoRuta, type ReporteSync, type Vendedor } from '../api';
+import { useSession } from '../session';
 import { useFilters } from '../filters';
 import { useToast } from '../toast';
 import { FilterBar, PageHeader } from '../components/FilterBar';
@@ -50,7 +51,9 @@ export function Equipo() {
     }
   };
 
-  const activos = useMemo(() => vendedores.filter((v) => v.estado !== 'Baja'), [vendedores]);
+  // Los de prueba van en su propia tarjeta, no en el equipo real.
+  const activos = useMemo(() => vendedores.filter((v) => v.estado !== 'Baja' && !v.prueba), [vendedores]);
+  const dePrueba = useMemo(() => vendedores.filter((v) => v.prueba), [vendedores]);
   const hubs = useMemo(() => [...new Set(activos.map((v) => v.hubManagerNombre || SIN_DATO))].sort(), [activos]);
   const zonas = useMemo(() => [...new Set(activos.map((v) => v.zona || SIN_DATO))].sort(), [activos]);
 
@@ -110,6 +113,7 @@ export function Equipo() {
           </div>
         </Card>
         <RegistroVisitas />
+        <VendedoresPrueba vendedores={dePrueba} productos={estado?.productos.filter((p) => p.esDeCampo) ?? []} onCambio={() => { reload(); cargar(); }} />
         </div>
       </div>
 
@@ -178,6 +182,81 @@ export function Equipo() {
   );
 }
 
+// Vendedores de prueba: un admin se da de alta con su correo para usar la
+// app del vendedor en producción. No los toca la sincronización y no cuentan
+// en los indicadores; al borrarlo se borra todo lo que registró.
+function VendedoresPrueba({ vendedores, productos, onCambio }: {
+  vendedores: Vendedor[]; productos: { id: string; nombre: string }[]; onCambio: () => void;
+}) {
+  const { showToast } = useToast();
+  const { email: miCorreo } = useSession();
+  const [abierto, setAbierto] = useState(false);
+  const [email, setEmail] = useState('');
+  const [productoId, setProductoId] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const abrir = () => { setEmail(miCorreo ?? ''); setProductoId(productos[0]?.id ?? ''); setAbierto(true); };
+  const crear = async () => {
+    setGuardando(true);
+    try {
+      await api.crearVendedorPrueba({ email: email.trim(), productoId });
+      setAbierto(false);
+      onCambio();
+      showToast(`Listo: entra a la app del vendedor con ${email.trim()}`);
+    } catch (err: any) {
+      showToast(err.message || 'No se pudo crear', 'error');
+    } finally {
+      setGuardando(false);
+    }
+  };
+  const borrar = async (v: Vendedor) => {
+    if (!window.confirm(`¿Borrar a ${v.nombre} y todo lo que registró (visitas, rutas, llamadas, ubicaciones)? No se puede deshacer.`)) return;
+    try {
+      const r = await api.borrarVendedorPrueba(v.id);
+      onCambio();
+      showToast(`Vendedor de prueba borrado · ${r.borrados.visitas ?? 0} visitas y ${r.borrados.prospectos ?? 0} negocios de su ruta`);
+    } catch (err: any) {
+      showToast(err.message || 'No se pudo borrar', 'error');
+    }
+  };
+  return (
+    <Card
+      titulo="Vendedores de prueba"
+      subtitulo="Para usar la app del vendedor con tu correo sin afectar al equipo ni a los indicadores"
+      accion={!abierto && <button style={boton.secundario} onClick={abrir}>Agregar</button>}
+    >
+      {vendedores.map((v) => (
+        <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, marginBottom: 8 }}>
+          <Avatar color={v.color} iniciales={v.iniciales} size={28} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, color: '#263238' }}>{v.nombre} <span style={{ fontWeight: 400, color: '#8a978f' }}>· {v.producto}</span></div>
+            <div style={{ fontSize: 11.5, color: '#8a978f', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.email}</div>
+          </div>
+          <Link to={`/rutas/${v.id}`} style={{ fontSize: 12.5, fontWeight: 600 }}>Ruta →</Link>
+          <button style={{ ...boton.peligro, padding: '5px 9px', fontSize: 12 }} onClick={() => borrar(v)}>Borrar</button>
+        </div>
+      ))}
+      {!vendedores.length && !abierto && <div style={{ fontSize: 12.5, color: '#8a978f' }}>Ninguno. Agrega uno con tu correo para probar la app en campo.</div>}
+      {abierto && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="correo@avivacredito.com" style={{ border: '1px solid #d9e1db', borderRadius: 8, padding: '8px 10px', fontSize: 13 }} />
+          <select value={productoId} onChange={(e) => setProductoId(e.target.value)} style={{ border: '1px solid #d9e1db', borderRadius: 8, padding: '8px 10px', fontSize: 13, background: '#fff' }}>
+            {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+          <div style={{ fontSize: 12, color: '#8a978f', lineHeight: 1.5 }}>
+            La sincronización no lo toca y no cuenta en Tablero, En vivo ni Visitas (salvo que lo elijas en el filtro de vendedores). Sus solicitudes de HubSpot salen de tu usuario de HubSpot.
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button style={boton.suave} onClick={() => setAbierto(false)}>Cancelar</button>
+            <button style={{ ...boton.primario, opacity: guardando || !email.trim() || !productoId ? 0.6 : 1 }} disabled={guardando || !email.trim() || !productoId} onClick={crear}>
+              {guardando ? 'Creando…' : 'Crear vendedor de prueba'}
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // Distancia máxima al negocio para registrar una visita (el "cerco"). Es
 // también la que cuenta una visita como "hecha en el negocio".
 function RegistroVisitas() {
@@ -237,7 +316,7 @@ function ReporteVista({ r }: { r: ReporteSync }) {
       </div>
       {r.sinColaborador > 0 && (
         <div style={{ fontSize: 12, color: '#8a978f', marginTop: 10 }}>
-          {r.sinColaborador === 1 ? '1 vendedor no aparece' : `${r.sinColaborador} vendedores no aparecen`} en la base de colaboradores (altas anteriores a esta integración); se dejan como están.
+          {r.sinColaborador === 1 ? '1 vendedor no aparece' : `${r.sinColaborador} vendedores no aparecen`} en la base de colaboradores (altas anteriores a esta integración): {r.ok ? 'quedaron' : 'quedarían'} como ya no activos. Su historial se conserva y, si aparecen en la base, se reactivan solos.
         </div>
       )}
       {(r.altas.length > 0 || r.bajas.length > 0 || r.reactivados.length > 0) && (

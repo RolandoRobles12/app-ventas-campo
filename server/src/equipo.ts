@@ -12,7 +12,10 @@
 //     contando en el historial) y sus pendientes dejan de bloquear esos
 //     negocios para el planeador (ver exclusiones en routes/rutas.ts).
 //   - Reingreso: un vendedor dado de baja que vuelve a estar activo se reactiva.
-//   - Un vendedor sin colaborador en la base (alta manual o de prueba) no se toca.
+//   - Un vendedor que no aparece en la base de colaboradores (p. ej. las altas
+//     de antes de esta integración) también queda 'Baja': solo es activo quien
+//     la base dice. Su historial se conserva y, si después aparece, se reactiva.
+//   - Los vendedores de prueba (ver prueba.ts) no se tocan nunca.
 //   - Si una corrida daría de baja a demasiada gente de golpe, se detiene sin
 //     escribir nada (como el freno de aviva-recruiting ante una hoja recortada);
 //     el admin puede forzarla si de verdad es así.
@@ -81,7 +84,7 @@ async function asegurarProductos(config: ConfigEquipo): Promise<void> {
 
 const PALETA = ['#ef8b3e', '#0e8a8a', '#22a36c', '#c96a1e', '#2a6fdb', '#7a52c9', '#a855f7', '#c0392b'];
 
-function colorPara(seed: string): string {
+export function colorPara(seed: string): string {
   let hash = 0;
   for (const ch of seed) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return PALETA[hash % PALETA.length];
@@ -109,7 +112,7 @@ export interface ReporteSync {
   bajas: { nombre: string; motivo: string }[];
   reactivados: { nombre: string }[];
   actualizados: number;
-  // Vendedores que no tienen colaborador en la base (alta manual o de prueba).
+  // De las bajas, cuántas son porque el vendedor no aparece en la base.
   sinColaborador: number;
   // Si la corrida se frenó, por qué (no se escribió nada).
   detenido: string | null;
@@ -158,9 +161,14 @@ export async function sincronizarEquipo(opts: { origen: 'manual' | 'programada';
   await asegurarProductos(config);
 
   const porEmail = new Map<string, { id: string; data: VendedorSync }>();
+  // Correos con vendedor de prueba (ver prueba.ts): la sincronización no los
+  // toca ni crea otro vendedor con ese correo.
+  const deprueba = new Set<string>();
   for (const d of vendedoresSnap.docs) {
-    const data = d.data() as VendedorSync;
-    if (data.email) porEmail.set(data.email.toLowerCase(), { id: d.id, data });
+    const data = d.data() as VendedorSync & { prueba?: boolean };
+    if (!data.email) continue;
+    if (data.prueba) deprueba.add(data.email.toLowerCase());
+    else porEmail.set(data.email.toLowerCase(), { id: d.id, data });
   }
   const colaboradorPorEmail = new Map(colaboradores.map((c) => [c.email, c]));
 
@@ -182,6 +190,7 @@ export async function sincronizarEquipo(opts: { origen: 'manual' | 'programada';
     const deCampo = config.productosCampo.includes(c.producto as ProductoRecruiting);
     const inactivo = motivoInactivo(c, hoy);
     if (deCampo) reporte.enProductosCampo++;
+    if (deprueba.has(c.email)) continue;
     const existente = porEmail.get(c.email);
 
     if (deCampo && !inactivo) {
@@ -230,7 +239,19 @@ export async function sincronizarEquipo(opts: { origen: 'manual' | 'programada';
   }
 
   for (const [email, v] of porEmail) {
-    if (!colaboradorPorEmail.has(email) && v.data.estado !== 'Baja') reporte.sinColaborador++;
+    if (colaboradorPorEmail.has(email) || v.data.estado === 'Baja') continue;
+    const motivo = 'No aparece en la base de colaboradores';
+    escrituras.push({ ref: db.collection('vendedores').doc(v.id), crear: false, data: { estado: 'Baja', bajaEn: ahora, bajaMotivo: motivo } });
+    reporte.bajas.push({ nombre: v.data.nombre, motivo });
+    reporte.sinColaborador++;
+  }
+  // Sin correo no se pueden ligar con la base ni entrar a la app.
+  for (const d of vendedoresSnap.docs) {
+    const v = d.data() as VendedorSync & { prueba?: boolean };
+    if (v.email || v.prueba || v.estado === 'Baja') continue;
+    const motivo = 'Sin correo: no se puede ligar con la base de colaboradores';
+    escrituras.push({ ref: d.ref, crear: false, data: { estado: 'Baja', bajaEn: ahora, bajaMotivo: motivo } });
+    reporte.bajas.push({ nombre: v.nombre, motivo });
   }
 
   // Freno: una base a medio editar o una lectura incompleta no debe dejar a

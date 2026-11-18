@@ -1,21 +1,25 @@
 import { AggregateField } from 'firebase-admin/firestore';
 import { db, FieldPath, Timestamp } from '../db.js';
 import { chunkArray, isEmptyRestriction } from '../firestore-helpers.js';
+import { idsDePrueba, idsReales } from '../prueba.js';
 
 // Resuelve el filtro combinado de producto(s)/vendedor(es) del admin a una
 // lista de vendedorId para usar en `where('vendedorId', 'in', ids)`.
 // null = sin restricción (todos); [] = el filtro no matchea a nadie.
 // Si se dan vendedorIds explícitos, mandan sobre productoIds (ya vienen
 // acotados a esos productos desde el selector del cliente).
+// Los vendedores de prueba (ver prueba.ts) solo entran si se eligen a
+// propósito: en "todos" o "por producto" quedan fuera.
 export async function resolveVendedorIds(vendedorIds?: string[], productoIds?: string[]): Promise<string[] | null> {
   if (vendedorIds && vendedorIds.length) return vendedorIds;
   if (productoIds && productoIds.length) {
-    const snaps = await Promise.all(
-      chunkArray(productoIds).map((c) => db.collection('vendedores').where('productoId', 'in', c).get()),
-    );
-    return snaps.flatMap((s) => s.docs.map((d) => d.id));
+    const [snaps, prueba] = await Promise.all([
+      Promise.all(chunkArray(productoIds).map((c) => db.collection('vendedores').where('productoId', 'in', c).get())),
+      idsDePrueba(),
+    ]);
+    return snaps.flatMap((s) => s.docs.map((d) => d.id)).filter((id) => !prueba.has(id));
   }
-  return null;
+  return idsReales();
 }
 
 // La lista que devuelve resolveVendedorIds puede superar los 30 valores que

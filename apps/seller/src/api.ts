@@ -8,6 +8,8 @@ export interface Vendedor {
   producto: string;
   zona: string | null;
   rutaConfig: { visitasPorDia: number; propiosPorDia?: number; dias: number[]; zonas: { etiqueta: string }[] } | null;
+  // Vendedor de prueba de un admin (sus datos no cuentan en los indicadores).
+  prueba?: boolean;
   // Cuándo vio el recorrido de bienvenida (null: todavía no).
   onboardingVisto?: string | null;
 }

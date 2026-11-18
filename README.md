@@ -142,6 +142,8 @@ Cómo se refleja aquí (`server/src/equipo.ts`):
   gestionan en aviva-recruiting. No se borra nada (sus visitas siguen en el
   historial) y sus pendientes dejan de bloquear esos negocios para el
   planeador. Si vuelve a estar activo, se reactiva solo.
+- Un vendedor que **no aparece en la base** (p. ej. las altas de antes de esta integración, de aviva-hr) o que no tiene correo también queda con `estado: 'Baja'` (*No aparece en la base de colaboradores*): solo es activo quien la base dice. Su historial se conserva y, si después aparece, se reactiva solo. La primera corrida con esta regla puede rebasar el freno de abajo; el admin ve la lista y la aplica con *Aplicar de todos modos*.
+- **Vendedores de prueba** (*Equipo → Vendedores de prueba*): un admin se da de alta con su propio correo (aunque esté en la base con un puesto que no es de campo) para usar la app del vendedor en producción. La sincronización no los toca; no cuentan en Tablero, En vivo, Visitas, Llamadas ni mapas salvo que se elijan en el filtro de vendedores (`resolveVendedorIds`); no les apartan negocios a los vendedores reales en el planeador ni cuentan como "ya era de alguien"; la app muestra *MODO PRUEBA*. *Borrar* elimina el vendedor y todo lo que registró (visitas, ruta, llamadas, ubicaciones, fotos). Sus solicitudes de HubSpot salen del usuario de HubSpot de ese correo. Ver `server/src/prueba.ts`.
 - Una "Baja programada" sigue activa hasta su fecha. Un puesto vacío en la
   hoja no basta para dar de baja a nadie. Un vendedor sin colaborador en la
   base (alta manual o de prueba) no se toca.

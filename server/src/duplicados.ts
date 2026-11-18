@@ -1,6 +1,7 @@
 import { db } from './db.js';
 import { haversineMetros } from './firestore-helpers.js';
 import { negocioIdDe, normalizarTexto } from './negocios.js';
+import { idsDePrueba } from './prueba.js';
 
 // ¿El "negocio nuevo" que registró el vendedor en realidad ya era de alguien?
 // Si sí, la visita se guarda, pero no cuenta para su meta de negocios nuevos
@@ -73,8 +74,12 @@ export async function buscarDuplicado(
       && nombresParecidos(n.nombre, c.nombre || '')),
   ];
   const limite = Date.now() - DIAS_RECIENTE * 86_400_000;
+  // Lo de un vendedor de prueba no cuenta contra un vendedor real (ni al revés).
+  const prueba = await idsDePrueba();
+  const esPrueba = prueba.has(vendedorId);
   let motivo: MotivoDuplicado | null = null;
   for (const c of candidatos) {
+    if (c.vendedorId && c.vendedorId !== vendedorId && prueba.has(c.vendedorId) !== esPrueba) continue;
     if (c.estado === 'por_visitar' && c.vendedorId === vendedorId) return 'en_tu_ruta';
     if (c.estado === 'por_visitar') motivo = 'ruta_de_otro';
     else if (!motivo && (c.visitadoEn?.toMillis() ?? 0) >= limite) motivo = 'visitado_reciente';

@@ -24,6 +24,8 @@ export interface VendedorDoc {
   hubManagerNombre?: string;
   headNombre?: string;
   fuente?: string;
+  // Vendedor de prueba de un admin (ver prueba.ts).
+  prueba?: boolean;
   bajaEn?: Timestamp | null;
   bajaMotivo?: string | null;
   // Zona, giros y ritmo con los que se planeó su última ruta; "Renovar" la reutiliza.
@@ -66,6 +68,7 @@ export function shapeVendedor(id: string, v: VendedorDoc, productoNombre?: strin
     hubManagerNombre: v.hubManagerNombre ?? null,
     headNombre: v.headNombre ?? null,
     fuente: v.fuente ?? null,
+    prueba: !!v.prueba,
     bajaEn: toIso(v.bajaEn ?? null),
     bajaMotivo: v.bajaMotivo ?? null,
     // Siempre en la forma actual (varias zonas), aunque se haya guardado con la vieja.

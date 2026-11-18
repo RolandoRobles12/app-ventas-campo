@@ -73,8 +73,9 @@ async function leerVendedor(id: string): Promise<VendedorDoc & { id: string }> {
 async function exclusiones(productoId: string, vendedorId: string, reemplazar: boolean): Promise<Set<string>> {
   // Solo vendedores activos: lo pendiente de alguien que ya no está activo
   // no debe bloquear esos negocios para el resto.
-  const companeros = (await db.collection('vendedores').where('productoId', '==', productoId).select('estado').get())
-    .docs.filter((d) => d.get('estado') !== 'Baja').map((d) => d.id);
+  // Ni los de prueba: lo suyo no debe apartarle negocios a nadie real.
+  const companeros = (await db.collection('vendedores').where('productoId', '==', productoId).select('estado', 'prueba').get())
+    .docs.filter((d) => d.get('estado') !== 'Baja' && (d.id === vendedorId || !d.get('prueba'))).map((d) => d.id);
   const ids = [...new Set([...companeros, vendedorId])];
   const limiteVisitado = Date.now() - DIAS_SIN_REPETIR_VISITADO * 86_400_000;
   const snaps = await Promise.all(chunkArray(ids).map((c) => db.collection('prospectos')
