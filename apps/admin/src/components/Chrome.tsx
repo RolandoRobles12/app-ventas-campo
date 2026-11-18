@@ -100,7 +100,7 @@ export function TopBar({ userEmail, onSignOut, onAyuda }: { userEmail: string; o
 // Recorrido del panel: qué es cada pantalla. Sale solo la primera vez (por
 // navegador) y se vuelve a ver con "¿Cómo funciona?".
 const PASOS_ADMIN: PasoRecorrido[] = [
-  { objetivo: 'nav/tablero', titulo: 'Tablero', texto: 'El embudo de campo por día, semana, mes o las fechas que elijas: de la meta (ruta + negocios nuevos) a la solicitud en HubSpot. Las solicitudes cuentan por la que el vendedor ligó a su visita. Abajo, el mismo embudo por vendedor y lo que requiere atención.' },
+  { objetivo: 'nav/tablero', titulo: 'Tablero', texto: 'El embudo de campo por día, semana, mes o las fechas que elijas: de la meta (ruta + negocios nuevos) a la solicitud, su aprobación y su desembolso, con el monto desembolsado. Cada solicitud cuenta por la visita a la que el vendedor la ligó. Abajo, el mismo embudo por producto y por vendedor.' },
   { objetivo: 'nav/en-vivo', titulo: 'En vivo', texto: 'Dónde está cada vendedor ahorita, cuántas visitas lleva hoy (de su ruta y negocios nuevos) y cuándo dio señal por última vez.' },
   { objetivo: 'nav/visitas', titulo: 'Visitas', texto: 'Cada visita con su foto, su resultado y si se hizo en el negocio. Filtra por origen (negocios nuevos o de la ruta) y por alertas: ubicaciones que reportaron los vendedores (las aceptas o descartas aquí), GPS sospechoso y solicitudes sin ligar.' },
   { objetivo: 'nav/llamadas', titulo: 'Llamadas y agenda', texto: 'A qué negocios llamaron los vendedores, qué pasó y las visitas que agendaron. El vendedor recibe avisos de sus citas a las 9 am, 1 hora y 30 minutos antes.' },
@@ -121,7 +121,9 @@ const NOVEDADES: [string, string][] = [
   ['Rutas: meta de negocios nuevos', 'En "Ritmo", decide cuántas de sus visitas diarias son negocios que encuentra él en la calle. La ruta trae solo la diferencia.'],
   ['Rutas: donde no puede ir', 'Marca zonas en rojo (buscando un lugar o dibujándolas) para uno o varios vendedores. No se le planean negocios ahí y la app no le deja registrar visitas.'],
   ['Visitas en el negocio', 'La app solo deja guardar la visita cerca del negocio (Equipo → Registro de visitas). Si el vendedor dice que el negocio está en otro lugar, lo revisas en Visitas → Alertas.'],
-  ['Solicitudes ligadas', 'Al marcar "Hizo solicitud", el vendedor elige cuál es en HubSpot. Si no aparecía, la liga después o se liga sola. El Tablero cuenta por esa liga.'],
+  ['Solicitudes ligadas', 'Al marcar "Hizo solicitud", el vendedor elige cuál es su solicitud. Si no aparecía, la liga después o se liga sola. El Tablero cuenta por esa liga (ya no por la hora, salvo en visitas viejas).'],
+  ['Desembolsos', 'El embudo termina en las solicitudes desembolsadas y su monto: por producto, por vendedor y la tasa de desembolso de las aprobadas.'],
+  ['Tipificación corregida', 'Si el vendedor marcó otro resultado pero sí hizo la solicitud (o al revés), lo corrige desde su app. En Visitas ves el resultado original y en el Tablero cuántas corrigió cada uno.'],
   ['Avisos de citas', 'Los vendedores reciben un aviso a las 9 am y 1 hora y 30 minutos antes de cada cita.'],
   ['Equipo', 'Solo es activo quien está en la base de colaboradores. Para probar la app con tu correo, crea un vendedor de prueba: no cuenta en los indicadores.'],
 ];

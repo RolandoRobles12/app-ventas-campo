@@ -30,6 +30,7 @@ function alertasTexto(v: VisitaListItem): string {
     v.fueraDeCerco && 'Enviada sin señal fuera del cerco',
     v.sospechaGps?.includes('salto') && 'GPS sospechoso: salto imposible',
     v.solicitudPendiente && 'Solicitud sin ligar',
+    v.resultadoOriginal && `Resultado corregido (antes: ${v.resultadoOriginal})`,
   ].filter(Boolean).join('; ');
 }
 
@@ -321,6 +322,9 @@ export function Visitas() {
               <div><span style={prodBadgeStyle(v.producto)}>{v.producto}</span></div>
               <div>
                 <span style={resultadoBadgeStyle(v.resultado)}>{v.resultado}</span>
+                {v.resultadoOriginal && (
+                  <div style={{ fontSize: 11, color: '#94500f', marginTop: 3 }} title="El vendedor tipificó otro resultado y lo corrigió después.">Corregida · antes: {v.resultadoOriginal}</div>
+                )}
                 {v.dealId ? (
                   <div style={{ fontSize: 11, color: '#5a665f', marginTop: 3 }} title={v.vinculoSolicitud === 'auto' ? 'Se ligó sola: era la solicitud de este vendedor creada más cerca de la hora de la visita.' : v.vinculoSolicitud === 'admin' ? 'La ligó un administrador.' : 'La eligió el vendedor al registrar la visita.'}>
                     HubSpot: {v.dealNombre || v.dealId}{v.vinculoSolicitud === 'auto' ? ' · se ligó sola' : ''}

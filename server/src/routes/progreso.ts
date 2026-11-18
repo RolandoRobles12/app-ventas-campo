@@ -4,7 +4,7 @@ import { toIso } from '../firestore-helpers.js';
 import { puedeActuarComoVendedor, vendedorAjeno } from '../auth.js';
 import { diaSemana, fechaMx, hoyMx, inicioDiaMx, sumarDias } from '../fechas.js';
 import { DIAS_POR_DEFECTO, configGuardada } from '../rutas/planificador.js';
-import { sinLigarDe } from '../solicitudes.js';
+import { sinLigarDe, sinVisitaDe } from '../solicitudes.js';
 import type { VendedorDoc } from './vendedores.js';
 
 // Avance del vendedor para su app: visitas de hoy, racha y lo que registró
@@ -24,6 +24,7 @@ interface VisitaDoc {
   fotos?: string[];
   esNegocioNuevo?: boolean;
   propio?: boolean;
+  dealId?: string | null;
   ubicacionValida?: boolean | null;
   createdAt: Timestamp;
 }
@@ -87,7 +88,11 @@ progresoRouter.get('/:vendedorId', async (req, res) => {
 
   const config = configGuardada(vendedor?.rutaConfig);
   // "Hizo solicitud" que siguen sin su solicitud de HubSpot: se le recuerdan.
-  const solicitudesSinLigar = await sinLigarDe(vendedorId).catch(() => []);
+  const [solicitudesSinLigar, solicitudesSinVisita] = await Promise.all([
+    sinLigarDe(vendedorId).catch(() => []),
+    // Solicitudes suyas sin visita: probablemente tipificó otro resultado.
+    sinVisitaDe(vendedorId).catch(() => []),
+  ]);
   const racha = await calcularRacha(vendedorId, porDia, config?.dias ?? DIAS_POR_DEFECTO, hoy);
   const deHoy = visitas.filter((v) => fechaMx(v.createdAt.toDate()) === hoy);
 
@@ -102,6 +107,7 @@ progresoRouter.get('/:vendedorId', async (req, res) => {
     // ya eran de alguien no cuentan).
     nuevosHoy: deHoy.filter((v) => v.esNegocioNuevo).length,
     solicitudesSinLigar,
+    solicitudesSinVisita,
     propiosHoy: deHoy.filter((v) => v.esNegocioNuevo && v.propio !== false).length,
     racha,
     semana: Array.from({ length: 7 }, (_, i) => {
@@ -118,6 +124,8 @@ progresoRouter.get('/:vendedorId', async (req, res) => {
       fotos: (v.fotos ?? []).length,
       esNegocioNuevo: !!v.esNegocioNuevo,
       propio: v.esNegocioNuevo ? v.propio !== false : null,
+      // Ya tiene su solicitud ligada (no se le ofrece para otra).
+      ligada: !!v.dealId,
       ubicacionValida: v.ubicacionValida ?? null,
       createdAt: toIso(v.createdAt),
     })),

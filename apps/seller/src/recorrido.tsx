@@ -39,7 +39,8 @@ const bienvenidaInicial = (v: Vendedor) => !v.onboardingVisto && !vistoEnEsteTel
 const PASOS: PasoRecorrido[] = [
   { objetivo: 'avance', titulo: 'Tu meta del día', texto: 'Aquí ves cuántas visitas llevas y cuántas te faltan. Si tu líder te pide negocios nuevos, ves dos barras: tu ruta y los nuevos (una no cubre a la otra). Si cumples varios días seguidos, sumas a tu racha 🔥.' },
   { objetivo: 'avisos', titulo: 'Avisos de tus citas', texto: 'Actívalos y te recordamos tus citas a las 9 am, 1 hora y 30 minutos antes de cada una.' },
-  { objetivo: 'sin-ligar', titulo: 'Solicitudes sin ligar', texto: 'Cuando marcas "Hizo solicitud" y todavía no aparecía en HubSpot, aquí te la recordamos para que elijas cuál es.' },
+  { objetivo: 'sin-ligar', titulo: 'Solicitudes sin ligar', texto: 'Cuando marcas "Hizo solicitud" y la solicitud todavía no aparecía, aquí te la recordamos para que elijas cuál es. Si no hubo solicitud, corrige el resultado aquí mismo.' },
+  { objetivo: 'sin-visita', titulo: 'Solicitudes sin visita', texto: 'Si hiciste una solicitud pero marcaste otro resultado en la visita, aquí te preguntamos de qué visita es para corregirla.' },
   { objetivo: 'siguiente', titulo: 'Tu siguiente parada', texto: 'Es el negocio más cercano (o tu próxima cita). "Cómo llegar" te muestra el camino en el mapa; cuando estés ahí, toca "Registrar visita".' },
   { objetivo: 'vistas', titulo: 'Tu ruta y tus llamadas', texto: 'En "Llamar" están los negocios con teléfono. Llama antes de ir: si agendas una cita, aparece en tu ruta ese día y a esa hora.' },
   { objetivo: 'lista', titulo: 'El resto de tu día', texto: 'Toca cualquier negocio para registrar su visita. Van del más cercano al más lejano; los de otros días están más abajo.' },

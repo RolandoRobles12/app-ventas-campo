@@ -44,6 +44,11 @@ interface VisitaTablero {
   propio: boolean;
   // La solicitud de HubSpot que se le ligó (a mano o sola), si ya tiene.
   dealId: string | null;
+  // Registrada ya con la atribución nueva (el vendedor elige su solicitud):
+  // a esas no se les busca solicitud por hora, aunque sigan sin ligar.
+  atribucionNueva: boolean;
+  // Se corrigió su resultado después (el vendedor tipificó mal).
+  corregida: boolean;
 }
 
 // Una visita solo se puede comprobar si la tablet mandó GPS y el negocio
@@ -163,7 +168,7 @@ const ultimoDia = (r: Rango) => fechaMx(new Date(r.end - 1));
 // ---------- Lecturas ----------
 
 async function visitasEnRango(ids: string[] | null, r: { start: number; end: number }, soloSolicitudes = false): Promise<VisitaTablero[]> {
-  const campos = ['vendedorId', 'resultado', 'createdAt', 'negocioId', 'prospectoId', 'ubicacionValida', 'esNegocioNuevo', 'propio', 'gpsAccuracy', 'dealId'];
+  const campos = ['vendedorId', 'resultado', 'createdAt', 'negocioId', 'prospectoId', 'ubicacionValida', 'esNegocioNuevo', 'propio', 'gpsAccuracy', 'dealId', 'solicitudPendiente', 'tipificacionCorregida'];
   const base = (q: FirebaseFirestore.Query) => {
     const x = soloSolicitudes ? q.where('resultado', '==', SOLICITUD) : q;
     return x.where('createdAt', '>=', Timestamp.fromMillis(r.start)).where('createdAt', '<', Timestamp.fromMillis(r.end)).select(...campos);
@@ -173,7 +178,7 @@ async function visitasEnRango(ids: string[] | null, r: { start: number; end: num
   return snaps.flatMap((s) => s.docs.map((d) => {
     const v = d.data() as {
       vendedorId: string; resultado: string; createdAt: Timestamp; negocioId?: string | null; prospectoId?: string | null;
-      ubicacionValida?: boolean | null; esNegocioNuevo?: boolean; propio?: boolean; gpsAccuracy?: number | null; dealId?: string | null;
+      ubicacionValida?: boolean | null; esNegocioNuevo?: boolean; propio?: boolean; gpsAccuracy?: number | null; dealId?: string | null; solicitudPendiente?: boolean; tipificacionCorregida?: boolean;
     };
     return {
       id: d.id, vendedorId: v.vendedorId, resultado: v.resultado, createdAt: v.createdAt.toMillis(),
@@ -181,6 +186,8 @@ async function visitasEnRango(ids: string[] | null, r: { start: number; end: num
       sinComprobar: motivoSinComprobar(v),
       nuevo: !!v.esNegocioNuevo, propio: !!v.esNegocioNuevo && v.propio !== false,
       dealId: v.dealId ?? null,
+      atribucionNueva: v.solicitudPendiente !== undefined,
+      corregida: !!v.tipificacionCorregida,
     };
   }));
 }
@@ -213,9 +220,10 @@ async function faltantesPorId(solicitudes: VisitaTablero[], deals: DealCampo[]):
   return faltan.length ? dealsPorId(faltan) : [];
 }
 
-// Primero cuentan las solicitudes ligadas (el vendedor eligió cuál era, o
-// se ligó sola después); las visitas sin ligar —las de antes de poder
-// elegirla— se emparejan por hora con las solicitudes que quedaron libres.
+// Cuentan las solicitudes ligadas (el vendedor eligió cuál era, o se ligó
+// sola después). Solo las visitas de antes de poder elegirla se emparejan
+// por hora (±30 min) con las solicitudes que quedaron libres; una visita
+// nueva sin ligar no cuenta hasta que se liga.
 export function confirmar(solicitudes: VisitaTablero[], deals: DealCampo[], ownerDe: Map<string, string>, extra: DealCampo[] = []): Map<string, DealCampo> {
   const porId = new Map([...deals, ...extra].map((d) => [d.id, d]));
   const out = new Map<string, DealCampo>();
@@ -224,7 +232,7 @@ export function confirmar(solicitudes: VisitaTablero[], deals: DealCampo[], owne
     if (deal) out.set(v.id, deal);
   }
   const usados = new Set([...out.values()].map((d) => d.id));
-  const sinLigar = solicitudes.filter((v) => !v.dealId);
+  const sinLigar = solicitudes.filter((v) => !v.dealId && !v.atribucionNueva);
   for (const [visita, deal] of emparejar(sinLigar, deals.filter((d) => !usados.has(d.id)), ownerDe)) out.set(visita, deal);
   return out;
 }
@@ -266,9 +274,12 @@ function agrupar<T>(l: T[], llave: (x: T) => string): Map<string, T[]> {
   return m;
 }
 
-type EstadoDeal = 'aprobada' | 'rechazada' | 'en_proceso';
-function estadoDeal(d: DealCampo): EstadoDeal {
-  // Si pasó por las dos etapas, manda la más reciente.
+type EstadoDeal = 'desembolsada' | 'aprobada' | 'rechazada' | 'en_proceso';
+export function estadoDeal(d: DealCampo): EstadoDeal {
+  // Desembolsada es el final: también cuenta como aprobada (aunque en
+  // HubSpot haya brincado la etapa "Aprobado").
+  if (d.desembolsado != null && (d.rechazado == null || d.desembolsado >= d.rechazado)) return 'desembolsada';
+  // Si pasó por aprobada y rechazada, manda la más reciente.
   if (d.aprobado != null && (d.rechazado == null || d.aprobado >= d.rechazado)) return 'aprobada';
   if (d.rechazado != null) return 'rechazada';
   return 'en_proceso';
@@ -294,9 +305,13 @@ function solicitudesDe(solicitudes: VisitaTablero[], ctx: Contexto) {
     confirmadasVisitas++;
     if (!porNegocio.has(v.negocio)) porNegocio.set(v.negocio, deal);
   }
-  const estados = [...porNegocio.values()].map(estadoDeal);
-  const aprobadas = estados.filter((e) => e === 'aprobada').length;
+  const deals = [...porNegocio.values()];
+  const estados = deals.map(estadoDeal);
+  const desembolsadas = estados.filter((e) => e === 'desembolsada').length;
+  const aprobadas = desembolsadas + estados.filter((e) => e === 'aprobada').length;
   const rechazadas = estados.filter((e) => e === 'rechazada').length;
+  // La venta: suma del monto de las desembolsadas (las que no traen monto no suman).
+  const montoDesembolsado = deals.reduce((t, d, i) => t + (estados[i] === 'desembolsada' ? d.monto ?? 0 : 0), 0);
   return {
     marcadas: solicitudes.length,
     confirmadasVisitas: ctx.hubspotOk ? confirmadasVisitas : null,
@@ -304,6 +319,8 @@ function solicitudesDe(solicitudes: VisitaTablero[], ctx: Contexto) {
     aprobadas: ctx.hubspotOk ? aprobadas : null,
     rechazadas: ctx.hubspotOk ? rechazadas : null,
     enProceso: ctx.hubspotOk ? porNegocio.size - aprobadas - rechazadas : null,
+    desembolsadas: ctx.hubspotOk ? desembolsadas : null,
+    montoDesembolsado: ctx.hubspotOk ? Math.round(montoDesembolsado) : null,
   };
 }
 
@@ -366,10 +383,14 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
     ...s,
     conversion: s.solicitudes != null ? pct1(s.solicitudes, negociosReales) : null,
     aprobacion: s.aprobadas != null ? pct1(s.aprobadas, s.aprobadas + (s.rechazadas ?? 0)) : null,
+    // De las aprobadas, cuántas ya se desembolsaron.
+    desembolso: s.desembolsadas != null && s.aprobadas != null ? pct1(s.desembolsadas, s.aprobadas) : null,
     confirmacion: s.confirmadasVisitas != null ? pct1(s.confirmadasVisitas, s.marcadas) : null,
     // Visitas hechas en el negocio (GPS dentro del cerco), de las que se pueden comprobar.
     // Las que no se pueden comprobar no cuentan ni a favor ni en contra; se
     // dice cuántas son y por qué.
+    // Visitas a las que se les corrigió el resultado (tipificó mal).
+    corregidas: visitas.filter((v) => v.corregida).length,
     validables,
     enNegocio: pct1(validas, validables),
     sinComprobar,
@@ -496,7 +517,7 @@ tableroRouter.get('/', async (req, res) => {
     tendencia: tendencia.map((r, i) => {
       const s = solicitudesDe(enRango(solicitudes, r), ctx);
       const visitas = vista === 'rango' || i === tendencia.length - 1 ? enRango(act, r).length : conteos[i];
-      return { desde: r.desde, hasta: r.hasta, parcial: r.parcial, visitas, marcadas: s.marcadas, solicitudes: s.solicitudes, aprobadas: s.aprobadas, rechazadas: s.rechazadas };
+      return { desde: r.desde, hasta: r.hasta, parcial: r.parcial, visitas, marcadas: s.marcadas, solicitudes: s.solicitudes, aprobadas: s.aprobadas, rechazadas: s.rechazadas, desembolsadas: s.desembolsadas, montoDesembolsado: s.montoDesembolsado };
     }),
   });
 });

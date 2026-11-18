@@ -71,6 +71,8 @@ export interface VisitaReciente {
   esNegocioNuevo: boolean;
   // Negocio nuevo que cuenta para su meta (false: ya era de alguien).
   propio?: boolean | null;
+  // Ya tiene su solicitud ligada.
+  ligada?: boolean;
   ubicacionValida: boolean | null;
   createdAt: string;
 }
@@ -103,6 +105,8 @@ export interface Progreso {
   propiosHoy?: number;
   // "Hizo solicitud" de los últimos días que siguen sin su solicitud de HubSpot.
   solicitudesSinLigar?: { visitaId: string; nombreNegocio: string; createdAt: string }[];
+  // Solicitudes suyas que no están en ninguna visita (tipificó otro resultado).
+  solicitudesSinVisita?: { dealId: string; nombre: string; creado: number }[];
   racha: number;
   semana: { fecha: string; visitas: number }[];
   recientes: VisitaReciente[];
@@ -144,8 +148,13 @@ export const api = {
     req<{ id: string; duplicado?: MotivoDuplicado | null; solicitud?: ResultadoLigar | null }>('/visitas', { method: 'POST', body: JSON.stringify(data) }),
   solicitudesParaLigar: (vendedorId: string, opts: { visitaId?: string; fresco?: boolean } = {}) =>
     req<{ estado: EstadoSolicitudes; items: OpcionSolicitud[] }>(`/solicitudes/vendedor/${vendedorId}?${new URLSearchParams({ ...(opts.visitaId ? { visitaId: opts.visitaId } : {}), ...(opts.fresco ? { fresco: '1' } : {}) })}`),
-  ligarSolicitud: (visitaId: string, dealId: string) =>
-    req<{ ok: boolean; nombre: string }>('/solicitudes/ligar', { method: 'POST', body: JSON.stringify({ visitaId, dealId }) }),
+  // corregirResultado: la visita tenía otro resultado y pasa a "Hizo solicitud".
+  ligarSolicitud: (visitaId: string, dealId: string, corregirResultado = false) =>
+    req<{ ok: boolean; nombre: string }>('/solicitudes/ligar', { method: 'POST', body: JSON.stringify({ visitaId, dealId, corregirResultado }) }),
+  corregirResultado: (visitaId: string, resultado: string) =>
+    req<{ ok: boolean }>('/solicitudes/corregir', { method: 'POST', body: JSON.stringify({ visitaId, resultado }) }),
+  descartarSinVisita: (vendedorId: string, dealId: string) =>
+    req<void>('/solicitudes/sin-visita/descartar', { method: 'POST', body: JSON.stringify({ vendedorId, dealId }) }),
   config: () => req<{ radioCercoMetros: number }>('/config'),
   registrarTokenPush: (vendedorId: string, token: string) =>
     req<void>('/notificaciones/token', { method: 'POST', body: JSON.stringify({ vendedorId, token }) }),

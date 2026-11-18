@@ -34,7 +34,7 @@ const diapositivas = (nombre: string): Diapositiva[] => [
     titulo: 'Registra cada visita',
     texto: 'Cuando estés en el negocio, toca "Registrar visita". Son tres pasos:',
     puntos: [
-      'Elige cómo te fue. Si hizo solicitud, elige cuál es en HubSpot (si todavía no aparece, la ligas después)',
+      'Elige cómo te fue. Si hizo solicitud, elige cuál de tus solicitudes es (si todavía no aparece, la ligas después)',
       'Toma al menos una foto del negocio: es tu evidencia',
       'Regístrala estando en el negocio: si estás lejos, la app te pide acercarte',
     ],

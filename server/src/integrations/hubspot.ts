@@ -19,6 +19,10 @@ export const PIPELINE_CAMPO = process.env.HUBSPOT_PIPELINE_ID || '890269050';
 // "Aprobado" / "Rechazado" de ese pipeline (vacías si nunca entró).
 const PROP_APROBADO = 'hs_v2_date_entered_1341410960';
 const PROP_RECHAZADO = 'hs_v2_date_entered_1341410959';
+// Fecha en que entró a la etapa "Desembolsado".
+const PROP_DESEMBOLSADO = 'hs_v2_date_entered_1341580187';
+// Monto del deal (el "Importe" estándar de HubSpot, salvo que se configure otra propiedad).
+const PROP_MONTO = process.env.HUBSPOT_PROP_MONTO || 'amount';
 
 const CACHE_DEALS_MS = 15 * 60 * 1000;
 const CACHE_OWNERS_MS = 60 * 60 * 1000;
@@ -81,7 +85,19 @@ export interface DealCampo {
   creado: number; // ms
   aprobado: number | null; // ms en que entró a "Aprobado"
   rechazado: number | null; // ms en que entró a "Rechazado"
+  desembolsado: number | null; // ms en que entró a "Desembolsado"
+  monto: number | null;
 }
+
+const numero = (v: string | null | undefined): number | null => {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const etapas = (p: Record<string, string | null>) => ({
+  aprobado: fechaMs(p[PROP_APROBADO]), rechazado: fechaMs(p[PROP_RECHAZADO]),
+  desembolsado: fechaMs(p[PROP_DESEMBOLSADO]), monto: numero(p[PROP_MONTO]),
+});
 
 const fechaMs = (v: string | null | undefined): number | null => {
   if (!v) return null;
@@ -113,7 +129,7 @@ async function buscarDeals(ownerIds: string[], desde: number, hasta: number): Pr
               { propertyName: 'hubspot_owner_id', operator: 'IN', values: bloque },
             ],
           }],
-          properties: ['createdate', 'hubspot_owner_id', PROP_APROBADO, PROP_RECHAZADO],
+          properties: ['createdate', 'hubspot_owner_id', PROP_APROBADO, PROP_RECHAZADO, PROP_DESEMBOLSADO, PROP_MONTO],
           sorts: [{ propertyName: 'createdate', direction: 'ASCENDING' }],
           limit: PAGINA,
           ...(after ? { after } : {}),
@@ -131,7 +147,7 @@ async function buscarDeals(ownerIds: string[], desde: number, hasta: number): Pr
         const creado = fechaMs(d.properties.createdate);
         const ownerId = d.properties.hubspot_owner_id;
         if (creado == null || !ownerId) continue;
-        deals.push({ id: d.id, ownerId, creado, aprobado: fechaMs(d.properties[PROP_APROBADO]), rechazado: fechaMs(d.properties[PROP_RECHAZADO]) });
+        deals.push({ id: d.id, ownerId, creado, ...etapas(d.properties) });
       }
       leidos += r.results.length;
       after = r.paging?.next?.after;
@@ -215,7 +231,7 @@ export async function dealsPorId(ids: string[]): Promise<(DealCampo & { nombre: 
     const r = await hsFetch<{ results: { id: string; properties: Record<string, string | null> }[] }>('/crm/v3/objects/deals/batch/read', {
       method: 'POST',
       body: JSON.stringify({
-        properties: ['dealname', 'createdate', 'hubspot_owner_id', 'pipeline', PROP_APROBADO, PROP_RECHAZADO],
+        properties: ['dealname', 'createdate', 'hubspot_owner_id', 'pipeline', PROP_APROBADO, PROP_RECHAZADO, PROP_DESEMBOLSADO, PROP_MONTO],
         inputs: unicos.slice(i, i + 100).map((id) => ({ id })),
       }),
     });
@@ -223,9 +239,42 @@ export async function dealsPorId(ids: string[]): Promise<(DealCampo & { nombre: 
       const s = aSolicitud(d);
       out.push({
         id: s.id, ownerId: s.ownerId ?? '', creado: s.creado, nombre: s.nombre, pipeline: s.pipeline,
-        aprobado: fechaMs(d.properties[PROP_APROBADO]), rechazado: fechaMs(d.properties[PROP_RECHAZADO]),
+        ...etapas(d.properties),
       });
     }
+  }
+  return out;
+}
+
+// Solicitudes del pipeline de campo de varios owners creadas en [desde,
+// hasta), con su nombre: para encontrar las que no tienen visita (el
+// vendedor tipificó otra cosa). Sin caché: lo usa una función programada.
+export async function solicitudesDeOwners(ownerIds: string[], desde: number, hasta: number): Promise<SolicitudHubspot[]> {
+  const out: SolicitudHubspot[] = [];
+  const ids = [...new Set(ownerIds)];
+  for (let i = 0; i < ids.length; i += MAX_VALORES_IN) {
+    let after: string | undefined;
+    do {
+      const r = await hsFetch<{ results: { id: string; properties: Record<string, string | null> }[]; paging?: { next?: { after: string } } }>('/crm/v3/objects/deals/search', {
+        method: 'POST',
+        body: JSON.stringify({
+          filterGroups: [{
+            filters: [
+              { propertyName: 'pipeline', operator: 'EQ', value: PIPELINE_CAMPO },
+              { propertyName: 'createdate', operator: 'GTE', value: String(desde) },
+              { propertyName: 'createdate', operator: 'LT', value: String(hasta) },
+              { propertyName: 'hubspot_owner_id', operator: 'IN', values: ids.slice(i, i + MAX_VALORES_IN) },
+            ],
+          }],
+          properties: ['dealname', 'createdate', 'hubspot_owner_id', 'pipeline'],
+          sorts: [{ propertyName: 'createdate', direction: 'ASCENDING' }],
+          limit: PAGINA,
+          ...(after ? { after } : {}),
+        }),
+      });
+      out.push(...r.results.map(aSolicitud));
+      after = r.paging?.next?.after;
+    } while (after && out.length < MAX_RESULTADOS_BUSQUEDA);
   }
   return out;
 }
