@@ -124,7 +124,12 @@ export function Hoy() {
         >{vendedor.iniciales}</button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: 'var(--ink-900)', letterSpacing: '-.3px' }}>Hola, {primerNombre}</h1>
-          <div style={{ fontSize: 15, fontWeight: 600, color: '#6f7d75', marginTop: 2 }}>{fechaLarga()}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#6f7d75', marginTop: 2 }}>
+            {fechaLarga()}
+            {vendedor.prueba && (
+              <span title="Eres un vendedor de prueba: lo que registres no cuenta en los indicadores del equipo." style={{ marginLeft: 8, fontSize: 12.5, fontWeight: 800, color: '#7b1da3', background: '#f3e6f9', borderRadius: 10, padding: '2px 8px', verticalAlign: 'middle' }}>MODO PRUEBA</span>
+            )}
+          </div>
         </div>
         <EstadoConexion />
         <button

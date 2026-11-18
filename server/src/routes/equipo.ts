@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db.js';
 import { isRecruitingConfigured, PRODUCTOS_RECRUITING, type ProductoRecruiting } from '../integrations/recruiting.js';
 import { GIROS_DENUE } from '../integrations/denue.js';
+import { borrarVendedorPrueba, crearVendedorPrueba } from '../prueba.js';
 import { guardarConfigEquipo, leerConfigEquipo, leerUltimoReporte, productoIdLocal, sincronizarEquipo } from '../equipo.js';
 
 // Equipo de campo: conexión con la base de colaboradores de aviva-recruiting
@@ -65,4 +66,30 @@ equipoRouter.put('/productos', async (req, res) => {
       }, { merge: true })));
   }
   res.json(await estado());
+});
+
+// Vendedores de prueba (ver prueba.ts): un admin se da de alta con su propio
+// correo para usar la app del vendedor sin ensuciar los indicadores.
+const DOMINIO = '@avivacredito.com';
+
+equipoRouter.post('/prueba', async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const productoId = String(req.body?.productoId || '');
+  if (!email.endsWith(DOMINIO) || email.length <= DOMINIO.length) return res.status(400).json({ error: 'EMAIL_INVALIDO', message: `Usa un correo ${DOMINIO}.` });
+  const producto = productoId ? await db.collection('productos').doc(productoId).get() : null;
+  if (!producto?.exists) return res.status(400).json({ error: 'PRODUCTO_INVALIDO', message: 'Elige el producto con el que vas a probar.' });
+  const mismos = (await db.collection('vendedores').where('email', '==', email).get()).docs;
+  if (mismos.some((d) => d.get('prueba'))) return res.status(409).json({ error: 'YA_EXISTE', message: 'Ya hay un vendedor de prueba con ese correo.' });
+  if (mismos.some((d) => d.get('estado') !== 'Baja')) {
+    return res.status(409).json({ error: 'VENDEDOR_REAL', message: 'Ese correo es de un vendedor activo: no se puede usar para pruebas.' });
+  }
+  const nombre = String(req.body?.nombre || '').trim().slice(0, 60) || `Prueba ${email.split('@')[0]}`;
+  const id = await crearVendedorPrueba({ email, nombre, productoId }, req.user!.email);
+  res.status(201).json({ id });
+});
+
+equipoRouter.delete('/prueba/:id', async (req, res) => {
+  const doc = await db.collection('vendedores').doc(req.params.id).get();
+  if (!doc.exists || !doc.get('prueba')) return res.status(404).json({ error: 'NOT_FOUND', message: 'No es un vendedor de prueba.' });
+  res.json({ borrados: await borrarVendedorPrueba(doc.id) });
 });

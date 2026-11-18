@@ -52,7 +52,7 @@ export function FilterBar({
         label="Vendedor"
         options={vendedoresFiltrados
           .filter((v) => v.estado !== 'Baja' || !sinFechas || fVendedores.includes(v.id))
-          .map((v) => ({ value: v.id, label: v.nombre, grupo: v.estado === 'Baja' ? 'Ya no activos' : undefined }))}
+          .map((v) => ({ value: v.id, label: v.nombre, grupo: v.prueba ? 'De prueba (no cuentan si no los eliges)' : v.estado === 'Baja' ? 'Ya no activos' : undefined }))}
         selected={fVendedores}
         onChange={setFVendedores}
         placeholder="Todos los vendedores"
