@@ -83,11 +83,11 @@ export function VisitaExito() {
           <span style={{ fontSize: 15, fontWeight: 600, color: '#1d4f8f', lineHeight: 1.45 }}>
             <b style={{ display: 'block', fontWeight: 800 }}>
               {s.solicitud === 'ocupada' ? 'Esa solicitud ya estaba ligada a otra visita.'
-                : s.solicitud === 'no_es_suya' ? 'Esa solicitud no es tuya en HubSpot.'
+                : s.solicitud === 'no_es_suya' ? 'Esa solicitud no es tuya.'
                   : s.solicitud === 'pendiente' ? 'La solicitud quedó sin ligar.'
                     : 'No pudimos ligar la solicitud ahora.'}
             </b>
-            La visita se guardó. Cuando aparezca en HubSpot, lígala desde Mi ruta; si no, se liga sola.
+            La visita se guardó. Cuando aparezca la solicitud, lígala desde Mi ruta; si no, se liga sola.
           </span>
         </div>
       )}

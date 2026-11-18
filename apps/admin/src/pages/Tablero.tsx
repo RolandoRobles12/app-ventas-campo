@@ -28,6 +28,7 @@ const partes = (iso: string) => {
   return { dia: d.getDate(), mes: d.getMonth(), anio: d.getFullYear(), dow: d.getDay() };
 };
 const num = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString('es-MX'));
+const dinero = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }));
 const pctTxt = (n: number | null | undefined) => (n == null ? '—' : `${n.toLocaleString('es-MX', { maximumFractionDigits: 1 })}%`);
 // En hora de México (como el resto de las fechas del tablero), sin importar la zona de la computadora.
 const hora = (iso: string) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Mexico_City' });
@@ -233,7 +234,7 @@ export function Tablero() {
             {data && data.porProducto.length > 0 ? (
               <div style={{ overflowX: 'auto' }}>
                 <table style={tabla}>
-                  <thead><tr>{['Producto', 'Meta', 'Visitados', 'Solicitudes', 'Conversión', 'Aprobación'].map((h, i) => <th key={h} style={th(i === 0)}>{h}</th>)}</tr></thead>
+                  <thead><tr>{['Producto', 'Meta', 'Visitados', 'Solicitudes', 'Conversión', 'Aprobación', 'Desembolsadas'].map((h, i) => <th key={h} style={th(i === 0)}>{h}</th>)}</tr></thead>
                   <tbody>
                     {data.porProducto.map((r) => (
                       <tr key={r.productoId}>
@@ -243,6 +244,7 @@ export function Tablero() {
                         <td style={td()}>{num(hsOk ? r.solicitudes : r.marcadas)}</td>
                         <td style={td()}>{pctTxt(r.conversion)}</td>
                         <td style={td()}>{pctTxt(r.aprobacion)}{r.aprobadas != null && <Sub>de {num(r.aprobadas + (r.rechazadas ?? 0))} con respuesta</Sub>}</td>
+                        <td style={td()}>{num(r.desembolsadas)}{r.desembolsadas ? <Sub>{dinero(r.montoDesembolsado)}</Sub> : null}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -268,8 +270,8 @@ export function Tablero() {
 
 // ---------- Embudo ----------
 
-const ALTOS = [100, 88, 76, 64, 52, 42];
-const COLORES = ['#9aa8a0', '#7cc49c', '#5cb283', '#3b9a68', '#157347', '#0d3d24'];
+const ALTOS = [100, 90, 80, 70, 60, 50, 42];
+const COLORES = ['#9aa8a0', '#7cc49c', '#5cb283', '#3b9a68', '#157347', '#0d3d24', '#062514'];
 
 function Embudo({ a, p, hsOk, corto }: { a: BloqueTablero; p: BloqueTablero; hsOk: boolean; corto: string }) {
   const etapas: { n: number | null; prev: number | null; l: string; det: string; fuente?: boolean; sinFlecha?: boolean }[] = [
@@ -281,12 +283,16 @@ function Embudo({ a, p, hsOk, corto }: { a: BloqueTablero; p: BloqueTablero; hsO
     { n: a.negociosReales, prev: p.negociosReales, l: 'Reales', det: a.noValidos ? `sin ${num(a.noValidos)} cerrados o que no existen` : 'ninguno cerrado o inexistente' },
     { n: a.interesados, prev: p.interesados, l: 'Con interés', det: 'solicitud, información o volver otro día' },
     hsOk
-      ? { n: a.solicitudes, prev: p.solicitudes, l: 'Solicitudes', det: 'confirmadas en HubSpot a ±30 min de la visita', fuente: true }
+      ? { n: a.solicitudes, prev: p.solicitudes, l: 'Solicitudes', det: 'la que el vendedor ligó a su visita, en HubSpot', fuente: true }
       : { n: a.marcadas, prev: p.marcadas, l: 'Solicitudes marcadas', det: 'en campo, sin confirmar en HubSpot' },
   ];
   // Mientras la aprobación sea preliminar, comparar aprobadas contra un
   // periodo que ya tuvo tiempo de resolverse siempre daría "▼".
-  if (hsOk) etapas.push({ n: a.aprobadas, prev: p.aprobadas, l: 'Aprobadas', det: `${num(a.rechazadas)} rechazadas · ${num(a.enProceso)} en revisión`, fuente: true, sinFlecha: esPreliminar(a) });
+  if (hsOk) {
+    etapas.push({ n: a.aprobadas, prev: p.aprobadas, l: 'Aprobadas', det: `${num(a.rechazadas)} rechazadas · ${num(a.enProceso)} en revisión`, fuente: true, sinFlecha: esPreliminar(a) });
+    // La venta: incluye las que ya se desembolsaron.
+    etapas.push({ n: a.desembolsadas, prev: p.desembolsadas, l: 'Desembolsadas', det: `${dinero(a.montoDesembolsado)} desembolsados`, fuente: true, sinFlecha: esPreliminar(a) });
+  }
   return (
     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${etapas.length}, minmax(0, 1fr))`, overflowX: 'auto' }}>
       {etapas.map((e, i) => {
@@ -332,6 +338,10 @@ function Tasas({ a, p, hsOk }: { a: BloqueTablero; p: BloqueTablero; hsOk: boole
       k: 'Aprobación', v: a.aprobacion, prev: p.aprobacion, sinComparar: preliminar,
       f: hsOk ? `${num(a.aprobadas)} aprobadas de ${num((a.aprobadas ?? 0) + (a.rechazadas ?? 0))} con respuesta; las ${num(a.enProceso)} en revisión todavía no cuentan` : 'Aparece al conectar HubSpot',
       nota: preliminar ? <span style={{ color: '#94500f', background: '#fff5ea', borderRadius: 6, padding: '2px 8px', fontSize: 11.5 }}><b>Preliminar:</b> menos de la mitad tiene respuesta; puede cambiar mucho</span> : undefined,
+    },
+    {
+      k: 'Desembolso', v: a.desembolso, prev: p.desembolso, sinComparar: preliminar,
+      f: hsOk ? `${num(a.desembolsadas)} de ${num(a.aprobadas)} aprobadas ya se desembolsaron · ${dinero(a.montoDesembolsado)}` : 'Aparece al conectar HubSpot',
     },
   ];
   return (
@@ -419,7 +429,7 @@ function Tendencia({ data, hsOk }: { data: TableroData; hsOk: boolean }) {
 
 // ---------- Por vendedor ----------
 
-type Col = 'nombre' | 'meta' | 'avanceMeta' | 'solicitudes' | 'conversion' | 'aprobacion' | 'confirmacion' | 'enNegocio' | 'ultimaVisita';
+type Col = 'nombre' | 'meta' | 'avanceMeta' | 'solicitudes' | 'conversion' | 'aprobacion' | 'montoDesembolsado' | 'confirmacion' | 'enNegocio' | 'ultimaVisita';
 
 function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolean; onElegir: (id: string) => void }) {
   const [orden, setOrden] = useState<{ k: Col; desc: boolean }>({ k: 'solicitudes', desc: true });
@@ -436,7 +446,7 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
     });
   }, [data, orden, hsOk]);
   const yaNo = data.porVendedor.filter((v) => !v.activo).length;
-  const cols = 'minmax(180px, 2fr) 60px minmax(120px, 1.1fr) 80px 85px 95px 85px 130px 95px';
+  const cols = 'minmax(180px, 2fr) 60px minmax(120px, 1.1fr) 80px 85px 95px 105px 85px 130px 95px';
   return (
     <Card
       titulo="Por vendedor"
@@ -444,7 +454,7 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
       style={{ marginTop: 14 }} padding="18px 0 6px" paddingEncabezado="0 20px"
     >
       <div style={{ overflowX: 'auto' }}>
-        <div style={{ minWidth: 900 }}>
+        <div style={{ minWidth: 1000 }}>
           <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 10, padding: '0 20px 10px', fontSize: 12, fontWeight: 600, color: '#6f7d75', borderBottom: '1px solid #eef2ee' }}>
             <ThOrden k="nombre" orden={orden} setOrden={setOrden}>Vendedor</ThOrden>
             <ThOrden k="meta" orden={orden} setOrden={setOrden} alinear="right">Meta</ThOrden>
@@ -452,6 +462,7 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
             <ThOrden k="solicitudes" orden={orden} setOrden={setOrden} alinear="right">Solicitudes</ThOrden>
             <ThOrden k="conversion" orden={orden} setOrden={setOrden} alinear="right">Conversión</ThOrden>
             <ThOrden k="aprobacion" orden={orden} setOrden={setOrden} alinear="right">Aprobación</ThOrden>
+            <ThOrden k="montoDesembolsado" orden={orden} setOrden={setOrden} alinear="right">Desembolsadas</ThOrden>
             <ThOrden k="confirmacion" orden={orden} setOrden={setOrden} alinear="right">En HubSpot</ThOrden>
             <span title="Visitas guardadas con la tablet dentro de la distancia permitida al negocio (se fija en Equipo). Solo se puede comprobar en negocios con ubicación conocida y cuando la tablet tenía GPS."><ThOrden k="enNegocio" orden={orden} setOrden={setOrden} alinear="right">En el negocio</ThOrden></span>
             <ThOrden k="ultimaVisita" orden={orden} setOrden={setOrden} alinear="right">Última visita</ThOrden>
@@ -477,7 +488,10 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
                   {f.metaPropios ? `ruta ${num(f.rutaVisitados)}/${num(f.metaRuta)} · nuevos ${num(f.propios)}/${num(f.metaPropios)}` : `${num(f.negociosVisitados)} visitados`}
                 </div>
               </div>
-              <div style={celdaNum}>{num(hsOk ? f.solicitudes : f.marcadas)}</div>
+              <div style={celdaNum}>
+                {num(hsOk ? f.solicitudes : f.marcadas)}
+                {f.corregidas > 0 && <Sub>{f.corregidas === 1 ? '1 visita corregida' : `${f.corregidas} visitas corregidas`}</Sub>}
+              </div>
               <div style={celdaNum}>
                 {f.conversion != null ? <>{pctTxt(f.conversion)}<Sub>de {num(f.negociosReales)} negocios</Sub></>
                   : <SinDato texto={f.visitas ? '—' : 'sin visitas'} ayuda={f.visitas ? 'Se calcula con las solicitudes confirmadas en HubSpot.' : 'No visitó ningún negocio en el periodo.'} />}
@@ -487,6 +501,10 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
                   : (f.solicitudes ?? 0) > 0
                     ? <SinDato texto="en revisión" ayuda="Sus solicitudes del periodo todavía no tienen respuesta (ni aprobadas ni rechazadas)." />
                     : <SinDato texto="sin solicitudes" ayuda="No tuvo solicitudes confirmadas en el periodo; no hay nada que aprobar." />}
+              </div>
+              <div style={celdaNum}>
+                {f.desembolsadas != null && f.desembolsadas > 0 ? <>{num(f.desembolsadas)}<Sub>{dinero(f.montoDesembolsado)}</Sub></>
+                  : <SinDato texto={hsOk ? '0' : '—'} ayuda="Ninguna de sus solicitudes del periodo se ha desembolsado todavía." />}
               </div>
               <div style={celdaNum}>
                 {f.confirmadasVisitas != null && f.marcadas ? `${num(f.confirmadasVisitas)} de ${num(f.marcadas)}`

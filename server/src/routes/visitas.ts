@@ -71,6 +71,9 @@ export interface VisitaDoc {
   dealNombre?: string | null;
   solicitudPendiente?: boolean;
   vinculoSolicitud?: Vinculo;
+  // El resultado se corrigió después (tipificó mal): el que puso primero.
+  resultadoOriginal?: string;
+  tipificacionCorregida?: boolean;
   createdAt: Timestamp;
 }
 
@@ -126,6 +129,7 @@ function shape(id: string, v: VisitaDoc) {
     dealNombre: v.dealNombre ?? null,
     solicitudPendiente: !!v.solicitudPendiente,
     vinculoSolicitud: v.vinculoSolicitud ?? null,
+    resultadoOriginal: v.tipificacionCorregida ? v.resultadoOriginal ?? null : null,
     createdAt: toIso(v.createdAt),
   };
 }
@@ -195,6 +199,7 @@ async function conVendedor<T extends VisitaDoc & { id: string }>(visitas: T[]) {
       dealNombre: v.dealNombre ?? null,
       solicitudPendiente: !!v.solicitudPendiente,
       vinculoSolicitud: v.vinculoSolicitud ?? null,
+      resultadoOriginal: v.tipificacionCorregida ? v.resultadoOriginal ?? null : null,
       createdAt: toIso(v.createdAt),
     };
   });

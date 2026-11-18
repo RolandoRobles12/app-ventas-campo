@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { Progreso, Prospecto } from '../api';
+import type { Progreso, Prospecto, VisitaReciente } from '../api';
 import { useSession } from '../session';
 import { useUbicacion } from '../ubicacion';
 import {
@@ -15,6 +15,7 @@ import { AvisoZona } from '../components/AvisoZona';
 import { useAvisos } from '../notificaciones';
 import { SelectorSolicitud } from '../components/SelectorSolicitud';
 import { api } from '../api';
+import { resultadoUI } from '../resultados';
 import { Pantalla } from '../components/AppShell';
 import { ParadaFila } from '../components/ParadaFila';
 import { EstadoConexion } from '../components/EstadoConexion';
@@ -56,6 +57,8 @@ export function Hoy() {
   const avisos = useAvisos(vendedor?.id);
   // Visita "Hizo solicitud" que se está ligando con su solicitud de HubSpot.
   const [ligando, setLigando] = useState<{ visitaId: string; nombreNegocio: string } | null>(null);
+  // Solicitud sin visita a la que se le está eligiendo su visita.
+  const [eligiendoVisita, setEligiendoVisita] = useState<{ dealId: string; nombre: string; creado: number } | null>(null);
   const [cargando, setCargando] = useState(false);
   const [menu, setMenu] = useState(false);
   const ultimaCarga = useRef(0);
@@ -153,6 +156,7 @@ export function Hoy() {
           />
           {avisos.mostrarInvitacion && <InvitacionAvisos onActivar={avisos.activar} onPosponer={avisos.posponer} />}
           {!!progreso?.solicitudesSinLigar?.length && <SinLigar items={progreso.solicitudesSinLigar} onLigar={setLigando} />}
+          {!!progreso?.solicitudesSinVisita?.length && <SinVisita items={progreso.solicitudesSinVisita} onElegir={setEligiendoVisita} />}
           {siguiente ? <SiguienteParada parada={siguiente} /> : lista && <SinRutaHoy hayProximos={ruta.proximos.length > 0} />}
           <button data-tour="nuevo" className="btn btn-secondary tap" onClick={() => navigate('/visita/nueva')} style={{ width: '100%' }}>
             <IconMas size={22} stroke={2.6} /> Registrar negocio nuevo
@@ -216,7 +220,15 @@ export function Hoy() {
         <HojaLigar
           vendedorId={vendedor.id} visita={ligando}
           onCerrar={() => setLigando(null)}
-          onLigada={(nombre) => { setLigando(null); setAviso(`Solicitud ligada: ${nombre}`); cargar(); }}
+          onLigada={(mensaje) => { setLigando(null); setAviso(mensaje); cargar(); }}
+        />
+      )}
+
+      {eligiendoVisita && (
+        <HojaSinVisita
+          vendedorId={vendedor.id} solicitud={eligiendoVisita} visitas={progreso?.recientes ?? []}
+          onCerrar={() => setEligiendoVisita(null)}
+          onListo={(mensaje) => { setEligiendoVisita(null); setAviso(mensaje); cargar(); }}
         />
       )}
 
@@ -251,6 +263,9 @@ export function Hoy() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
               <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start' }} onClick={() => { setMenu(false); recorrido.verBienvenida(); }}>
                 <IconInfo size={20} /> Ver la guía de la app
+              </button>
+              <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start' }} onClick={() => { setMenu(false); recorrido.verNovedades(); }}>
+                <IconCheck size={20} /> Ver lo nuevo de la app
               </button>
               <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start' }} onClick={() => { setMenu(false); recorrido.iniciarRecorrido(); }}>
                 <IconRuta size={20} /> Recorrido por mi pantalla
@@ -365,11 +380,11 @@ function Barra({ pct, completa, alto }: { pct: number; completa: boolean; alto: 
 // hacerlo él.
 function SinLigar({ items, onLigar }: { items: { visitaId: string; nombreNegocio: string; createdAt: string }[]; onLigar: (v: { visitaId: string; nombreNegocio: string }) => void }) {
   return (
-    <section className="card aparecer" style={{ padding: '16px 18px', border: '2px solid #bcd3f0' }}>
+    <section data-tour="sin-ligar" className="card aparecer" style={{ padding: '16px 18px', border: '2px solid #bcd3f0' }}>
       <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink-900)' }}>
         {items.length === 1 ? 'Tienes 1 solicitud sin ligar' : `Tienes ${items.length} solicitudes sin ligar`}
       </div>
-      <div style={{ fontSize: 14.5, fontWeight: 600, color: '#5a665f', marginTop: 3, lineHeight: 1.45 }}>Elige cuál es en HubSpot para que cuente como tuya.</div>
+      <div style={{ fontSize: 14.5, fontWeight: 600, color: '#5a665f', marginTop: 3, lineHeight: 1.45 }}>Elige cuál es su solicitud para que cuente como tuya, o corrige el resultado si no la hubo.</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
         {items.map((v) => (
           <div key={v.visitaId} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -385,40 +400,166 @@ function SinLigar({ items, onLigar }: { items: { visitaId: string; nombreNegocio
   );
 }
 
+// Resultados a los que se puede corregir un "Hizo solicitud" que no lo fue
+// (los mismos que acepta el servidor, ver CORRECCIONES en solicitudes.ts).
+const CORRECCIONES = ['Se dejó información', 'Cliente no interesado', 'No es un negocio válido o existente'];
+const REAGENDA = 'Se reagenda visita';
+
+function Hoja({ titulo, subtitulo, onCerrar, children }: { titulo: string; subtitulo: string; onCerrar: () => void; children: React.ReactNode }) {
+  return (
+    <div onClick={onCerrar} style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(10,25,17,.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={(e) => e.stopPropagation()} className="aparecer" style={{ width: '100%', maxWidth: 620, maxHeight: '88%', overflowY: 'auto', background: '#fff', borderRadius: '24px 24px 0 0', padding: '20px 18px 24px' }}>
+        <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '1px', color: '#6f7d75' }}>{titulo}</div>
+        <div style={{ fontSize: 21, fontWeight: 800, color: 'var(--ink-900)', marginTop: 2 }}>{subtitulo}</div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function OpcionHoja({ activa, onClick, titulo, detalle }: { activa: boolean; onClick: () => void; titulo: string; detalle?: string }) {
+  return (
+    <button
+      className="tap" onClick={onClick} aria-pressed={activa}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%', borderRadius: 14, padding: '12px 14px', background: activa ? '#fff' : '#fbfdfb', border: `2px solid ${activa ? 'var(--aviva-green-700)' : '#d7e6dc'}` }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="ellipsis" style={{ fontSize: 16, fontWeight: 800, color: 'var(--ink-800)' }}>{titulo}</div>
+        {detalle && <div style={{ fontSize: 13.5, fontWeight: 600, color: '#6f7d75', marginTop: 2 }}>{detalle}</div>}
+      </div>
+      {activa && <span style={{ color: 'var(--aviva-green-700)', flex: 'none' }}><IconCheck size={22} stroke={3} /></span>}
+    </button>
+  );
+}
+
+// "Hizo solicitud" sin ligar: elegir cuál es, o corregir el resultado si en
+// realidad no hubo solicitud.
 function HojaLigar({ vendedorId, visita, onCerrar, onLigada }: {
-  vendedorId: string; visita: { visitaId: string; nombreNegocio: string }; onCerrar: () => void; onLigada: (nombre: string) => void;
+  vendedorId: string; visita: { visitaId: string; nombreNegocio: string }; onCerrar: () => void; onLigada: (mensaje: string) => void;
 }) {
   const [dealId, setDealId] = useState<string | null>(null);
+  const [corrigiendo, setCorrigiendo] = useState(false);
+  const [resultado, setResultado] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
-  const ligar = async () => {
-    if (!dealId) return;
+  const listo = corrigiendo ? !!resultado : !!dealId;
+  const guardar = async () => {
+    if (!listo) return;
     setGuardando(true);
     setError('');
     try {
-      const r = await api.ligarSolicitud(visita.visitaId, dealId);
-      onLigada(r.nombre);
+      if (corrigiendo) {
+        await api.corregirResultado(visita.visitaId, resultado!);
+        onLigada(`Resultado corregido: ${resultadoUI(resultado!).etiqueta}`);
+      } else {
+        const r = await api.ligarSolicitud(visita.visitaId, dealId!);
+        onLigada(`Solicitud ligada: ${r.nombre}`);
+      }
     } catch (err: any) {
-      setError(err.message || 'No se pudo ligar. Intenta de nuevo.');
+      setError(err.message || 'No se pudo guardar. Intenta de nuevo.');
     } finally {
       setGuardando(false);
     }
   };
   return (
-    <div onClick={onCerrar} style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(10,25,17,.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={(e) => e.stopPropagation()} className="aparecer" style={{ width: '100%', maxWidth: 620, maxHeight: '88%', overflowY: 'auto', background: '#fff', borderRadius: '24px 24px 0 0', padding: '20px 18px 24px' }}>
-        <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '1px', color: '#6f7d75' }}>LIGAR SOLICITUD</div>
-        <div style={{ fontSize: 21, fontWeight: 800, color: 'var(--ink-900)', marginTop: 2 }}>{visita.nombreNegocio}</div>
-        <SelectorSolicitud vendedorId={vendedorId} visitaId={visita.visitaId} valor={dealId} onChange={setDealId} />
-        {error && <div style={{ color: '#b23a2b', fontSize: 15, fontWeight: 700, marginTop: 12 }}>{error}</div>}
-        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-          <button className="btn btn-ghost tap" style={{ flex: 1 }} onClick={onCerrar}>Después</button>
-          <button className="btn btn-primary tap" style={{ flex: 1.4, opacity: dealId && !guardando ? 1 : 0.6 }} disabled={!dealId || guardando} onClick={ligar}>
-            {guardando ? 'Ligando…' : 'Ligar solicitud'}
+    <Hoja titulo={corrigiendo ? 'CORREGIR RESULTADO' : 'LIGAR SOLICITUD'} subtitulo={visita.nombreNegocio} onCerrar={onCerrar}>
+      {corrigiendo ? (
+        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#3a4a41' }}>¿Cómo te fue en realidad?</div>
+          {CORRECCIONES.map((r) => <OpcionHoja key={r} activa={resultado === r} onClick={() => setResultado(r)} titulo={resultadoUI(r).etiqueta} />)}
+          <button className="tap" onClick={() => { setCorrigiendo(false); setResultado(null); }} style={{ fontSize: 14.5, fontWeight: 800, color: 'var(--aviva-green-700)', padding: '8px 0', textAlign: 'left' }}>
+            ← Sí hizo solicitud
           </button>
         </div>
+      ) : (
+        <>
+          <SelectorSolicitud vendedorId={vendedorId} visitaId={visita.visitaId} valor={dealId} onChange={setDealId} />
+          <button className="tap" onClick={() => { setCorrigiendo(true); setDealId(null); }} style={{ fontSize: 14.5, fontWeight: 800, color: '#a8322a', padding: '12px 0 0', textAlign: 'left' }}>
+            No hizo solicitud: me equivoqué de resultado
+          </button>
+        </>
+      )}
+      {error && <div style={{ color: '#b23a2b', fontSize: 15, fontWeight: 700, marginTop: 12 }}>{error}</div>}
+      <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+        <button className="btn btn-ghost tap" style={{ flex: 1 }} onClick={onCerrar}>Después</button>
+        <button className="btn btn-primary tap" style={{ flex: 1.4, opacity: listo && !guardando ? 1 : 0.6 }} disabled={!listo || guardando} onClick={guardar}>
+          {guardando ? 'Guardando…' : corrigiendo ? 'Corregir resultado' : 'Ligar solicitud'}
+        </button>
       </div>
-    </div>
+    </Hoja>
+  );
+}
+
+// Solicitudes suyas que no están en ninguna visita: casi siempre porque
+// marcó otro resultado. Se le pregunta de qué visita es.
+function SinVisita({ items, onElegir }: { items: { dealId: string; nombre: string; creado: number }[]; onElegir: (s: { dealId: string; nombre: string; creado: number }) => void }) {
+  return (
+    <section data-tour="sin-visita" className="card aparecer" style={{ padding: '16px 18px', border: '2px solid #f3c99a' }}>
+      <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink-900)' }}>
+        {items.length === 1 ? 'Tienes 1 solicitud sin visita' : `Tienes ${items.length} solicitudes sin visita`}
+      </div>
+      <div style={{ fontSize: 14.5, fontWeight: 600, color: '#5a665f', marginTop: 3, lineHeight: 1.45 }}>
+        ¿Marcaste otro resultado al registrar la visita? Dinos de cuál es para que cuente como tuya.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+        {items.map((s) => (
+          <div key={s.dealId} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="ellipsis" style={{ fontSize: 15.5, fontWeight: 800, color: 'var(--ink-800)' }}>{s.nombre}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: '#8a978f' }}>Creada {etiquetaDia(fechaLocal(new Date(s.creado))).toLowerCase()} · {new Date(s.creado).toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' })}</div>
+            </div>
+            <button className="btn btn-primary tap" onClick={() => onElegir(s)} style={{ minHeight: 46, fontSize: 15, padding: '0 16px', flex: 'none' }}>Elegir visita</button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function HojaSinVisita({ vendedorId, solicitud, visitas, onCerrar, onListo }: {
+  vendedorId: string; solicitud: { dealId: string; nombre: string; creado: number };
+  visitas: VisitaReciente[]; onCerrar: () => void; onListo: (mensaje: string) => void;
+}) {
+  // Sus visitas de 12 h antes a 12 h después de la solicitud, la más cercana
+  // primero; sin las que ya tienen solicitud ni las de "Volver otro día".
+  const candidatas = visitas
+    .filter((v) => !v.ligada && v.resultado !== REAGENDA && Math.abs(new Date(v.createdAt).getTime() - solicitud.creado) <= 12 * 3600_000)
+    .sort((a, b) => Math.abs(new Date(a.createdAt).getTime() - solicitud.creado) - Math.abs(new Date(b.createdAt).getTime() - solicitud.creado));
+  const [visitaId, setVisitaId] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState('');
+  const ejecutar = async (fn: () => Promise<string>) => {
+    setGuardando(true);
+    setError('');
+    try { onListo(await fn()); } catch (err: any) { setError(err.message || 'No se pudo guardar. Intenta de nuevo.'); } finally { setGuardando(false); }
+  };
+  return (
+    <Hoja titulo="¿DE QUÉ VISITA ES?" subtitulo={solicitud.nombre} onCerrar={onCerrar}>
+      <div style={{ fontSize: 15, fontWeight: 600, color: '#5a665f', marginTop: 6, lineHeight: 1.45 }}>
+        Elige la visita: su resultado cambiará a "Hizo solicitud".
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+        {candidatas.map((v) => (
+          <OpcionHoja
+            key={v.id} activa={visitaId === v.id} onClick={() => setVisitaId(v.id)} titulo={v.nombreNegocio}
+            detalle={`${etiquetaDia(fechaLocal(new Date(v.createdAt)))} · ${new Date(v.createdAt).toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' })} · marcaste "${resultadoUI(v.resultado).etiqueta}"`}
+          />
+        ))}
+        {!candidatas.length && <div style={{ fontSize: 15, fontWeight: 600, color: '#5a665f' }}>No tienes visitas cerca de la hora de esta solicitud.</div>}
+      </div>
+      {error && <div style={{ color: '#b23a2b', fontSize: 15, fontWeight: 700, marginTop: 12 }}>{error}</div>}
+      <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+        <button className="btn btn-ghost tap" style={{ flex: 1 }} disabled={guardando} onClick={() => ejecutar(async () => { await api.descartarSinVisita(vendedorId, solicitud.dealId); return 'Listo: no se volverá a preguntar por esa solicitud'; })}>
+          No fue en una visita
+        </button>
+        <button
+          className="btn btn-primary tap" style={{ flex: 1.4, opacity: visitaId && !guardando ? 1 : 0.6 }} disabled={!visitaId || guardando}
+          onClick={() => ejecutar(async () => { const r = await api.ligarSolicitud(visitaId!, solicitud.dealId, true); return `Solicitud ligada: ${r.nombre}`; })}
+        >
+          {guardando ? 'Guardando…' : 'Ligar a esta visita'}
+        </button>
+      </div>
+    </Hoja>
   );
 }
 
@@ -426,7 +567,7 @@ function HojaLigar({ vendedorId, visita, onCerrar, onLigada }: {
 // solo se puede pedir con un toque suyo (el navegador lo exige).
 function InvitacionAvisos({ onActivar, onPosponer }: { onActivar: () => void; onPosponer: () => void }) {
   return (
-    <section className="card aparecer" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <section data-tour="avisos" className="card aparecer" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         <span style={{ flex: 'none', width: 44, height: 44, borderRadius: 14, background: '#e2ecfb', color: '#1d5fae', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <IconCalendario size={22} />

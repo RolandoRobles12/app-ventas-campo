@@ -91,7 +91,13 @@ export interface BloqueTablero {
   // null mientras HubSpot no está conectado o falló.
   marcadas: number; confirmadasVisitas: number | null; solicitudes: number | null;
   aprobadas: number | null; rechazadas: number | null; enProceso: number | null;
+  // Desembolsadas (cuentan también como aprobadas) y la suma de su monto.
+  desembolsadas: number | null; montoDesembolsado: number | null;
   conversion: number | null; aprobacion: number | null; confirmacion: number | null;
+  // De las aprobadas, % ya desembolsadas.
+  desembolso: number | null;
+  // Visitas a las que se les corrigió el resultado (tipificaron mal).
+  corregidas: number;
   validables: number; enNegocio: number | null;
   // Visitas que no se pueden comprobar (no cuentan en enNegocio), por motivo.
   sinComprobar: { nuevo: number; sinGps: number; sinUbicacion: number };
@@ -151,6 +157,8 @@ export interface VisitaListItem {
   // o por un admin) o si sigue sin ligar.
   dealId?: string | null; dealNombre?: string | null; solicitudPendiente?: boolean;
   vinculoSolicitud?: 'vendedor' | 'auto' | 'admin' | null;
+  // Se corrigió el resultado (tipificó mal): el que había puesto.
+  resultadoOriginal?: string | null;
 }
 export interface VisitasResponse { items: VisitaListItem[]; nextCursor: string | null }
 export interface HistorialNegocio {

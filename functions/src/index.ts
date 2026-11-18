@@ -78,10 +78,14 @@ export const recordatoriosDeCitas = onSchedule(
 export const ligarSolicitudesPendientes = onSchedule(
   { schedule: 'every 15 minutes', timeZone: 'America/Mexico_City', timeoutSeconds: 300 },
   async () => {
-    const { ligarPendientes } = await import('./_server/solicitudes.js');
+    const { actualizarSinVisita, ligarPendientes } = await import('./_server/solicitudes.js');
     try {
       const r = await ligarPendientes();
       if (r.ligadas || r.pendientes) console.log(`Solicitudes: ${r.ligadas} ligadas solas, ${r.pendientes} siguen pendientes.`);
+      // Después de ligar: lo que quede libre son solicitudes sin visita
+      // (el vendedor tipificó otro resultado); "Mi ruta" le pregunta de cuál es.
+      const sv = await actualizarSinVisita();
+      if (sv.solicitudes) console.log(`Solicitudes sin visita: ${sv.solicitudes} de ${sv.vendedores} vendedores.`);
     } catch (err) {
       console.error('Ligar solicitudes pendientes falló:', err);
     }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { IconCamara, IconCheck, IconNube, IconRuta, IconSiguiente, IconTelefono, IconTienda } from '../icons';
+import { IconCalendario, IconCamara, IconCheck, IconNube, IconRuta, IconSiguiente, IconTelefono, IconTienda } from '../icons';
 
 type Siguiente = 'recorrido' | 'practica' | 'empezar';
 
@@ -23,19 +23,37 @@ const diapositivas = (nombre: string): Diapositiva[] => [
     Icon: IconRuta, color: '#c96a1e', fondo: '#fdecdb',
     titulo: 'Tu ruta del día',
     texto: 'Tu coordinador arma tu lista de negocios para cada día y la app te la ordena del más cercano al más lejano.',
-    puntos: ['Arriba ves tu meta: cuántas visitas llevas y cuántas te faltan', 'Tu siguiente parada siempre está a la mano, con "Cómo llegar"', 'Si terminas antes, puedes adelantar visitas de otros días'],
+    puntos: [
+      'Arriba ves tu meta: las visitas de tu ruta y, si te toca, los negocios nuevos que encuentres en la calle',
+      'Tu siguiente parada siempre está a la mano; "Cómo llegar" te marca el camino en el mapa',
+      'Si terminas antes, puedes adelantar visitas de otros días',
+    ],
   },
   {
     Icon: IconCamara, color: '#1d5fae', fondo: '#e2ecfb',
     titulo: 'Registra cada visita',
     texto: 'Cuando estés en el negocio, toca "Registrar visita". Son tres pasos:',
-    puntos: ['Elige cómo te fue: hizo solicitud, dejaste información, volver otro día…', 'Toma al menos una foto del negocio: es tu evidencia', 'Regístrala estando en el negocio: si estás lejos, la app te pide acercarte'],
+    puntos: [
+      'Elige cómo te fue. Si hizo solicitud, elige cuál de tus solicitudes es (si todavía no aparece, la ligas después)',
+      'Toma al menos una foto del negocio: es tu evidencia',
+      'Regístrala estando en el negocio: si estás lejos, la app te pide acercarte',
+    ],
   },
   {
     Icon: IconTelefono, color: '#15703f', fondo: '#dcf1e5',
     titulo: 'Llama y arma tu agenda',
     texto: 'En "Mi ruta", toca "Llamar" para ver los negocios que tienen teléfono.',
     puntos: ['Llama antes de ir para confirmar que te puedan atender', 'Si agendas una cita, aparece en tu ruta ese día y a esa hora', 'Si te piden que llames después, lo dejamos hasta arriba para que no se te olvide'],
+  },
+  {
+    Icon: IconCalendario, color: '#7b1da3', fondo: '#f3e6f9',
+    titulo: 'Avisos y zonas',
+    texto: 'La app te ayuda a no perder citas y a cuidarte en la calle.',
+    puntos: [
+      'Activa los avisos: te recordamos tus citas a las 9 am, 1 hora y 30 minutos antes',
+      'Las zonas en rojo del mapa son donde no puedes visitar negocios',
+      'Si un negocio nuevo te pide volver otro día, queda en tu ruta ese día',
+    ],
   },
   {
     Icon: IconNube, color: '#4f5c55', fondo: '#eceff0',

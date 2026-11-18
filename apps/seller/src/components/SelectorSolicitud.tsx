@@ -44,7 +44,7 @@ export function SelectorSolicitud({ vendedorId, visitaId, valor, onChange }: {
   return (
     <div className="aparecer" style={{ marginTop: 16, background: '#f2f8f4', borderRadius: 16, padding: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ flex: 1, fontSize: 15, fontWeight: 800, color: '#15703f' }}>¿Cuál es su solicitud en HubSpot?</div>
+        <div style={{ flex: 1, fontSize: 15, fontWeight: 800, color: '#15703f' }}>¿Cuál es su solicitud?</div>
         {estado === 'ok' && (
           <button className="tap" onClick={() => cargar(true)} disabled={actualizando} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 800, color: 'var(--aviva-green-700)', padding: '6px 8px' }}>
             <span className={actualizando ? 'girando' : undefined} style={{ display: 'flex' }}><IconRecargar size={16} /></span> Actualizar
@@ -57,8 +57,8 @@ export function SelectorSolicitud({ vendedorId, visitaId, valor, onChange }: {
       {sinLista && (
         <div style={{ fontSize: 14, fontWeight: 600, color: '#5a665f', marginTop: 8, lineHeight: 1.45 }}>
           {!enLinea ? 'Sin señal no podemos ver tus solicitudes.'
-            : estado === 'sin_cuenta' ? 'Tu correo no tiene usuario en HubSpot: avísale a tu líder.'
-              : estado === 'sin_configurar' ? 'HubSpot no está conectado.'
+            : estado === 'sin_cuenta' ? 'Tu cuenta todavía no puede ver solicitudes: avísale a tu líder.'
+              : estado === 'sin_configurar' ? 'Las solicitudes no están disponibles ahora.'
                 : 'No pudimos traer tus solicitudes ahora.'}
           {' '}Guarda la visita: la solicitud se liga después.
           {estado === 'error' && enLinea && (
