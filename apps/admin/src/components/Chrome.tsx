@@ -102,7 +102,7 @@ export function TopBar({ userEmail, onSignOut, onAyuda }: { userEmail: string; o
 const PASOS_ADMIN: PasoRecorrido[] = [
   { objetivo: 'nav/tablero', titulo: 'Tablero', texto: 'El embudo de campo, de la meta de la ruta a la solicitud aprobada en HubSpot, por día, semana, mes o las fechas que elijas. Abajo, el mismo embudo por vendedor y lo que requiere atención.' },
   { objetivo: 'nav/en-vivo', titulo: 'En vivo', texto: 'Dónde está cada vendedor ahorita, cuántas visitas lleva hoy y cuándo dio señal por última vez.' },
-  { objetivo: 'nav/visitas', titulo: 'Visitas', texto: 'Cada visita con su foto, su resultado y si se hizo en el negocio (GPS a 50 m o menos). Toca un negocio para ver todo su historial.' },
+  { objetivo: 'nav/visitas', titulo: 'Visitas', texto: 'Cada visita con su foto, su resultado y si se hizo en el negocio (GPS dentro de la distancia que fijas en Equipo). Toca un negocio para ver todo su historial.' },
   { objetivo: 'nav/llamadas', titulo: 'Llamadas y agenda', texto: 'A qué negocios llamaron los vendedores, qué pasó y las visitas que agendaron. El vendedor es dueño de su agenda: una cita mueve el negocio al día y hora que acordó.' },
   { objetivo: 'nav/rutas', titulo: 'Rutas', texto: 'Arma la ruta de cada vendedor con tres decisiones: zona, giros y visitas por día. Si reemplazas una ruta, las citas que el vendedor ya agendó se conservan.' },
   { objetivo: 'nav/equipo', titulo: 'Equipo', texto: 'Los vendedores llegan solos desde la base de colaboradores. Aquí eliges qué productos son de campo y qué giros visita cada uno.' },

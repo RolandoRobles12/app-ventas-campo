@@ -15,6 +15,9 @@ interface Estado {
   pendiente?: boolean;
   // El "negocio nuevo" ya era de alguien: no cuenta para su meta de nuevos.
   duplicado?: 'en_tu_ruta' | 'ruta_de_otro' | 'visitado_reciente' | null;
+  // "Hizo solicitud": 'ligada', 'pendiente' (todavía no aparecía) o por qué
+  // no se pudo ligar ('ocupada', 'no_es_suya', 'error'…).
+  solicitud?: string | null;
   reagendarPara?: string | null;
   // Visita de práctica del onboarding: no se guardó nada.
   practica?: boolean;
@@ -70,6 +73,21 @@ export function VisitaExito() {
                   : 'Este negocio ya se visitó hace poco.'}
             </b>
             La visita se guardó, pero no cuenta como negocio nuevo para tu meta. Busca negocios que todavía nadie haya visitado.
+          </span>
+        </div>
+      )}
+
+      {s.solicitud && s.solicitud !== 'ligada' && !s.pendiente && (
+        <div style={{ marginTop: 20, width: '100%', display: 'flex', alignItems: 'center', gap: 12, background: '#f2f7fd', border: '2px solid #bcd3f0', borderRadius: 16, padding: '14px 16px', textAlign: 'left' }}>
+          <span style={{ color: '#1d5fae', flex: 'none', display: 'flex' }}><IconInfo size={24} /></span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: '#1d4f8f', lineHeight: 1.45 }}>
+            <b style={{ display: 'block', fontWeight: 800 }}>
+              {s.solicitud === 'ocupada' ? 'Esa solicitud ya estaba ligada a otra visita.'
+                : s.solicitud === 'no_es_suya' ? 'Esa solicitud no es tuya en HubSpot.'
+                  : s.solicitud === 'pendiente' ? 'La solicitud quedó sin ligar.'
+                    : 'No pudimos ligar la solicitud ahora.'}
+            </b>
+            La visita se guardó. Cuando aparezca en HubSpot, lígala desde Mi ruta; si no, se liga sola.
           </span>
         </div>
       )}

@@ -72,6 +72,11 @@ export interface VisitaReciente {
 }
 
 // Por qué un "negocio nuevo" no cuenta para la meta: ya era de alguien.
+// Una solicitud de HubSpot del vendedor que puede ligar a su visita.
+export interface OpcionSolicitud { id: string; nombre: string; creado: number; ligadaA: { visitaId: string; nombreNegocio: string } | null }
+export type EstadoSolicitudes = 'ok' | 'sin_configurar' | 'sin_cuenta' | 'error';
+export type ResultadoLigar = { ok: true; nombre: string } | { ok: false; motivo: 'ocupada' | 'no_es_suya' | 'no_encontrada' | 'error' };
+
 export type MotivoDuplicado = 'en_tu_ruta' | 'ruta_de_otro' | 'visitado_reciente';
 
 // Una visita anterior al mismo negocio, de este vendedor o de otro.
@@ -92,6 +97,8 @@ export interface Progreso {
   propiosPorDia?: number;
   nuevosHoy?: number;
   propiosHoy?: number;
+  // "Hizo solicitud" de los últimos días que siguen sin su solicitud de HubSpot.
+  solicitudesSinLigar?: { visitaId: string; nombreNegocio: string; createdAt: string }[];
   racha: number;
   semana: { fecha: string; visitas: number }[];
   recientes: VisitaReciente[];
@@ -130,7 +137,14 @@ export const api = {
   antecedentes: (vendedorId: string, prospectoIds: string[]) =>
     req<Record<string, Antecedente[]>>(`/prospectos/vendedor/${vendedorId}/antecedentes?ids=${prospectoIds.map(encodeURIComponent).join(',')}`),
   registrarVisita: (data: Record<string, unknown>) =>
-    req<{ id: string; duplicado?: MotivoDuplicado | null }>('/visitas', { method: 'POST', body: JSON.stringify(data) }),
+    req<{ id: string; duplicado?: MotivoDuplicado | null; solicitud?: ResultadoLigar | null }>('/visitas', { method: 'POST', body: JSON.stringify(data) }),
+  solicitudesParaLigar: (vendedorId: string, opts: { visitaId?: string; fresco?: boolean } = {}) =>
+    req<{ estado: EstadoSolicitudes; items: OpcionSolicitud[] }>(`/solicitudes/vendedor/${vendedorId}?${new URLSearchParams({ ...(opts.visitaId ? { visitaId: opts.visitaId } : {}), ...(opts.fresco ? { fresco: '1' } : {}) })}`),
+  ligarSolicitud: (visitaId: string, dealId: string) =>
+    req<{ ok: boolean; nombre: string }>('/solicitudes/ligar', { method: 'POST', body: JSON.stringify({ visitaId, dealId }) }),
+  config: () => req<{ radioCercoMetros: number }>('/config'),
+  registrarTokenPush: (vendedorId: string, token: string) =>
+    req<void>('/notificaciones/token', { method: 'POST', body: JSON.stringify({ vendedorId, token }) }),
   zonasRestringidas: (vendedorId: string) =>
     req<{ id: string; puntos: { lat: number; lng: number }[]; mensaje: string | null }[]>(`/zonas-restringidas/vendedor/${vendedorId}`),
   registrarLlamada: (data: NuevaLlamada) =>

@@ -9,17 +9,21 @@ import { esNegocioIdValido, negocioIdDe } from '../negocios.js';
 import { llamadasDeNegocio, normalizarTelefono } from './llamadas.js';
 import { evaluarPunto, zonasDeVendedor } from '../zonasRestringidas.js';
 import { buscarDuplicado, type MotivoDuplicado } from '../duplicados.js';
+import { leerConfigApp } from '../configApp.js';
+import { sospechasGps, type SospechaGps } from '../sospechaGps.js';
+import { ligar, SOLICITUD, type ResultadoLigar, type Vinculo } from '../solicitudes.js';
 
 export const visitasRouter = Router();
 
 const MAX_FOTOS_POR_VISITA = 5;
 const RESULTADO_REAGENDA = 'Se reagenda visita';
-
-// Radio dentro del cual la ubicación GPS capturada en la visita se considera
-// que corresponde al negocio. Solo aplica a prospectos que vienen del DENUE
-// (coordenadas reales de INEGI) — un negocio agregado a mano o "nuevo" no
-// tiene una ubicación de referencia contra la cual validar.
-const RADIO_UBICACION_VALIDA_METROS = 50;
+// "Cerrado o no existe" se puede registrar desde donde sea: justo no hay
+// negocio en el punto al que habría que acercarse.
+const RESULTADO_NO_VALIDO = 'No es un negocio válido o existente';
+// Una visita que llega con más retraso que esto se capturó sin señal y se
+// reenvía desde la cola de la tablet: si se rechazara, se perdería (la cola
+// descarta los rechazos). Se guarda marcada en vez de rechazarla.
+const RETRASO_COLA_MS = 5 * 60_000;
 
 export interface VisitaDoc {
   vendedorId: string;
@@ -53,6 +57,20 @@ export interface VisitaDoc {
   gpsAccuracy: number | null;
   ubicacionValida: boolean | null;
   distanciaValidacionMetros: number | null;
+  // Cerco: la visita llegó desde la cola sin señal y estaba fuera de la
+  // distancia permitida (no se pudo bloquear a tiempo).
+  fueraDeCerco?: boolean;
+  // El vendedor dijo que el negocio está en otro lugar: su GPS de esta visita
+  // queda como propuesta de ubicación para que el líder la acepte o descarte.
+  ubicacionReportada?: 'pendiente' | 'aceptada' | 'descartada';
+  // Señales de GPS falso (ver sospechaGps.ts).
+  sospechaGps?: SospechaGps[];
+  // "Hizo solicitud": la solicitud de HubSpot que le corresponde (ver
+  // solicitudes.ts). solicitudPendiente = todavía sin ligar.
+  dealId?: string | null;
+  dealNombre?: string | null;
+  solicitudPendiente?: boolean;
+  vinculoSolicitud?: Vinculo;
   createdAt: Timestamp;
 }
 
@@ -64,6 +82,13 @@ interface ProspectoDoc {
   origen?: string;
   lat?: number | null;
   lng?: number | null;
+}
+
+// Día al que regresa un negocio con "Volver otro día": el que eligió el
+// vendedor (si es después del día de la visita) o el día siguiente.
+function fechaReagenda(elegida: string | undefined, en: Timestamp): string {
+  const dia = fechaMx(en.toDate());
+  return esFechaIso(elegida) && elegida > dia ? elegida : sumarDias(dia, 1);
 }
 
 function parseCoord(raw: string | undefined, min: number, max: number): number | null {
@@ -94,6 +119,13 @@ function shape(id: string, v: VisitaDoc) {
     lng: v.lng ?? null,
     ubicacionValida: v.ubicacionValida ?? null,
     distanciaValidacionMetros: v.distanciaValidacionMetros ?? null,
+    fueraDeCerco: !!v.fueraDeCerco,
+    ubicacionReportada: v.ubicacionReportada ?? null,
+    sospechaGps: v.sospechaGps ?? [],
+    dealId: v.dealId ?? null,
+    dealNombre: v.dealNombre ?? null,
+    solicitudPendiente: !!v.solicitudPendiente,
+    vinculoSolicitud: v.vinculoSolicitud ?? null,
     createdAt: toIso(v.createdAt),
   };
 }
@@ -146,6 +178,7 @@ async function conVendedor<T extends VisitaDoc & { id: string }>(visitas: T[]) {
       negocioId: v.negocioId ?? null,
       prospectoId: v.prospectoId ?? null,
       esNegocioNuevo: v.esNegocioNuevo,
+      propio: v.esNegocioNuevo ? v.propio !== false : null,
       nombreNegocio: v.nombreNegocio,
       direccion: v.direccion,
       resultado: v.resultado,
@@ -155,6 +188,13 @@ async function conVendedor<T extends VisitaDoc & { id: string }>(visitas: T[]) {
       lng: v.lng ?? null,
       ubicacionValida: v.ubicacionValida ?? null,
       distanciaValidacionMetros: v.distanciaValidacionMetros ?? null,
+      fueraDeCerco: !!v.fueraDeCerco,
+      ubicacionReportada: v.ubicacionReportada ?? null,
+      sospechaGps: v.sospechaGps ?? [],
+      dealId: v.dealId ?? null,
+      dealNombre: v.dealNombre ?? null,
+      solicitudPendiente: !!v.solicitudPendiente,
+      vinculoSolicitud: v.vinculoSolicitud ?? null,
       createdAt: toIso(v.createdAt),
     };
   });
@@ -177,9 +217,19 @@ export async function visitasDeNegocio(negocioId: string, limite: number): Promi
 export const ORIGENES_VISITA = ['nuevo', 'ruta'] as const;
 const origenDe = (v: { esNegocioNuevo?: boolean }) => (v.esNegocioNuevo ? 'nuevo' : 'ruta');
 
+// Alertas para el líder: 'ubicacion' (reportó que el negocio está en otro
+// lugar y falta revisarlo, o llegó sin señal fuera del cerco) y 'gps'
+// (señales de GPS falso).
+export const ALERTAS_VISITA = ['ubicacion', 'gps', 'solicitud'] as const;
+function tieneAlerta(v: VisitaDoc, alertas: string[]): boolean {
+  return (alertas.includes('ubicacion') && (v.ubicacionReportada === 'pendiente' || !!v.fueraDeCerco))
+    || (alertas.includes('gps') && !!v.sospechaGps?.length)
+    || (alertas.includes('solicitud') && !!v.solicitudPendiente);
+}
+
 visitasRouter.get('/', requireAdmin, async (req, res) => {
-  const { vendedorIds, productoIds, resultados, origenes, desde, hasta, cursor, limit } = req.query as {
-    vendedorIds?: string; productoIds?: string; resultados?: string; origenes?: string;
+  const { vendedorIds, productoIds, resultados, origenes, alertas, desde, hasta, cursor, limit } = req.query as {
+    vendedorIds?: string; productoIds?: string; resultados?: string; origenes?: string; alertas?: string;
     desde?: string; hasta?: string; cursor?: string; limit?: string;
   };
 
@@ -189,6 +239,7 @@ visitasRouter.get('/', requireAdmin, async (req, res) => {
   const origenList = parseCsvParam(origenes).filter((o) => (ORIGENES_VISITA as readonly string[]).includes(o));
   // Los dos orígenes juntos = sin filtro.
   const filtraOrigen = origenList.length === 1;
+  const alertaList = parseCsvParam(alertas).filter((a) => (ALERTAS_VISITA as readonly string[]).includes(a));
   const pageSize = Math.max(1, Math.min(100, parseInt(limit || '', 10) || 20));
   const rango = parseDateRangeQuery(desde, hasta);
   const cur = cursor ? decodeCursor(cursor) : null;
@@ -201,7 +252,7 @@ visitasRouter.get('/', requireAdmin, async (req, res) => {
   // permite combinar el 'in' de vendedorId con otro filtro de igualdad en la
   // misma consulta sin un índice dedicado; en vez de eso, se filtra en
   // memoria después de traer los datos (mismo patrón que ya usa /evidencias).
-  const overfetch = resultadoList.length || filtraOrigen ? pageSize * 3 : pageSize;
+  const overfetch = resultadoList.length || filtraOrigen || alertaList.length ? pageSize * 3 : pageSize;
 
   const chunkResults = await Promise.all(idChunks.map(async (chunkIds) => {
     let query: FirebaseFirestore.Query = db.collection('visitas');
@@ -232,6 +283,7 @@ visitasRouter.get('/', requireAdmin, async (req, res) => {
   let visitas = completos.map((d) => ({ id: d.id, ...(d.data() as VisitaDoc) }));
   if (resultadoList.length) visitas = visitas.filter((v) => resultadoList.includes(v.resultado));
   if (filtraOrigen) visitas = visitas.filter((v) => origenDe(v) === origenList[0]);
+  if (alertaList.length) visitas = visitas.filter((v) => tieneAlerta(v, alertaList));
 
   let pagina = visitas;
   let nextCursor: string | null = null;
@@ -245,6 +297,31 @@ visitasRouter.get('/', requireAdmin, async (req, res) => {
   }
 
   res.json({ items: await conVendedor(pagina), nextCursor });
+});
+
+// El líder revisa una ubicación que reportó el vendedor ("el negocio está en
+// otro lugar"): al aceptarla, el negocio queda en ese punto en todas las
+// rutas donde está (el cerco y "hecha en el negocio" se miden contra él).
+visitasRouter.post('/:id/ubicacion', requireAdmin, async (req, res) => {
+  const accion = req.body?.accion;
+  if (accion !== 'aceptar' && accion !== 'descartar') return res.status(400).json({ error: 'ACCION_INVALIDA', message: 'Acción inválida.' });
+  const ref = db.collection('visitas').doc(req.params.id);
+  const doc = await ref.get();
+  const v = doc.data() as VisitaDoc | undefined;
+  if (!v) return res.status(404).json({ error: 'NOT_FOUND', message: 'Esa visita ya no existe.' });
+  if (accion === 'aceptar') {
+    if (v.lat == null || v.lng == null) return res.status(400).json({ error: 'SIN_UBICACION', message: 'Esa visita no tiene ubicación.' });
+    const negocios = v.negocioId
+      ? (await db.collection('prospectos').where('negocioId', '==', v.negocioId).get()).docs
+      : v.prospectoId ? [await db.collection('prospectos').doc(v.prospectoId).get()].filter((d) => d.exists) : [];
+    const batch = db.batch();
+    negocios.forEach((d) => batch.update(d.ref, { lat: v.lat, lng: v.lng, ubicacionCorregidaEn: Timestamp.now() }));
+    batch.update(ref, { ubicacionReportada: 'aceptada', ubicacionValida: true, distanciaValidacionMetros: 0 });
+    await batch.commit();
+    return res.json({ ok: true, negocios: negocios.length });
+  }
+  await ref.update({ ubicacionReportada: 'descartada' });
+  res.json({ ok: true });
 });
 
 // Historial completo de un negocio (todas sus visitas, de cualquier
@@ -314,7 +391,7 @@ function fotoUrlValida(url: string, vendedorId: string): boolean {
 }
 
 visitasRouter.post('/', async (req, res) => {
-  const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy, capturadoEn, reagendarPara, telefono, fotos: fotosRaw } = req.body as Record<string, string> & { fotos?: unknown };
+  const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy, capturadoEn, reagendarPara, telefono, negocioEnOtroLugar, dealId, fotos: fotosRaw } = req.body as Record<string, string> & { fotos?: unknown };
   if (!vendedorId || !resultado) return res.status(400).json({ error: 'vendedorId y resultado son requeridos' });
   if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
 
@@ -355,19 +432,49 @@ visitasRouter.post('/', async (req, res) => {
   // Solo puede cerrar negocios de su propia ruta.
   if (prospecto && prospecto.vendedorId && prospecto.vendedorId !== vendedorId) prospecto = null;
 
+  // Cerco: un negocio de su ruta con ubicación conocida solo se registra
+  // estando a `radioCercoMetros` o menos (y con un GPS al menos así de
+  // preciso). Se revisa antes de tocar el negocio: una visita rechazada no
+  // debe marcarlo como visitado.
+  const gpsAcc = parseCoord(gpsAccuracy, 0, 100000);
+  const { radioCercoMetros: radio } = await leerConfigApp();
+  let fueraDeCerco = false;
+  let ubicacionReportada: 'pendiente' | null = null;
+  if (!esNuevo && prospecto && prospecto.lat != null && prospecto.lng != null && resultado !== RESULTADO_NO_VALIDO) {
+    const dist = hasGps ? haversineMetros({ lat: gpsLat!, lng: gpsLng! }, { lat: prospecto.lat, lng: prospecto.lng }) : null;
+    const dentro = dist != null && dist <= radio && (gpsAcc == null || gpsAcc <= radio);
+    if (!dentro) {
+      if (hasGps && (negocioEnOtroLugar === 'true' || negocioEnOtroLugar === '1')) ubicacionReportada = 'pendiente';
+      else if (Date.now() - createdAt.toMillis() > RETRASO_COLA_MS) fueraDeCerco = true;
+      else {
+        const message = dist == null ? 'Necesitamos tu ubicación GPS para registrar la visita. Revisa que la ubicación esté encendida.'
+          : dist <= radio ? `Tu GPS no es preciso ahora (±${Math.round(gpsAcc!)} m). Sal a la calle o espera unos segundos e intenta de nuevo.`
+            : `Estás a ${Math.round(dist)} m del negocio: acércate a menos de ${radio} m para registrar la visita.`;
+        return res.status(403).json({ error: 'FUERA_DE_CERCO', message });
+      }
+    }
+  }
+
+  let creadoAhora = false;
   if (esNuevo && !prospecto) {
     const nombre = nombreNegocio || 'Nuevo negocio';
     const dir = direccion || 'Ubicación actual';
     // Antes de crearlo, para no encontrarse a sí mismo.
     duplicado = await buscarDuplicado(vendedorId, { nombre, direccion: dir, lat: gpsLat, lng: gpsLng });
-    const data: ProspectoDoc & { vendedorId: string; negocioId: string; giro?: string; telefono: string | null; origen: string; estado: string; visitadoEn: Timestamp; createdAt: Timestamp } = {
+    // "Volver otro día" también vale para un negocio nuevo: entra a su ruta
+    // ese día, con la ubicación donde lo encontró (así el cerco aplica al regresar).
+    const reagenda = resultado === RESULTADO_REAGENDA;
+    const data = {
       vendedorId, negocioId: negocioIdDe({ nombre, direccion: dir, lat: gpsLat, lng: gpsLng }),
       nombre, direccion: dir,
-      giro: giro || undefined, telefono: telefonoCapturado, origen: 'manual', estado: 'visitado', visitadoEn: createdAt,
+      giro: giro || undefined, telefono: telefonoCapturado, origen: 'calle',
+      estado: reagenda ? 'por_visitar' : 'visitado', visitadoEn: createdAt,
+      ...(reagenda ? { fechaPlan: fechaReagenda(reagendarPara, createdAt), orden: 0, reagendado: true } : {}),
       lat: hasGps ? gpsLat : null, lng: hasGps ? gpsLng : null, createdAt: Timestamp.now(),
     };
     const ref = await db.collection('prospectos').add(data);
     prospecto = { id: ref.id, ...data };
+    creadoAhora = true;
   } else if (prospecto) {
     const prospectoRef = db.collection('prospectos').doc(prospecto.id);
     // Prospectos de antes de negocioId lo reciben en su primera visita.
@@ -380,27 +487,24 @@ visitasRouter.post('/', async (req, res) => {
     // casos, la cita que tuviera agendada por teléfono ya se cumplió.
     const tel = telefonoCapturado ? { telefono: telefonoCapturado, telefonoInvalido: false } : {};
     if (resultado === RESULTADO_REAGENDA) {
-      const fecha = esFechaIso(reagendarPara) && reagendarPara > fechaMx(createdAt.toDate())
-        ? reagendarPara
-        : sumarDias(fechaMx(createdAt.toDate()), 1);
-      await prospectoRef.update({ estado: 'por_visitar', fechaPlan: fecha, orden: 0, reagendado: true, citaFecha: null, citaHora: null, ...tel });
+      await prospectoRef.update({ estado: 'por_visitar', fechaPlan: fechaReagenda(reagendarPara, createdAt), orden: 0, reagendado: true, citaFecha: null, citaHora: null, ...tel });
     } else {
       await prospectoRef.update({ estado: 'visitado', visitadoEn: createdAt, reagendado: false, citaFecha: null, citaHora: null, ...tel });
     }
   }
 
-  // Valida la ubicación solo cuando el teléfono entregó GPS real (no la
-  // coordenada de respaldo del prospecto, que trivialmente daría distancia 0)
-  // y el prospecto viene del DENUE (tiene una ubicación de referencia real de
-  // INEGI). Negocios manuales/nuevos no tienen contra qué validar: se dejan
-  // en null (no aplica), no en false.
+  // "Hecha en el negocio": GPS real dentro del cerco. Solo se puede medir
+  // si el negocio ya tenía ubicación (del DENUE, o de cuando lo registraron
+  // en la calle) y no se creó en esta misma visita (compararlo consigo
+  // mismo siempre daría "sí"). Si no, se deja en null (no aplica).
   let ubicacionValida: boolean | null = null;
   let distanciaValidacionMetros: number | null = null;
-  if (hasGps && prospecto?.origen === 'denue' && prospecto.lat != null && prospecto.lng != null) {
+  if (hasGps && !creadoAhora && prospecto && prospecto.lat != null && prospecto.lng != null) {
     const distancia = haversineMetros({ lat: gpsLat!, lng: gpsLng! }, { lat: prospecto.lat, lng: prospecto.lng });
     distanciaValidacionMetros = Math.round(distancia);
-    ubicacionValida = distancia <= RADIO_UBICACION_VALIDA_METROS;
+    ubicacionValida = distancia <= radio;
   }
+  const sospecha = hasGps ? await sospechasGps(vendedorId, { lat: gpsLat!, lng: gpsLng!, en: createdAt }) : [];
 
   // Si el teléfono no entregó GPS, usamos la ubicación conocida del prospecto
   // (p. ej. coordenadas DENUE) para que la visita siga apareciendo en el mapa de calor.
@@ -429,6 +533,11 @@ visitasRouter.post('/', async (req, res) => {
     gpsAccuracy: hasGps ? parseCoord(gpsAccuracy, 0, 100000) : null,
     ubicacionValida,
     distanciaValidacionMetros,
+    ...(fueraDeCerco ? { fueraDeCerco: true } : {}),
+    ...(ubicacionReportada ? { ubicacionReportada } : {}),
+    ...(sospecha.length ? { sospechaGps: sospecha } : {}),
+    // Queda pendiente hasta ligarla (abajo, si el vendedor ya la eligió).
+    ...(resultado === SOLICITUD ? { solicitudPendiente: true } : {}),
     // Una visita registrada sin señal se reenvía después desde la cola local
     // del teléfono; capturadoEn conserva la hora real en que se hizo la visita
     // para que el avance del día y la racha no se muevan al día del reenvío.
@@ -436,6 +545,16 @@ visitasRouter.post('/', async (req, res) => {
   };
   const ref = await db.collection('visitas').add(visitaData);
 
+  // La solicitud que eligió. Si no se puede ligar (ya la tiene otra visita,
+  // HubSpot no responde…), la visita se guarda igual y queda sin ligar: se
+  // liga después desde "Mi ruta" o sola (ver solicitudes.ts). Nunca se
+  // rechaza la visita por esto: una visita en cola se perdería.
+  let solicitud: ResultadoLigar | null = null;
+  if (resultado === SOLICITUD && typeof dealId === 'string' && /^\d{1,20}$/.test(dealId)) {
+    solicitud = await ligar(ref.id, dealId, 'vendedor').catch(() => ({ ok: false as const, motivo: 'error' as const }));
+  }
+  const final = solicitud?.ok ? { ...visitaData, dealId, dealNombre: solicitud.nombre, solicitudPendiente: false, vinculoSolicitud: 'vendedor' as const } : visitaData;
+
   // `duplicado`: la app le avisa que este negocio no cuenta como nuevo.
-  res.status(201).json({ ...shape(ref.id, visitaData), duplicado });
+  res.status(201).json({ ...shape(ref.id, final), duplicado, solicitud });
 });

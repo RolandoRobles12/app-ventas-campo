@@ -1,4 +1,4 @@
-export { auth, storage, googleProvider, ALLOWED_EMAIL_DOMAIN } from './firebase';
+export { firebaseApp, auth, storage, googleProvider, ALLOWED_EMAIL_DOMAIN } from './firebase';
 export { AuthProvider, useAuth, RequireAuth, getIdToken } from './auth';
 export { loadGoogleMaps, GOOGLE_MAPS_API_KEY } from './googleMaps';
 export { Recorrido, type PasoRecorrido } from './recorrido';

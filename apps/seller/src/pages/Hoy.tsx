@@ -6,17 +6,20 @@ import { useUbicacion } from '../ubicacion';
 import {
   listarVisitasPendientes, progresoConCache, progresoEnCache, prospectosConCache, rutaEnCache, useCambiosDeRuta,
 } from '../offline';
-import { agruparRuta, comoLlegarUrl, horaCita, siguienteParada, textoDistancia, textoHora, type Parada } from '../ruta';
+import { agruparRuta, horaCita, siguienteParada, textoDistancia, textoHora, type Parada } from '../ruta';
 import { agruparLlamadas } from '../llamadas';
 import { etiquetaDia, fechaLarga, fechaLocal } from '../fechas';
 import { useRecorrido } from '../recorrido';
 import { actualizarZonas, evaluarZona, useZonasRestringidas } from '../zonas';
 import { AvisoZona } from '../components/AvisoZona';
+import { useAvisos } from '../notificaciones';
+import { SelectorSolicitud } from '../components/SelectorSolicitud';
+import { api } from '../api';
 import { Pantalla } from '../components/AppShell';
 import { ParadaFila } from '../components/ParadaFila';
 import { EstadoConexion } from '../components/EstadoConexion';
 import { HojaLlamada, VistaLlamadas } from '../components/Llamadas';
-import { IconAbajo, IconCamara, IconCheck, IconFuego, IconInfo, IconMas, IconNavegar, IconRecargar, IconRuta, IconSalir, IconTelefono, IconTienda } from '../icons';
+import { IconAbajo, IconCalendario, IconCamara, IconCheck, IconFuego, IconInfo, IconMas, IconNavegar, IconRecargar, IconRuta, IconSalir, IconTelefono, IconTienda } from '../icons';
 
 const RECARGA_AL_VOLVER_MS = 2 * 60 * 1000;
 
@@ -50,6 +53,9 @@ export function Hoy() {
   // De las que siguen en el teléfono, cuántas son negocios nuevos.
   const [pendientesNuevosHoy, setPendientesNuevosHoy] = useState(0);
   const zonas = useZonasRestringidas(vendedor?.id);
+  const avisos = useAvisos(vendedor?.id);
+  // Visita "Hizo solicitud" que se está ligando con su solicitud de HubSpot.
+  const [ligando, setLigando] = useState<{ visitaId: string; nombreNegocio: string } | null>(null);
   const [cargando, setCargando] = useState(false);
   const [menu, setMenu] = useState(false);
   const ultimaCarga = useRef(0);
@@ -140,6 +146,8 @@ export function Hoy() {
             nuevos={{ hechas: propiosHoy, meta: metaNuevos }}
             onNuevo={() => navigate('/visita/nueva')}
           />
+          {avisos.mostrarInvitacion && <InvitacionAvisos onActivar={avisos.activar} onPosponer={avisos.posponer} />}
+          {!!progreso?.solicitudesSinLigar?.length && <SinLigar items={progreso.solicitudesSinLigar} onLigar={setLigando} />}
           {siguiente ? <SiguienteParada parada={siguiente} /> : lista && <SinRutaHoy hayProximos={ruta.proximos.length > 0} />}
           <button data-tour="nuevo" className="btn btn-secondary tap" onClick={() => navigate('/visita/nueva')} style={{ width: '100%' }}>
             <IconMas size={22} stroke={2.6} /> Registrar negocio nuevo
@@ -199,6 +207,14 @@ export function Hoy() {
         </div>
       </div>
 
+      {ligando && (
+        <HojaLigar
+          vendedorId={vendedor.id} visita={ligando}
+          onCerrar={() => setLigando(null)}
+          onLigada={(nombre) => { setLigando(null); setAviso(`Solicitud ligada: ${nombre}`); cargar(); }}
+        />
+      )}
+
       {hoja && (
         <HojaLlamada
           parada={hoja}
@@ -238,6 +254,16 @@ export function Hoy() {
                 <IconCamara size={20} /> Practicar una visita
               </button>
             </div>
+            {avisos.estado === 'denied' && (
+              <p style={{ margin: '16px 0 0', fontSize: 14, color: '#8a5a1e', background: '#fdf4e7', borderRadius: 12, padding: '10px 12px', lineHeight: 1.5, fontWeight: 600 }}>
+                Los avisos de tus citas están bloqueados en esta tablet. Para recibirlos, toca el candado junto a la dirección (o Ajustes del sitio) y permite las notificaciones.
+              </p>
+            )}
+            {avisos.estado === 'default' && (
+              <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start', marginTop: 10, width: '100%' }} onClick={() => { setMenu(false); avisos.activar(); }}>
+                <IconCalendario size={20} /> Activar avisos de mis citas
+              </button>
+            )}
             <p style={{ margin: '16px 0 0', fontSize: 14, color: '#6f7d75', lineHeight: 1.5 }}>
               Si cierras sesión tendrás que volver a entrar con tu cuenta de Google para registrar visitas.
             </p>
@@ -329,6 +355,92 @@ function Barra({ pct, completa, alto }: { pct: number; completa: boolean; alto: 
   );
 }
 
+// "Hizo solicitud" que quedaron sin su solicitud de HubSpot (no aparecía
+// todavía o no había señal). Se ligan solas si aparecen, pero aquí puede
+// hacerlo él.
+function SinLigar({ items, onLigar }: { items: { visitaId: string; nombreNegocio: string; createdAt: string }[]; onLigar: (v: { visitaId: string; nombreNegocio: string }) => void }) {
+  return (
+    <section className="card aparecer" style={{ padding: '16px 18px', border: '2px solid #bcd3f0' }}>
+      <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink-900)' }}>
+        {items.length === 1 ? 'Tienes 1 solicitud sin ligar' : `Tienes ${items.length} solicitudes sin ligar`}
+      </div>
+      <div style={{ fontSize: 14.5, fontWeight: 600, color: '#5a665f', marginTop: 3, lineHeight: 1.45 }}>Elige cuál es en HubSpot para que cuente como tuya.</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+        {items.map((v) => (
+          <div key={v.visitaId} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="ellipsis" style={{ fontSize: 15.5, fontWeight: 800, color: 'var(--ink-800)' }}>{v.nombreNegocio}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: '#8a978f' }}>{etiquetaDia(fechaLocal(new Date(v.createdAt)))} · {new Date(v.createdAt).toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' })}</div>
+            </div>
+            <button className="btn btn-primary tap" onClick={() => onLigar(v)} style={{ minHeight: 46, fontSize: 15, padding: '0 16px', flex: 'none' }}>Ligar</button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function HojaLigar({ vendedorId, visita, onCerrar, onLigada }: {
+  vendedorId: string; visita: { visitaId: string; nombreNegocio: string }; onCerrar: () => void; onLigada: (nombre: string) => void;
+}) {
+  const [dealId, setDealId] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState('');
+  const ligar = async () => {
+    if (!dealId) return;
+    setGuardando(true);
+    setError('');
+    try {
+      const r = await api.ligarSolicitud(visita.visitaId, dealId);
+      onLigada(r.nombre);
+    } catch (err: any) {
+      setError(err.message || 'No se pudo ligar. Intenta de nuevo.');
+    } finally {
+      setGuardando(false);
+    }
+  };
+  return (
+    <div onClick={onCerrar} style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(10,25,17,.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={(e) => e.stopPropagation()} className="aparecer" style={{ width: '100%', maxWidth: 620, maxHeight: '88%', overflowY: 'auto', background: '#fff', borderRadius: '24px 24px 0 0', padding: '20px 18px 24px' }}>
+        <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '1px', color: '#6f7d75' }}>LIGAR SOLICITUD</div>
+        <div style={{ fontSize: 21, fontWeight: 800, color: 'var(--ink-900)', marginTop: 2 }}>{visita.nombreNegocio}</div>
+        <SelectorSolicitud vendedorId={vendedorId} visitaId={visita.visitaId} valor={dealId} onChange={setDealId} />
+        {error && <div style={{ color: '#b23a2b', fontSize: 15, fontWeight: 700, marginTop: 12 }}>{error}</div>}
+        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+          <button className="btn btn-ghost tap" style={{ flex: 1 }} onClick={onCerrar}>Después</button>
+          <button className="btn btn-primary tap" style={{ flex: 1.4, opacity: dealId && !guardando ? 1 : 0.6 }} disabled={!dealId || guardando} onClick={ligar}>
+            {guardando ? 'Ligando…' : 'Ligar solicitud'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// La primera vez: pedirle permiso para avisarle de sus citas. El permiso
+// solo se puede pedir con un toque suyo (el navegador lo exige).
+function InvitacionAvisos({ onActivar, onPosponer }: { onActivar: () => void; onPosponer: () => void }) {
+  return (
+    <section className="card aparecer" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <span style={{ flex: 'none', width: 44, height: 44, borderRadius: 14, background: '#e2ecfb', color: '#1d5fae', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <IconCalendario size={22} />
+        </span>
+        <div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink-900)' }}>Que no se te pase ninguna cita</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#5a665f', marginTop: 3, lineHeight: 1.45 }}>
+            Te avisamos a las 9 am de las citas del día, y 1 hora y 30 minutos antes de cada una.
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button className="btn btn-ghost tap" onClick={onPosponer} style={{ flex: 1, minHeight: 50, fontSize: 16 }}>Ahora no</button>
+        <button className="btn btn-primary tap" onClick={onActivar} style={{ flex: 1.4, minHeight: 50, fontSize: 16 }}>Activar avisos</button>
+      </div>
+    </section>
+  );
+}
+
 function SiguienteParada({ parada }: { parada: Parada }) {
   const navigate = useNavigate();
   const distancia = textoDistancia(parada.distanciaM);
@@ -346,12 +458,12 @@ function SiguienteParada({ parada }: { parada: Parada }) {
         {[parada.giro, parada.direccion].filter(Boolean).join(' · ')}
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
-        <a
-          href={comoLlegarUrl(parada)} target="_blank" rel="noreferrer" className="btn tap"
-          style={{ flex: 1, minWidth: 150, background: 'rgba(255,255,255,.14)', color: '#fff', textDecoration: 'none', border: '2px solid rgba(255,255,255,.35)' }}
+        <button
+          onClick={() => navigate(`/llegar/${parada.id}`, { state: { prospecto: parada } })} className="btn tap"
+          style={{ flex: 1, minWidth: 150, background: 'rgba(255,255,255,.14)', color: '#fff', border: '2px solid rgba(255,255,255,.35)' }}
         >
           <IconNavegar size={20} stroke={2.4} /> Cómo llegar
-        </a>
+        </button>
         <button
           className="btn tap"
           onClick={() => navigate(`/visita/${parada.id}`, { state: { prospecto: parada } })}

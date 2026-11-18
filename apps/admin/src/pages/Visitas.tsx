@@ -3,6 +3,7 @@ import { api, type VisitaListItem, type MapaCalorResponse, type RecorridoVendedo
 import { useFilters } from '../filters';
 import { FilterBar, PageHeader } from '../components/FilterBar';
 import { MultiSelectDropdown } from '../components/MultiSelectDropdown';
+import { useToast } from '../toast';
 import { GeoMap, HEAT_GRADIENT } from '../components/GeoMap';
 import { HistorialNegocio } from '../components/HistorialNegocio';
 import { prodBadgeStyle, resultadoBadgeStyle } from '../badges';
@@ -13,6 +14,24 @@ const ORIGENES = [
   { value: 'nuevo', label: 'Negocios nuevos (de calle)' },
   { value: 'ruta', label: 'Prospectos de la ruta (DENUE)' },
 ];
+
+// Alertas para revisar: ubicación reportada por el vendedor (o visita que
+// llegó sin señal fuera del cerco) y señales de GPS falso.
+const ALERTAS = [
+  { value: 'ubicacion', label: 'Ubicación por revisar' },
+  { value: 'gps', label: 'GPS sospechoso' },
+  { value: 'solicitud', label: 'Solicitud sin ligar' },
+];
+
+function alertasTexto(v: VisitaListItem): string {
+  return [
+    v.ubicacionReportada === 'pendiente' && 'Reportó que el negocio está en otro lugar (por revisar)',
+    v.ubicacionReportada === 'aceptada' && 'Ubicación corregida',
+    v.fueraDeCerco && 'Enviada sin señal fuera del cerco',
+    v.sospechaGps?.includes('salto') && 'GPS sospechoso: salto imposible',
+    v.solicitudPendiente && 'Solicitud sin ligar',
+  ].filter(Boolean).join('; ');
+}
 
 const RESULTADOS = [
   'Se realizó solicitud', 'Se dejó información', 'Se reagenda visita',
@@ -35,6 +54,18 @@ export function Visitas() {
   const { fProductos, fVendedores, fDesde, fHasta } = useFilters();
   const [selResultados, setSelResultados] = useState<string[]>([]);
   const [selOrigenes, setSelOrigenes] = useState<string[]>([]);
+  const [selAlertas, setSelAlertas] = useState<string[]>([]);
+  const { showToast } = useToast();
+  // El líder acepta o descarta la ubicación que reportó el vendedor.
+  const revisar = async (v: VisitaListItem, accion: 'aceptar' | 'descartar') => {
+    try {
+      const r = await api.revisarUbicacion(v.id, accion);
+      setItems((prev) => prev.map((x) => (x.id === v.id ? { ...x, ubicacionReportada: accion === 'aceptar' ? 'aceptada' : 'descartada', ...(accion === 'aceptar' ? { ubicacionValida: true, distanciaValidacionMetros: 0 } : {}) } : x)));
+      showToast(accion === 'aceptar' ? `Ubicación de ${v.nombreNegocio} actualizada${r.negocios && r.negocios > 1 ? ` en ${r.negocios} rutas` : ''}` : 'Ubicación descartada');
+    } catch (err: any) {
+      showToast(err.message || 'No se pudo guardar', 'error');
+    }
+  };
 
   const [items, setItems] = useState<VisitaListItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -79,7 +110,7 @@ export function Visitas() {
       // filtros a la vez solo complicaría la resolución en el servidor.
       vendedorIds: fVendedores.length ? fVendedores : undefined,
       productoIds: fVendedores.length ? undefined : fProductos,
-      resultados: selResultados, origenes: selOrigenes,
+      resultados: selResultados, origenes: selOrigenes, alertas: selAlertas,
       desde: fDesde, hasta: fHasta,
       cursor, limit: PAGE_SIZE,
     }).then((r) => {
@@ -88,7 +119,7 @@ export function Visitas() {
     }).catch(() => {
       if (primeraPagina) setItems([]);
     }).finally(() => { setLoading(false); setLoadingMore(false); });
-  }, [fProductos, fVendedores, selResultados, selOrigenes, fDesde, fHasta]);
+  }, [fProductos, fVendedores, selResultados, selOrigenes, selAlertas, fDesde, fHasta]);
 
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -102,19 +133,19 @@ export function Visitas() {
         const r = await api.visitas({
           vendedorIds: fVendedores.length ? fVendedores : undefined,
           productoIds: fVendedores.length ? undefined : fProductos,
-          resultados: selResultados, origenes: selOrigenes, desde: fDesde, hasta: fHasta, cursor, limit: 100,
+          resultados: selResultados, origenes: selOrigenes, alertas: selAlertas, desde: fDesde, hasta: fHasta, cursor, limit: 100,
         });
         filas.push(...r.items);
         cursor = r.nextCursor ?? undefined;
       } while (cursor && filas.length < MAX_EXPORTAR);
-      const encabezado = ['Fecha', 'Hora', 'Vendedor', 'Vendedor activo hoy', 'Producto', 'Negocio', 'Dirección', 'Origen', 'Cuenta como negocio nuevo', 'Resultado', 'Notas', 'Fotos', 'Hecha en el negocio', 'Distancia al negocio (m)', 'Latitud', 'Longitud'];
+      const encabezado = ['Fecha', 'Hora', 'Vendedor', 'Vendedor activo hoy', 'Producto', 'Negocio', 'Dirección', 'Origen', 'Cuenta como negocio nuevo', 'Resultado', 'Notas', 'Fotos', 'Hecha en el negocio', 'Distancia al negocio (m)', 'Alertas', 'Solicitud en HubSpot (id)', 'Solicitud en HubSpot', 'Latitud', 'Longitud'];
       const lineas = filas.map((v) => {
         const d = new Date(v.createdAt);
         return [
           d.toLocaleDateString('es-MX'), d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }), v.vendedorNombre, v.vendedorActivo ? 'Sí' : 'No', v.producto,
           v.nombreNegocio, v.direccion, v.esNegocioNuevo ? 'Negocio nuevo' : 'Ruta (DENUE)',
           v.esNegocioNuevo ? (v.propio === false ? 'No, ya era de alguien' : 'Sí') : '', v.resultado, v.notas ?? '', (v.fotos ?? []).length,
-          v.ubicacionValida == null ? (v.esNegocioNuevo ? 'No se puede medir (negocio nuevo)' : 'No se puede medir (sin GPS o sin ubicación)') : v.ubicacionValida ? 'Sí' : 'No', v.distanciaValidacionMetros ?? '', v.lat ?? '', v.lng ?? '',
+          v.ubicacionValida == null ? (v.esNegocioNuevo ? 'No se puede medir (negocio nuevo)' : 'No se puede medir (sin GPS o sin ubicación)') : v.ubicacionValida ? 'Sí' : 'No', v.distanciaValidacionMetros ?? '', alertasTexto(v), v.dealId ?? '', v.dealNombre ?? '', v.lat ?? '', v.lng ?? '',
         ].map(celdaCsv).join(',');
       });
       // BOM para que Excel abra bien los acentos.
@@ -152,6 +183,13 @@ export function Visitas() {
               placeholder="Nuevos y de ruta"
             />
             <MultiSelectDropdown
+              label="Alertas"
+              options={ALERTAS}
+              selected={selAlertas}
+              onChange={setSelAlertas}
+              placeholder="Con y sin alertas"
+            />
+            <MultiSelectDropdown
               label="Resultado"
               options={RESULTADOS.map((r) => ({ value: r, label: r }))}
               selected={selResultados}
@@ -160,8 +198,8 @@ export function Visitas() {
             />
           </>
         }
-        extraActivo={selResultados.length > 0 || selOrigenes.length > 0}
-        onLimpiarExtra={() => { setSelResultados([]); setSelOrigenes([]); }}
+        extraActivo={selResultados.length > 0 || selOrigenes.length > 0 || selAlertas.length > 0}
+        onLimpiarExtra={() => { setSelResultados([]); setSelOrigenes([]); setSelAlertas([]); }}
       />
 
       <div style={{ background: '#fff', border: '1px solid #e6ece7', borderRadius: 10, padding: '20px 22px', marginBottom: 16 }}>
@@ -281,7 +319,16 @@ export function Visitas() {
                 {!v.vendedorActivo && <div><span title="Ya no está activo en la base de colaboradores" style={{ fontSize: 10.5, color: '#6f7d75', background: '#eef1ee', borderRadius: 999, padding: '1px 7px' }}>ya no activo</span></div>}
               </div>
               <div><span style={prodBadgeStyle(v.producto)}>{v.producto}</span></div>
-              <div><span style={resultadoBadgeStyle(v.resultado)}>{v.resultado}</span></div>
+              <div>
+                <span style={resultadoBadgeStyle(v.resultado)}>{v.resultado}</span>
+                {v.dealId ? (
+                  <div style={{ fontSize: 11, color: '#5a665f', marginTop: 3 }} title={v.vinculoSolicitud === 'auto' ? 'Se ligó sola: era la solicitud de este vendedor creada más cerca de la hora de la visita.' : v.vinculoSolicitud === 'admin' ? 'La ligó un administrador.' : 'La eligió el vendedor al registrar la visita.'}>
+                    HubSpot: {v.dealNombre || v.dealId}{v.vinculoSolicitud === 'auto' ? ' · se ligó sola' : ''}
+                  </div>
+                ) : v.solicitudPendiente ? (
+                  <div><span style={pill('#94500f', '#fdecdb')} title="Todavía no se sabe cuál es su solicitud en HubSpot. Se liga sola cuando aparece, o el vendedor la liga desde su app.">Solicitud sin ligar</span></div>
+                ) : null}
+              </div>
               <div>
                 {v.ubicacionValida === null ? (
                   // No cuenta ni a favor ni en contra: se dice por qué no se puede medir.
@@ -295,6 +342,7 @@ export function Visitas() {
                     {v.ubicacionValida ? '✓ Sí' : '✕ No'} <span style={{ fontWeight: 400, color: '#8a978f' }}>· a {v.distanciaValidacionMetros} m</span>
                   </span>
                 )}
+                <Alertas v={v} onRevisar={revisar} />
               </div>
               <div style={{ color: '#8a978f' }}>
                 {new Date(v.createdAt).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
@@ -345,5 +393,35 @@ export function Visitas() {
         </div>
       )}
     </div>
+  );
+}
+
+const accionPeq = (color: string): React.CSSProperties => ({ fontSize: 11.5, fontWeight: 600, color, background: 'none', border: 'none', padding: 0, cursor: 'pointer' });
+const pill = (color: string, fondo: string): React.CSSProperties => ({ display: 'inline-block', fontSize: 10.5, fontWeight: 600, color, background: fondo, borderRadius: 999, padding: '1px 7px', marginTop: 4, cursor: 'help' });
+
+function Alertas({ v, onRevisar }: { v: VisitaListItem; onRevisar: (v: VisitaListItem, accion: 'aceptar' | 'descartar') => void }) {
+  return (
+    <>
+      {v.ubicacionReportada === 'pendiente' && (
+        <div style={{ marginTop: 4 }}>
+          <span style={pill('#1d4f8f', '#e6eef9')} title="El vendedor dijo que el negocio está en otro lugar y registró la visita desde ahí. Si es correcto, usa su ubicación como la del negocio.">Negocio en otro lugar</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', marginTop: 3 }}>
+            <button onClick={() => onRevisar(v, 'aceptar')} style={accionPeq('#157347')}>Aceptar</button>
+            <button onClick={() => onRevisar(v, 'descartar')} style={accionPeq('#a8322a')}>Descartar</button>
+            {v.lat != null && v.lng != null && (
+              <a href={`https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lng}`} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, fontWeight: 600 }}>Ver punto</a>
+            )}
+          </div>
+        </div>
+      )}
+      {v.ubicacionReportada === 'aceptada' && <div><span style={pill('#14623b', '#ecf8f0')} title="Se usó la ubicación que reportó el vendedor como la del negocio.">Ubicación corregida</span></div>}
+      {v.ubicacionReportada === 'descartada' && <div><span style={pill('#6f7d75', '#eef1ee')} title="Se revisó y no se cambió la ubicación del negocio.">Ubicación descartada</span></div>}
+      {v.fueraDeCerco && (
+        <div><span style={pill('#94500f', '#fdecdb')} title="La tablet la guardó sin señal y se envió después; estaba más lejos del negocio de lo permitido.">Fuera del cerco · sin señal</span></div>
+      )}
+      {v.sospechaGps?.includes('salto') && (
+        <div><span style={pill('#a8322a', '#fdeeec')} title="Para llegar de su ubicación anterior a donde dice esta visita habría tenido que ir a más de 150 km/h. Puede ser un GPS falso.">GPS sospechoso</span></div>
+      )}
+    </>
   );
 }

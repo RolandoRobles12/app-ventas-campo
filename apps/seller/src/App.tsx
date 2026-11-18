@@ -7,6 +7,7 @@ import { Mapa } from './pages/Mapa';
 import { Historial } from './pages/Historial';
 import { RegistrarVisita } from './pages/visita/RegistrarVisita';
 import { VisitaExito } from './pages/visita/VisitaExito';
+import { ComoLlegar } from './pages/ComoLlegar';
 import { AppShell } from './components/AppShell';
 import { BottomNav } from './components/BottomNav';
 import { LocationGate } from './components/LocationGate';
@@ -23,7 +24,7 @@ function AppShellConSesion() {
 
   // Registrar una visita es una tarea de pantalla completa: sin la barra de
   // abajo hay más espacio y menos toques accidentales.
-  const enVisita = pathname.startsWith('/visita');
+  const enVisita = pathname.startsWith('/visita') || pathname.startsWith('/llegar');
 
   return (
     <AppShell>
@@ -43,6 +44,7 @@ function AppShellConSesion() {
                 <Route path="/visita/practica" element={<RegistrarVisita practica />} />
                 <Route path="/visita/exito" element={<VisitaExito />} />
                 <Route path="/visita/:id" element={<RegistrarVisita />} />
+                <Route path="/llegar/:id" element={<ComoLlegar />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </div>

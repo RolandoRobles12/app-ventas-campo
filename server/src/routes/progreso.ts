@@ -4,6 +4,7 @@ import { toIso } from '../firestore-helpers.js';
 import { puedeActuarComoVendedor, vendedorAjeno } from '../auth.js';
 import { diaSemana, fechaMx, hoyMx, inicioDiaMx, sumarDias } from '../fechas.js';
 import { DIAS_POR_DEFECTO, configGuardada } from '../rutas/planificador.js';
+import { sinLigarDe } from '../solicitudes.js';
 import type { VendedorDoc } from './vendedores.js';
 
 // Avance del vendedor para su app: visitas de hoy, racha y lo que registró
@@ -85,6 +86,8 @@ progresoRouter.get('/:vendedorId', async (req, res) => {
   }
 
   const config = configGuardada(vendedor?.rutaConfig);
+  // "Hizo solicitud" que siguen sin su solicitud de HubSpot: se le recuerdan.
+  const solicitudesSinLigar = await sinLigarDe(vendedorId).catch(() => []);
   const racha = await calcularRacha(vendedorId, porDia, config?.dias ?? DIAS_POR_DEFECTO, hoy);
   const deHoy = visitas.filter((v) => fechaMx(v.createdAt.toDate()) === hoy);
 
@@ -98,6 +101,7 @@ progresoRouter.get('/:vendedorId', async (req, res) => {
     // Negocios nuevos de hoy: todos, y los que cuentan para la meta (los que
     // ya eran de alguien no cuentan).
     nuevosHoy: deHoy.filter((v) => v.esNegocioNuevo).length,
+    solicitudesSinLigar,
     propiosHoy: deHoy.filter((v) => v.esNegocioNuevo && v.propio !== false).length,
     racha,
     semana: Array.from({ length: 7 }, (_, i) => {

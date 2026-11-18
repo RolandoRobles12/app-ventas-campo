@@ -5,21 +5,23 @@ import { useSession } from '../../session';
 import { CameraCapture } from '../../components/CameraCapture';
 import { antecedentesEnCache, cargarAntecedentes, guardarVisitaPendiente, marcarVisitaLocal, prospectosConCache, rutaEnCache } from '../../offline';
 import { subirFotos } from '../../uploadFotos';
-import { comoLlegarUrl, distanciaMetros, textoDistancia } from '../../ruta';
+import { distanciaMetros, textoDistancia } from '../../ruta';
 import { etiquetaDia, fechaLocal, sumarDias } from '../../fechas';
 import { RESULTADOS_UI, resultadoUI } from '../../resultados';
 import { telHref, textoTelefono } from '../../llamadas';
 import { evaluarZona, useZonasRestringidas } from '../../zonas';
 import { AvisoZona } from '../../components/AvisoZona';
+import { useConfigApp } from '../../configApp';
+import { PENDIENTE, SelectorSolicitud } from '../../components/SelectorSolicitud';
 import { IconAtras, IconCamara, IconCheck, IconInfo, IconMas, IconNavegar, IconPin, IconTelefono, IconX } from '../../icons';
 
 const GIROS = ['Abarrotes', 'Ferretería', 'Papelería', 'Alimentos', 'Belleza', 'Taller', 'Servicios', 'Otro'];
 // Mismo tope que MAX_FOTOS_POR_VISITA en server/src/routes/visitas.ts (el
 // servidor es quien lo hace cumplir; este solo es para la interfaz).
 const MAX_FOTOS = 5;
-// Mismo radio que RADIO_UBICACION_VALIDA_METROS del servidor: dentro de él,
-// la visita cuenta en el admin como "hecha en el negocio".
-const RADIO_VERIFICADA_M = 50;
+// "Cerrado o no existe" se registra desde donde sea: no hay a qué acercarse.
+const NO_VALIDO = 'No es un negocio válido o existente';
+const SOLICITUD = 'Se realizó solicitud';
 const REAGENDA = 'Se reagenda visita';
 const NOTAS_RAPIDAS = ['No estaba el dueño', 'Pidió que regrese', 'Ya tiene crédito', 'Lo va a pensar', 'Negocio cerrado hoy'];
 
@@ -62,6 +64,13 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
   const location = useLocation();
   const gps = useGps();
   const zonas = useZonasRestringidas(vendedor?.id);
+  const { radioCercoMetros: radio } = useConfigApp();
+  // "El negocio está en otro lugar": deja registrar fuera del cerco y manda
+  // su ubicación para que el líder la revise.
+  const [otroLugar, setOtroLugar] = useState(false);
+  // "Hizo solicitud": cuál de sus solicitudes de HubSpot es (id del deal,
+  // PENDIENTE = "todavía no aparece", null = sin elegir).
+  const [solicitud, setSolicitud] = useState<string | null>(null);
 
   // La lista manda el negocio en el estado de navegación: abre al instante y
   // sin depender de la red. El caché es el respaldo si se entra por URL.
@@ -131,13 +140,26 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
   const faltaNombre = nueva && !nombre.trim();
   const faltaResultado = !resultado;
   const faltaFoto = fotos.length === 0;
-  const faltantes = [faltaNombre && 'nombre', faltaResultado && 'resultado', faltaFoto && 'foto'].filter(Boolean) as string[];
+  const pideSolicitud = resultado === SOLICITUD && !practica;
+  const faltaSolicitud = pideSolicitud && !solicitud;
+  const faltantes = [faltaNombre && 'nombre', faltaResultado && 'resultado', faltaSolicitud && 'cuál solicitud', faltaFoto && 'foto'].filter(Boolean) as string[];
 
-  // Solo los negocios del DENUE tienen una ubicación de referencia contra la
-  // cual el servidor valida (ver POST /visitas).
-  const distanciaNegocio = gps.status === 'ok' && prospecto?.origen === 'denue' && prospecto.lat != null && prospecto.lng != null
-    ? distanciaMetros(gps.fix, { lat: prospecto.lat, lng: prospecto.lng })
-    : null;
+  // Cerco: un negocio de su ruta con ubicación conocida (del DENUE, o de
+  // cuando lo registraron en la calle) solo se registra estando a `radio`
+  // metros o menos, con un GPS así de preciso. El servidor aplica lo mismo.
+  const conReferencia = !nueva && !practica && prospecto?.lat != null && prospecto?.lng != null;
+  const distanciaNegocio = gps.status === 'ok' && conReferencia ? distanciaMetros(gps.fix, { lat: prospecto!.lat!, lng: prospecto!.lng! }) : null;
+  const cerco: EstadoCerco = !conReferencia ? 'sin_referencia'
+    : resultado === NO_VALIDO ? 'exento'
+      : gps.status === 'buscando' ? 'buscando'
+        : gps.status === 'error' ? 'sin_gps'
+          : distanciaNegocio! > radio ? 'lejos'
+            : gps.fix.accuracy > radio ? 'impreciso' : 'ok';
+  const fueraDeCerco = ['buscando', 'sin_gps', 'impreciso', 'lejos'].includes(cerco) && !(cerco === 'lejos' && otroLugar);
+  const textoBloqueo: Record<string, string> = {
+    buscando: 'Buscando tu ubicación…', sin_gps: 'Activa tu ubicación para registrar',
+    impreciso: 'Esperando un GPS más preciso', lejos: 'Acércate al negocio para registrar',
+  };
 
   const tomarFoto = (file: File) => {
     setFotos((prev) => [...prev, { file, preview: URL.createObjectURL(file) }]);
@@ -151,10 +173,17 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
       setError('Estás en una zona donde no puedes visitar negocios: esta visita no se puede registrar aquí.');
       return;
     }
+    if (fueraDeCerco) {
+      setError(cerco === 'lejos' ? `Estás a ${textoDistancia(distanciaNegocio)} del negocio: acércate a menos de ${radio} m para registrar la visita.`
+        : cerco === 'impreciso' ? 'Tu GPS no es preciso ahora. Sal a la calle o espera unos segundos.'
+          : cerco === 'sin_gps' ? 'Necesitamos tu ubicación para registrar la visita. Revisa que esté encendida.'
+            : 'Espera a que encontremos tu ubicación.');
+      return;
+    }
     if (faltantes.length) {
       setIntento(true);
       setError('');
-      const primero = faltaNombre ? refs.nombre : faltaResultado ? refs.resultado : refs.foto;
+      const primero = faltaNombre ? refs.nombre : faltaResultado || faltaSolicitud ? refs.resultado : refs.foto;
       primero.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
@@ -183,16 +212,21 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
       campos.prospectoId = prospecto!.id;
       campos.direccion = prospecto!.direccion;
       if (resultado === REAGENDA) campos.reagendarPara = reagendarPara;
+      if (cerco === 'lejos' && otroLugar) campos.negocioEnOtroLugar = 'true';
     }
+    if (pideSolicitud && solicitud && solicitud !== PENDIENTE) campos.dealId = solicitud;
+    // Un negocio nuevo también puede quedar para otro día (entra a su ruta).
+    if (nueva && resultado === REAGENDA) campos.reagendarPara = reagendarPara;
     const capturadoEn = Date.now();
 
-    const terminar = (pendiente: boolean, duplicado: string | null = null) => {
+    // Cómo quedó la solicitud: ligada, o sin ligar (y por qué).
+    const terminar = (pendiente: boolean, duplicado: string | null = null, estadoSolicitud: string | null = pideSolicitud ? (solicitud === PENDIENTE ? 'pendiente' : 'ligada') : null) => {
       if (!nueva) {
         marcarVisitaLocal(vendedor.id, prospecto!.id, resultado === REAGENDA
           ? { estado: 'por_visitar', fechaPlan: reagendarPara, reagendado: true }
           : { estado: 'visitado' });
       }
-      navigate('/visita/exito', { replace: true, state: { nombre: nombreNegocio, resultado, fotos: fotos.length, pendiente, duplicado, reagendarPara: resultado === REAGENDA ? reagendarPara : null } });
+      navigate('/visita/exito', { replace: true, state: { nombre: nombreNegocio, resultado, fotos: fotos.length, pendiente, duplicado, solicitud: estadoSolicitud, reagendarPara: resultado === REAGENDA ? reagendarPara : null } });
     };
 
     // Sin señal, la visita no se pierde: queda en la tablet (IndexedDB) y
@@ -209,7 +243,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
       }
       const urls = await subirFotos(vendedor.id, fotos.map((f) => f.file));
       const r = await api.registrarVisita({ ...campos, capturadoEn, fotos: urls });
-      terminar(false, r.duplicado ?? null);
+      terminar(false, r.duplicado ?? null, !pideSolicitud ? null : r.solicitud?.ok ? 'ligada' : r.solicitud ? r.solicitud.motivo : 'pendiente');
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -258,9 +292,9 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
               <span>{[prospecto.giro, prospecto.direccion].filter(Boolean).join(' · ')}</span>
             </div>
             {!practica && <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
-              <a href={comoLlegarUrl(prospecto)} target="_blank" rel="noreferrer" className="btn btn-ghost tap" style={{ flex: 1, minWidth: 160, textDecoration: 'none' }}>
+              <button className="btn btn-ghost tap" style={{ flex: 1, minWidth: 160 }} onClick={() => navigate(`/llegar/${prospecto.id}`, { state: { prospecto, desdeVisita: true } })}>
                 <IconNavegar size={20} stroke={2.4} /> Cómo llegar
-              </a>
+              </button>
               {prospecto.telefono && !prospecto.telefonoInvalido && (
                 <a href={telHref(prospecto.telefono)} className="btn btn-ghost tap" style={{ flex: 1, minWidth: 160, textDecoration: 'none' }}>
                   <IconTelefono size={20} /> Llamar
@@ -280,7 +314,10 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
                 <input className="field" type="tel" inputMode="tel" value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="Así podrás llamarle para agendar la próxima visita" />
               </div>
             ))}
-            <Ubicacion gps={gps} distancia={distanciaNegocio} />
+            <Cerco
+              estado={cerco} gps={gps} distancia={distanciaNegocio} radio={radio} otroLugar={otroLugar} setOtroLugar={setOtroLugar}
+              comoLlegar={() => navigate(`/llegar/${prospecto.id}`, { state: { prospecto, desdeVisita: true } })}
+            />
           </section>
         )}
 
@@ -315,7 +352,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
         <section ref={refs.resultado} className="card" style={{ padding: 18 }}>
           <Etiqueta falta={intento && faltaResultado} aviso="elige una opción">¿Cómo te fue?</Etiqueta>
           <div className="resultados-grid">
-            {RESULTADOS_UI.filter((r) => !(nueva && r.valor === REAGENDA)).map((r) => {
+            {RESULTADOS_UI.map((r) => {
               const activo = resultado === r.valor;
               return (
                 <button
@@ -339,7 +376,9 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
             })}
           </div>
 
-          {resultado === REAGENDA && !nueva && (
+          {pideSolicitud && <SelectorSolicitud vendedorId={vendedor.id} valor={solicitud} onChange={setSolicitud} />}
+
+          {resultado === REAGENDA && (
             <div className="aparecer" style={{ marginTop: 16, background: '#f2f7fd', borderRadius: 16, padding: 14 }}>
               <div style={{ fontSize: 15, fontWeight: 800, color: '#1d5fae', marginBottom: 10 }}>¿Cuándo regresas?</div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -419,9 +458,9 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
             onClick={guardar}
             disabled={guardando}
             className="btn tap"
-            style={{ width: '100%', minHeight: 62, fontSize: 19, background: bloqueada ? '#c9a39d' : faltantes.length ? '#9fb5a8' : 'var(--aviva-green-700)', color: '#fff' }}
+            style={{ width: '100%', minHeight: 62, fontSize: 19, background: bloqueada || fueraDeCerco ? '#c9a39d' : faltantes.length ? '#9fb5a8' : 'var(--aviva-green-700)', color: '#fff' }}
           >
-            {guardando ? 'Guardando…' : bloqueada ? 'No puedes registrar visitas en esta zona' : faltantes.length ? `Falta: ${faltantes.join(', ')}` : <><IconCheck size={24} stroke={3} /> {practica ? 'Guardar visita (práctica)' : 'Guardar visita'}</>}
+            {guardando ? 'Guardando…' : bloqueada ? 'No puedes registrar visitas en esta zona' : fueraDeCerco ? textoBloqueo[cerco] : faltantes.length ? `Falta: ${faltantes.join(', ')}` : <><IconCheck size={24} stroke={3} /> {practica ? 'Guardar visita (práctica)' : 'Guardar visita'}</>}
           </button>
         </div>
       </footer>
@@ -439,8 +478,6 @@ function Etiqueta({ children, falta = false, aviso }: { children: React.ReactNod
   );
 }
 
-// Dónde está el vendedor respecto al negocio: dentro de 50 m la visita
-// cuenta como hecha en el negocio; más lejos se le avisa (no se le bloquea).
 function VisitadoAntes({ antecedentes }: { antecedentes: Antecedente[] }) {
   return (
     <section className="card" style={{ padding: 16 }}>
@@ -468,23 +505,85 @@ function VisitadoAntes({ antecedentes }: { antecedentes: Antecedente[] }) {
   );
 }
 
-function Ubicacion({ gps, distancia }: { gps: GpsState; distancia: number | null }) {
+// Ubicación del vendedor al registrar un negocio nuevo (su GPS será la
+// ubicación del negocio).
+function Ubicacion({ gps }: { gps: GpsState; distancia?: null }) {
   let fondo = '#eef5f0', color = '#356048', texto: string;
   if (gps.status === 'buscando') {
     fondo = '#fdf4e7'; color = '#8a5a1e'; texto = 'Buscando tu ubicación GPS…';
   } else if (gps.status === 'error') {
     fondo = '#fdecea'; color = '#8f3025'; texto = gps.message;
-  } else if (distancia == null) {
-    texto = `Ubicación capturada · precisión ±${gps.fix.accuracy} m`;
-  } else if (distancia <= RADIO_VERIFICADA_M) {
-    fondo = '#dcf1e5'; color = '#15703f'; texto = `Estás en el negocio (a ${textoDistancia(distancia)}) · la visita cuenta como hecha aquí`;
   } else {
-    fondo = '#fdecdb'; color = '#8a4b0f'; texto = `Estás a ${textoDistancia(distancia)} del negocio · acércate a menos de 50 m para que cuente como hecha en el negocio`;
+    texto = `Ubicación capturada · precisión ±${gps.fix.accuracy} m`;
   }
+  return <Franja fondo={fondo} color={color}>{texto}</Franja>;
+}
+
+type EstadoCerco = 'sin_referencia' | 'exento' | 'buscando' | 'sin_gps' | 'impreciso' | 'lejos' | 'ok';
+
+// Dónde está el vendedor respecto al negocio. Fuera del cerco no se puede
+// guardar: se le dice qué hacer (acercarse, mejorar el GPS) y, si el negocio
+// en realidad está en otro lugar, puede decirlo para que su líder lo revise.
+function Cerco({ estado, gps, distancia, radio, otroLugar, setOtroLugar, comoLlegar }: {
+  estado: EstadoCerco; gps: GpsState; distancia: number | null; radio: number;
+  otroLugar: boolean; setOtroLugar: (v: boolean) => void; comoLlegar: () => void;
+}) {
+  if (estado === 'sin_referencia') {
+    return <Franja fondo="#f2f5f2" color="#5a665f">Este negocio no tiene ubicación registrada: la visita queda sin comprobar.</Franja>;
+  }
+  if (estado === 'exento') {
+    return <Franja fondo="#f2f5f2" color="#5a665f">"Cerrado o no existe" se puede registrar desde donde estés.</Franja>;
+  }
+  if (estado === 'ok') {
+    return <Franja fondo="#dcf1e5" color="#15703f">Estás en el negocio (a {textoDistancia(distancia)}) · ya puedes registrar la visita</Franja>;
+  }
+  if (estado === 'buscando') return <Franja fondo="#fdf4e7" color="#8a5a1e">Buscando tu ubicación GPS…</Franja>;
+  if (estado === 'sin_gps') {
+    return <Franja fondo="#fdecea" color="#8f3025">{gps.status === 'error' ? gps.message : 'Sin ubicación'}: actívala para registrar la visita.</Franja>;
+  }
+  if (estado === 'impreciso') {
+    return (
+      <Franja fondo="#fdf4e7" color="#8a5a1e">
+        Tu GPS no es preciso ahora (±{gps.status === 'ok' ? gps.fix.accuracy : '?'} m). Sal a la calle o espera unos segundos: se actualiza solo.
+      </Franja>
+    );
+  }
+  // Lejos del negocio.
+  return (
+    <div style={{ marginTop: 14, background: otroLugar ? '#f2f7fd' : '#fdecea', border: `2px solid ${otroLugar ? '#bcd3f0' : '#f0c0b8'}`, borderRadius: 14, padding: 14 }}>
+      {otroLugar ? (
+        <>
+          <div style={{ fontSize: 15, fontWeight: 800, color: '#1d5fae' }}>El negocio está en otro lugar</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#3a4a41', marginTop: 4, lineHeight: 1.45 }}>
+            Guardaremos tu ubicación actual como la del negocio y tu líder la revisará.
+          </div>
+          <button className="tap" onClick={() => setOtroLugar(false)} style={{ marginTop: 8, fontSize: 14, fontWeight: 800, color: '#1d5fae', padding: '6px 0' }}>No, me equivoqué</button>
+        </>
+      ) : (
+        <>
+          <div style={{ fontSize: 15, fontWeight: 800, color: '#8f3025' }}>Estás a {textoDistancia(distancia)} del negocio</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#5a3a35', marginTop: 4, lineHeight: 1.45 }}>
+            Acércate a menos de {radio} m para registrar la visita.
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            <button className="btn btn-primary tap" onClick={comoLlegar} style={{ flex: 1, minWidth: 150, minHeight: 50, fontSize: 16 }}>
+              <IconNavegar size={18} stroke={2.4} /> Cómo llegar
+            </button>
+            <button className="btn btn-ghost tap" onClick={() => setOtroLugar(true)} style={{ flex: 1, minWidth: 150, minHeight: 50, fontSize: 15 }}>
+              El negocio está en otro lugar
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Franja({ fondo, color, children }: { fondo: string; color: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: fondo, color, borderRadius: 12, padding: '11px 13px', marginTop: 14, fontSize: 14, fontWeight: 700, lineHeight: 1.35 }}>
       <span style={{ flex: 'none', display: 'flex' }}><IconPin size={18} /></span>
-      {texto}
+      <span>{children}</span>
     </div>
   );
 }

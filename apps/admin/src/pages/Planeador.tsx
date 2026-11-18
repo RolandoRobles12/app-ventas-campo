@@ -6,7 +6,7 @@ import { useToast } from '../toast';
 import { PlaceAutocompleteInput } from '../components/PlaceAutocompleteInput';
 import { PlannerMap, ROJO_PROHIBIDA, ZONA_COLORES, type LatLng } from '../components/PlannerMap';
 import { ZonasProhibidas, type ZonaEnEdicion } from '../components/ZonasProhibidas';
-import { centroide, dentroDeAlguna } from '../lib/zonas';
+import { centroide, conCentro, dentroDeAlguna } from '../lib/zonas';
 import { Aviso, Avatar, boton } from '../components/ui';
 import { prodBadgeStyle } from '../badges';
 import { diaSemana, etiquetaDia, sumarDias, toISODate } from '../lib/dateRanges';
@@ -210,6 +210,13 @@ export function Planeador() {
   const zonasIncompletas = c.zonas.some((a) => a.poligono && a.poligono.length > 0 && a.poligono.length < 3);
   const listo = zonaLista && !zonasIncompletas && c.giros.length > 0 && fechas.length > 0 && !editandoR;
   const deRuta = c.visitasPorDia - c.propiosPorDia;
+  // Por qué todavía no se puede generar, dicho en palabras (un botón apagado
+  // sin explicación solo confunde).
+  const porQueNoListo = editandoR ? 'Guarda o cancela la zona donde no puede ir para generar la ruta.'
+    : zonasIncompletas ? 'Marca al menos 3 esquinas en cada zona dibujada.'
+      : !zonaLista ? 'Elige la zona en el paso 1.'
+        : !c.giros.length ? 'Elige al menos un giro.'
+          : !fechas.length ? 'Elige al menos un día de trabajo.' : '';
   const primerCentro = c.zonas.map((a) => a.poligono?.length ? centroide(a.poligono) : a.centro).find(Boolean) ?? null;
   const todosLosGiros = [...new Set([...girosProducto, ...girosDisponibles, ...c.giros])];
   const girosVisibles = verMasGiros ? todosLosGiros : [...new Set([...girosProducto, ...c.giros])];
@@ -323,7 +330,7 @@ export function Planeador() {
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
                           <button style={boton.suave} disabled={!a.poligono.length} onClick={() => setArea(i, { poligono: a.poligono!.slice(0, -1) })}>Deshacer punto</button>
                           <button style={boton.suave} onClick={() => setArea(i, { poligono: [] })} disabled={!a.poligono.length}>Borrar esquinas</button>
-                          <button style={{ ...boton.suave, marginLeft: 'auto' }} onClick={() => setArea(i, { poligono: null })}>Mejor buscar colonia</button>
+                          <button style={{ ...boton.suave, marginLeft: 'auto' }} onClick={() => setArea(i, { poligono: null })}>Mejor usar el buscador</button>
                         </div>
                       </div>
                     ) : (
@@ -332,7 +339,7 @@ export function Planeador() {
                           value={a.etiqueta}
                           onChange={(t) => setArea(i, { etiqueta: t, centro: null })}
                           onPlaceSelected={(p) => { setArea(i, { etiqueta: p.description, centro: { lat: p.lat, lng: p.lng } }); setEncuadrar((n) => n + 1); }}
-                          placeholder={i === 0 ? 'Colonia, C.P., municipio o dirección del kiosco' : 'Colonia vecina, C.P. o municipio'}
+                          placeholder={i === 0 ? 'Colonia, C.P., municipio o dirección del kiosco' : 'Busca la zona: colonia, C.P., municipio o lugar'}
                           types={['geocode']}
                         />
                         <div style={{ fontSize: 12, color: '#8a978f', marginTop: 6 }}>
@@ -355,11 +362,9 @@ export function Planeador() {
               })}
             </div>
             {c.zonas.length < MAX_ZONAS && !editandoR && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12.5, color: '#5a665f' }}>Juntar otra zona vecina:</span>
-                <button style={{ ...boton.suave, padding: '6px 10px', fontSize: 12 }} onClick={() => agregarArea(false)}>+ Buscar colonia</button>
-                <button style={{ ...boton.suave, padding: '6px 10px', fontSize: 12 }} onClick={() => agregarArea(true)}>+ Dibujar</button>
-              </div>
+              <button style={{ ...boton.suave, marginTop: 8 }} onClick={() => agregarArea(false)} title="Junta otra zona vecina a su ruta: el recorrido de cada día pasa por todas">
+                + Agregar zona
+              </button>
             )}
             <ZonasProhibidas
               vendedor={vendedor} vendedores={vendedores} zonas={zonasR} recargar={recargarZonasR}
@@ -393,7 +398,7 @@ export function Planeador() {
           <Paso n={3} titulo="Ritmo" ok={fechas.length > 0}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <Etiqueta>Visitas por día</Etiqueta>
+                <Etiqueta>Meta de visitas por día</Etiqueta>
                 <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #d9e1db', borderRadius: 8, overflow: 'hidden', width: 'fit-content' }}>
                   <button style={stepper} onClick={() => { const v = Math.max(1, c.visitasPorDia - 1); set({ visitasPorDia: v, propiosPorDia: Math.min(c.propiosPorDia, v - 1) }); }}>−</button>
                   <input type="number" min={1} max={40} value={c.visitasPorDia} onChange={(e) => { const v = Math.max(1, Math.min(40, parseInt(e.target.value, 10) || 1)); set({ visitasPorDia: v, propiosPorDia: Math.min(c.propiosPorDia, v - 1) }); }} style={{ width: 52, border: 'none', textAlign: 'center', fontSize: 15, fontWeight: 600, padding: '8px 0' }} />
@@ -508,6 +513,9 @@ export function Planeador() {
           )}
         </div>
 
+        {!listo && !generando && (
+          <div style={{ padding: '10px 18px 0', fontSize: 12.5, color: '#94500f' }}>{porQueNoListo}</div>
+        )}
         <div style={{ padding: '12px 18px', borderTop: '1px solid #eef2ee', display: 'flex', gap: 10 }}>
           <button
             style={{ ...(preview ? boton.secundario : boton.primario), flex: 1, opacity: !listo || generando ? 0.6 : 1 }}
@@ -532,6 +540,8 @@ export function Planeador() {
             ...(eligiendoR ? zonasR.filter((z) => !suyasR.includes(z)).map((z) => ({ id: z.id, nombre: z.nombre, puntos: z.puntos, tenue: true })) : []),
           ]}
           editandoRestringida={editandoR?.puntos ?? null} onEditandoRestringida={(pts) => setEditandoR((z) => (z ? { ...z, puntos: pts } : z))}
+          onClicRestringida={editandoR?.modo === 'buscar' ? (p) => setEditandoR((z) => (z ? conCentro(z, p) : z)) : undefined}
+          restringidaEditable={editandoR?.modo === 'dibujar'}
           existentes={existentes} preview={puntosPreview} diaSeleccionado={diaSel} onElegirDia={setDiaSel}
           encuadrarToken={encuadrar} alto="100%"
         />
@@ -542,7 +552,7 @@ export function Planeador() {
           {suyasR.length > 0 && <Leyenda color={ROJO_PROHIBIDA} texto="Donde no puede ir" chico />}
           {(!preview || editandoR) && (
             <span style={{ color: editandoR ? ROJO_PROHIBIDA : '#6f7d75', fontWeight: editandoR ? 600 : 400 }}>
-              {editandoR ? 'Clic: esquina de la zona donde no puede ir'
+              {editandoR ? (editandoR.modo === 'buscar' ? 'Clic: centro de la zona donde no puede ir' : 'Clic: esquina de la zona donde no puede ir')
                 : c.zonas[areaActiva]?.poligono ? `Clic: esquina de la zona${c.zonas.length > 1 ? ` ${areaActiva + 1}` : ''}`
                   : `Clic: centro de la zona${c.zonas.length > 1 ? ` ${areaActiva + 1}` : ''}`}
             </span>
