@@ -31,6 +31,17 @@ authRouter.get('/me', async (req, res) => {
   res.json({ email, vendedor: shapeVendedor(doc.id, v, productos.get(v.productoId)), baja: false, isAdmin });
 });
 
+// La app del vendedor avisa qué versión de "Novedades" ya vio, para no
+// volver a mostrársela aunque entre desde otra tablet.
+authRouter.post('/novedades', async (req, res) => {
+  const version = String(req.body?.version || '').slice(0, 20);
+  if (!version) return res.status(400).json({ error: 'version_requerida' });
+  const doc = await vendedorDeEmail(req.user!.email);
+  if (!doc) return res.status(404).json({ error: 'no_es_vendedor' });
+  await doc.ref.update({ novedadesVistas: version });
+  res.status(204).end();
+});
+
 // La app del vendedor avisa que ya vio el recorrido de bienvenida: así no se
 // le vuelve a mostrar solo, aunque entre desde otra tablet.
 authRouter.post('/onboarding', async (req, res) => {

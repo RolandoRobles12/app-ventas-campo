@@ -37,6 +37,8 @@ export interface VendedorDoc {
   zonaPoligonos?: ZonaPunto[][] | null;
   // Cuándo vio el recorrido de bienvenida de la app (ver POST /auth/onboarding).
   onboardingVisto?: Timestamp | null;
+  // Última versión de "Novedades" que vio (ver POST /auth/novedades).
+  novedadesVistas?: string | null;
 }
 
 export async function productosPorId(ids: string[]): Promise<Map<string, string>> {
@@ -74,6 +76,7 @@ export function shapeVendedor(id: string, v: VendedorDoc, productoNombre?: strin
     // Siempre en la forma actual (varias zonas), aunque se haya guardado con la vieja.
     rutaConfig: configGuardada(v.rutaConfig),
     onboardingVisto: toIso(v.onboardingVisto ?? null),
+    novedadesVistas: v.novedadesVistas ?? null,
     // Para precargar el planeador cuando aún no hay rutaConfig.
     rutaAnterior: v.rutaConfig ? null : {
       etiqueta: [v.colonia, v.ciudad].filter(Boolean).join(', '),

@@ -252,6 +252,9 @@ export function Hoy() {
               <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start' }} onClick={() => { setMenu(false); recorrido.verBienvenida(); }}>
                 <IconInfo size={20} /> Ver la guía de la app
               </button>
+              <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start' }} onClick={() => { setMenu(false); recorrido.verNovedades(); }}>
+                <IconCheck size={20} /> Ver lo nuevo de la app
+              </button>
               <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start' }} onClick={() => { setMenu(false); recorrido.iniciarRecorrido(); }}>
                 <IconRuta size={20} /> Recorrido por mi pantalla
               </button>
@@ -365,7 +368,7 @@ function Barra({ pct, completa, alto }: { pct: number; completa: boolean; alto: 
 // hacerlo él.
 function SinLigar({ items, onLigar }: { items: { visitaId: string; nombreNegocio: string; createdAt: string }[]; onLigar: (v: { visitaId: string; nombreNegocio: string }) => void }) {
   return (
-    <section className="card aparecer" style={{ padding: '16px 18px', border: '2px solid #bcd3f0' }}>
+    <section data-tour="sin-ligar" className="card aparecer" style={{ padding: '16px 18px', border: '2px solid #bcd3f0' }}>
       <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink-900)' }}>
         {items.length === 1 ? 'Tienes 1 solicitud sin ligar' : `Tienes ${items.length} solicitudes sin ligar`}
       </div>
@@ -426,7 +429,7 @@ function HojaLigar({ vendedorId, visita, onCerrar, onLigada }: {
 // solo se puede pedir con un toque suyo (el navegador lo exige).
 function InvitacionAvisos({ onActivar, onPosponer }: { onActivar: () => void; onPosponer: () => void }) {
   return (
-    <section className="card aparecer" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <section data-tour="avisos" className="card aparecer" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         <span style={{ flex: 'none', width: 44, height: 44, borderRadius: 14, background: '#e2ecfb', color: '#1d5fae', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <IconCalendario size={22} />

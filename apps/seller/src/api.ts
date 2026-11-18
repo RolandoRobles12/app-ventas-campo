@@ -12,6 +12,8 @@ export interface Vendedor {
   prueba?: boolean;
   // Cuándo vio el recorrido de bienvenida (null: todavía no).
   onboardingVisto?: string | null;
+  // Última versión de "Novedades" que vio.
+  novedadesVistas?: string | null;
 }
 
 export interface Prospecto {
@@ -152,6 +154,7 @@ export const api = {
   registrarLlamada: (data: NuevaLlamada) =>
     req<{ id: string }>('/llamadas', { method: 'POST', body: JSON.stringify(data) }),
   marcarOnboarding: () => req<void>('/auth/onboarding', { method: 'POST' }),
+  marcarNovedades: (version: string) => req<void>('/auth/novedades', { method: 'POST', body: JSON.stringify({ version }) }),
   registrarUbicacion: (data: { vendedorId: string; lat: number; lng: number; accuracy?: number; capturadoEn?: number }) =>
     req<{ ok: boolean }>('/ubicaciones', { method: 'POST', body: JSON.stringify(data) }),
 };
