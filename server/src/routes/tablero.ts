@@ -340,7 +340,7 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
     conversion: s.solicitudes != null ? pct1(s.solicitudes, negociosReales) : null,
     aprobacion: s.aprobadas != null ? pct1(s.aprobadas, s.aprobadas + (s.rechazadas ?? 0)) : null,
     confirmacion: s.confirmadasVisitas != null ? pct1(s.confirmadasVisitas, s.marcadas) : null,
-    // Visitas hechas en el negocio (GPS a 50 m o menos), de las que se pueden comprobar.
+    // Visitas hechas en el negocio (GPS dentro del cerco), de las que se pueden comprobar.
     // Las que no se pueden comprobar no cuentan ni a favor ni en contra; se
     // dice cuántas son y por qué.
     validables,

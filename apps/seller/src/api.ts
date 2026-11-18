@@ -131,6 +131,9 @@ export const api = {
     req<Record<string, Antecedente[]>>(`/prospectos/vendedor/${vendedorId}/antecedentes?ids=${prospectoIds.map(encodeURIComponent).join(',')}`),
   registrarVisita: (data: Record<string, unknown>) =>
     req<{ id: string; duplicado?: MotivoDuplicado | null }>('/visitas', { method: 'POST', body: JSON.stringify(data) }),
+  config: () => req<{ radioCercoMetros: number }>('/config'),
+  registrarTokenPush: (vendedorId: string, token: string) =>
+    req<void>('/notificaciones/token', { method: 'POST', body: JSON.stringify({ vendedorId, token }) }),
   zonasRestringidas: (vendedorId: string) =>
     req<{ id: string; puntos: { lat: number; lng: number }[]; mensaje: string | null }[]>(`/zonas-restringidas/vendedor/${vendedorId}`),
   registrarLlamada: (data: NuevaLlamada) =>

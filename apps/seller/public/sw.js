@@ -49,3 +49,37 @@ self.addEventListener('fetch', (event) => {
     })),
   );
 });
+
+// ——— Avisos de citas (notificaciones push) ———
+// El servidor manda solo datos (title, body, url, tag): aquí se arma la
+// notificación, igual en la app instalada que en el navegador.
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch { payload = {}; }
+  const d = payload.data || payload;
+  const title = d.title || (payload.notification && payload.notification.title) || 'Aviva · Visitas de campo';
+  const body = d.body || (payload.notification && payload.notification.body) || '';
+  event.waitUntil(self.registration.showNotification(title, {
+    body,
+    tag: d.tag || undefined,
+    renotify: !!d.tag,
+    icon: '/favicon.png',
+    data: { url: d.url || '/' },
+  }));
+});
+
+// Al tocarla: abre la app (o la trae al frente) en la pantalla del aviso.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = new URL((event.notification.data && event.notification.data.url) || '/', self.location.origin).href;
+  event.waitUntil((async () => {
+    const abiertas = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const app = abiertas.find((c) => new URL(c.url).origin === self.location.origin);
+    if (app) {
+      await app.focus();
+      if ('navigate' in app) return app.navigate(url);
+      return undefined;
+    }
+    return self.clients.openWindow(url);
+  })());
+});

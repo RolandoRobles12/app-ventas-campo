@@ -29,7 +29,7 @@ const diapositivas = (nombre: string): Diapositiva[] => [
     Icon: IconCamara, color: '#1d5fae', fondo: '#e2ecfb',
     titulo: 'Registra cada visita',
     texto: 'Cuando estés en el negocio, toca "Registrar visita". Son tres pasos:',
-    puntos: ['Elige cómo te fue: hizo solicitud, dejaste información, volver otro día…', 'Toma al menos una foto del negocio: es tu evidencia', 'Hazlo estando a menos de 50 m para que cuente como hecha en el negocio'],
+    puntos: ['Elige cómo te fue: hizo solicitud, dejaste información, volver otro día…', 'Toma al menos una foto del negocio: es tu evidencia', 'Regístrala estando en el negocio: si estás lejos, la app te pide acercarte'],
   },
   {
     Icon: IconTelefono, color: '#15703f', fondo: '#dcf1e5',

@@ -91,6 +91,7 @@ export function Equipo() {
           {u ? <ReporteVista r={u} /> : estado?.configurado && <div style={{ fontSize: 13, color: '#8a978f' }}>Todavía no se ha sincronizado. Dale a "Sincronizar ahora" para traer al equipo.</div>}
         </Card>
 
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <Card
           titulo="Productos de campo"
           subtitulo="Los colaboradores activos de estos productos son vendedores aquí"
@@ -108,6 +109,8 @@ export function Equipo() {
             ))}
           </div>
         </Card>
+        <RegistroVisitas />
+        </div>
       </div>
 
       <FilterBar
@@ -172,6 +175,49 @@ export function Equipo() {
         <EditarProductos estado={estado} onClose={() => setEditandoProductos(false)} onGuardado={(e) => { setEstado(e); reload(); setEditandoProductos(false); showToast('Productos de campo actualizados'); }} />
       )}
     </div>
+  );
+}
+
+// Distancia máxima al negocio para registrar una visita (el "cerco"). Es
+// también la que cuenta una visita como "hecha en el negocio".
+function RegistroVisitas() {
+  const { showToast } = useToast();
+  const [radio, setRadio] = useState<number | null>(null);
+  const [valor, setValor] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => { api.config().then((c) => { setRadio(c.radioCercoMetros); setValor(String(c.radioCercoMetros)); }).catch(() => {}); }, []);
+  const n = Number(valor);
+  const valido = Number.isInteger(n) && n >= 30 && n <= 1000;
+  const guardar = async () => {
+    setGuardando(true);
+    try {
+      const c = await api.guardarConfig({ radioCercoMetros: n });
+      setRadio(c.radioCercoMetros);
+      showToast(`Listo: las visitas se registran a ${c.radioCercoMetros} m o menos del negocio`);
+    } catch (err: any) {
+      showToast(err.message || 'No se pudo guardar', 'error');
+    } finally {
+      setGuardando(false);
+    }
+  };
+  return (
+    <Card titulo="Registro de visitas" subtitulo="Qué tan cerca del negocio debe estar el vendedor para registrar la visita">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, color: '#3a4a41' }}>A</span>
+        <input
+          type="number" min={30} max={1000} step={10} value={valor} onChange={(e) => setValor(e.target.value)} disabled={radio == null}
+          style={{ width: 90, border: `1px solid ${valido || !valor ? '#d9e1db' : '#e29a90'}`, borderRadius: 8, padding: '8px 10px', fontSize: 14, fontWeight: 600 }}
+        />
+        <span style={{ fontSize: 13, color: '#3a4a41' }}>metros o menos</span>
+        <span style={{ flex: 1 }} />
+        <button style={{ ...boton.primario, opacity: !valido || n === radio || guardando ? 0.6 : 1 }} disabled={!valido || n === radio || guardando} onClick={guardar}>
+          {guardando ? 'Guardando…' : 'Guardar'}
+        </button>
+      </div>
+      <div style={{ fontSize: 12, color: '#8a978f', marginTop: 8, lineHeight: 1.5 }}>
+        Entre 30 y 1,000 m. Más lejos, la app no deja guardar la visita (salvo "Cerrado o no existe" o si el vendedor reporta que el negocio está en otro lugar, que llega a Visitas para revisarse). Es también la distancia con la que el Tablero cuenta una visita como "hecha en el negocio".
+      </div>
+    </Card>
   );
 }
 

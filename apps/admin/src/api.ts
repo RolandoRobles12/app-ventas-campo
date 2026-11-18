@@ -139,6 +139,12 @@ export interface VisitaListItem {
   nombreNegocio: string; direccion: string; resultado: string;
   notas: string | null; fotos: string[]; lat: number | null; lng: number | null;
   ubicacionValida: boolean | null; distanciaValidacionMetros: number | null; createdAt: string;
+  // Cerco: llegó sin señal y fuera de la distancia permitida.
+  fueraDeCerco?: boolean;
+  // El vendedor reportó que el negocio está en otro lugar.
+  ubicacionReportada?: 'pendiente' | 'aceptada' | 'descartada' | null;
+  // Señales de GPS falso ('salto': habría tenido que ir a más de 150 km/h).
+  sospechaGps?: string[];
 }
 export interface VisitasResponse { items: VisitaListItem[]; nextCursor: string | null }
 export interface HistorialNegocio {
@@ -232,9 +238,9 @@ export const api = {
   mapaCalor: (f: Filtro) => req<MapaCalorResponse>(`/mapa/calor${qs({ ...f })}`),
   recorridos: (f: Filtro) => req<RecorridoVendedor[]>(`/ubicaciones/recorrido${qs({ ...f })}`),
 
-  visitas: (params: Filtro & { resultados?: string[]; origenes?: string[]; cursor?: string; limit?: number }) =>
+  visitas: (params: Filtro & { resultados?: string[]; origenes?: string[]; alertas?: string[]; cursor?: string; limit?: number }) =>
     req<VisitasResponse>(`/visitas${qs({
-      vendedorIds: params.vendedorIds, productoIds: params.productoIds, resultados: params.resultados, origenes: params.origenes,
+      vendedorIds: params.vendedorIds, productoIds: params.productoIds, resultados: params.resultados, origenes: params.origenes, alertas: params.alertas,
       desde: params.desde, hasta: params.hasta, cursor: params.cursor, limit: params.limit ? String(params.limit) : undefined,
     })}`),
   llamadas: (params: Filtro & { resultados?: string[] }) =>
@@ -242,5 +248,9 @@ export const api = {
       vendedorIds: params.vendedorIds, productoIds: params.productoIds, resultados: params.resultados, desde: params.desde, hasta: params.hasta,
     })}`),
   citas: (f: { productoIds?: string[]; vendedorIds?: string[] }) => req<CitaProxima[]>(`/llamadas/citas${qs(f)}`),
+  revisarUbicacion: (visitaId: string, accion: 'aceptar' | 'descartar') =>
+    req<{ ok: boolean; negocios?: number }>(`/visitas/${visitaId}/ubicacion`, post({ accion })),
+  config: () => req<{ radioCercoMetros: number }>('/config'),
+  guardarConfig: (data: { radioCercoMetros: number }) => req<{ radioCercoMetros: number }>('/config', { method: 'PUT', body: JSON.stringify(data) }),
   historialNegocio: (negocioId: string) => req<HistorialNegocio>(`/visitas/negocio/${encodeURIComponent(negocioId)}`),
 };

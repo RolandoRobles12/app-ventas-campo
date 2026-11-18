@@ -453,7 +453,7 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
             <ThOrden k="conversion" orden={orden} setOrden={setOrden} alinear="right">Conversión</ThOrden>
             <ThOrden k="aprobacion" orden={orden} setOrden={setOrden} alinear="right">Aprobación</ThOrden>
             <ThOrden k="confirmacion" orden={orden} setOrden={setOrden} alinear="right">En HubSpot</ThOrden>
-            <span title="Visitas guardadas con la tablet a 50 m o menos del negocio. Solo se puede comprobar en negocios de la ruta (traen la ubicación oficial del DENUE) y cuando la tablet tenía GPS."><ThOrden k="enNegocio" orden={orden} setOrden={setOrden} alinear="right">En el negocio</ThOrden></span>
+            <span title="Visitas guardadas con la tablet dentro de la distancia permitida al negocio (se fija en Equipo). Solo se puede comprobar en negocios con ubicación conocida y cuando la tablet tenía GPS."><ThOrden k="enNegocio" orden={orden} setOrden={setOrden} alinear="right">En el negocio</ThOrden></span>
             <ThOrden k="ultimaVisita" orden={orden} setOrden={setOrden} alinear="right">Última visita</ThOrden>
           </div>
           {filas.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: '#9aa39c', fontSize: 13 }}>No hay vendedores en este filtro.</div>}
@@ -499,7 +499,7 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
         </div>
       </div>
       <div style={{ padding: '10px 20px 8px', fontSize: 11.5, color: '#8a978f', lineHeight: 1.5 }}>
-        <b style={{ color: '#6f7d75' }}>En el negocio:</b> de las visitas que se pueden comprobar, cuántas se guardaron con la tablet a 50 m o menos del negocio.
+        <b style={{ color: '#6f7d75' }}>En el negocio:</b> de las visitas que se pueden comprobar, cuántas se guardaron con la tablet dentro de la distancia permitida al negocio (se fija en Equipo).
         Se comprueba contra la ubicación oficial del negocio (DENUE), así que no se pueden medir las visitas a <b style={{ color: '#6f7d75' }}>negocios nuevos</b> (su única
         ubicación es la que manda el propio vendedor: siempre daría "sí"), a negocios <b style={{ color: '#6f7d75' }}>agregados a mano</b> en la ruta (no tienen coordenadas)
         ni las que se guardaron <b style={{ color: '#6f7d75' }}>sin GPS</b>. Esas no cuentan ni a favor ni en contra; debajo de cada porcentaje se dice cuántas son
@@ -534,7 +534,7 @@ function EnNegocio({ f }: { f: VendedorTablero }) {
     );
   }
   return (
-    <span title={fuera ? AYUDA_SIN_COMPROBAR : 'Visitas guardadas con la tablet a 50 m o menos del negocio.'} style={{ cursor: 'help' }}>
+    <span title={fuera ? AYUDA_SIN_COMPROBAR : 'Visitas guardadas con la tablet dentro de la distancia permitida al negocio.'} style={{ cursor: 'help' }}>
       {pctTxt(f.enNegocio)}
       <Sub>de {num(f.validables)} {f.validables === 1 ? 'comprobable' : 'comprobables'}</Sub>
       {fuera > 0 && <Sub>no se miden: {motivosTxt(f.sinComprobar)}</Sub>}

@@ -12,11 +12,12 @@ import { etiquetaDia, fechaLarga, fechaLocal } from '../fechas';
 import { useRecorrido } from '../recorrido';
 import { actualizarZonas, evaluarZona, useZonasRestringidas } from '../zonas';
 import { AvisoZona } from '../components/AvisoZona';
+import { useAvisos } from '../notificaciones';
 import { Pantalla } from '../components/AppShell';
 import { ParadaFila } from '../components/ParadaFila';
 import { EstadoConexion } from '../components/EstadoConexion';
 import { HojaLlamada, VistaLlamadas } from '../components/Llamadas';
-import { IconAbajo, IconCamara, IconCheck, IconFuego, IconInfo, IconMas, IconNavegar, IconRecargar, IconRuta, IconSalir, IconTelefono, IconTienda } from '../icons';
+import { IconAbajo, IconCalendario, IconCamara, IconCheck, IconFuego, IconInfo, IconMas, IconNavegar, IconRecargar, IconRuta, IconSalir, IconTelefono, IconTienda } from '../icons';
 
 const RECARGA_AL_VOLVER_MS = 2 * 60 * 1000;
 
@@ -50,6 +51,7 @@ export function Hoy() {
   // De las que siguen en el teléfono, cuántas son negocios nuevos.
   const [pendientesNuevosHoy, setPendientesNuevosHoy] = useState(0);
   const zonas = useZonasRestringidas(vendedor?.id);
+  const avisos = useAvisos(vendedor?.id);
   const [cargando, setCargando] = useState(false);
   const [menu, setMenu] = useState(false);
   const ultimaCarga = useRef(0);
@@ -140,6 +142,7 @@ export function Hoy() {
             nuevos={{ hechas: propiosHoy, meta: metaNuevos }}
             onNuevo={() => navigate('/visita/nueva')}
           />
+          {avisos.mostrarInvitacion && <InvitacionAvisos onActivar={avisos.activar} onPosponer={avisos.posponer} />}
           {siguiente ? <SiguienteParada parada={siguiente} /> : lista && <SinRutaHoy hayProximos={ruta.proximos.length > 0} />}
           <button data-tour="nuevo" className="btn btn-secondary tap" onClick={() => navigate('/visita/nueva')} style={{ width: '100%' }}>
             <IconMas size={22} stroke={2.6} /> Registrar negocio nuevo
@@ -238,6 +241,16 @@ export function Hoy() {
                 <IconCamara size={20} /> Practicar una visita
               </button>
             </div>
+            {avisos.estado === 'denied' && (
+              <p style={{ margin: '16px 0 0', fontSize: 14, color: '#8a5a1e', background: '#fdf4e7', borderRadius: 12, padding: '10px 12px', lineHeight: 1.5, fontWeight: 600 }}>
+                Los avisos de tus citas están bloqueados en esta tablet. Para recibirlos, toca el candado junto a la dirección (o Ajustes del sitio) y permite las notificaciones.
+              </p>
+            )}
+            {avisos.estado === 'default' && (
+              <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start', marginTop: 10, width: '100%' }} onClick={() => { setMenu(false); avisos.activar(); }}>
+                <IconCalendario size={20} /> Activar avisos de mis citas
+              </button>
+            )}
             <p style={{ margin: '16px 0 0', fontSize: 14, color: '#6f7d75', lineHeight: 1.5 }}>
               Si cierras sesión tendrás que volver a entrar con tu cuenta de Google para registrar visitas.
             </p>
@@ -326,6 +339,30 @@ function Barra({ pct, completa, alto }: { pct: number; completa: boolean; alto: 
     <div style={{ height: alto, borderRadius: 8, background: '#e6efe9', overflow: 'hidden', marginTop: 6 }}>
       <div style={{ height: '100%', width: `${pct}%`, borderRadius: 8, background: completa ? 'var(--aviva-green-500)' : 'var(--aviva-green-700)', transition: 'width .4s ease' }} />
     </div>
+  );
+}
+
+// La primera vez: pedirle permiso para avisarle de sus citas. El permiso
+// solo se puede pedir con un toque suyo (el navegador lo exige).
+function InvitacionAvisos({ onActivar, onPosponer }: { onActivar: () => void; onPosponer: () => void }) {
+  return (
+    <section className="card aparecer" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <span style={{ flex: 'none', width: 44, height: 44, borderRadius: 14, background: '#e2ecfb', color: '#1d5fae', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <IconCalendario size={22} />
+        </span>
+        <div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink-900)' }}>Que no se te pase ninguna cita</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#5a665f', marginTop: 3, lineHeight: 1.45 }}>
+            Te avisamos a las 9 am de las citas del día, y 1 hora y 30 minutos antes de cada una.
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button className="btn btn-ghost tap" onClick={onPosponer} style={{ flex: 1, minHeight: 50, fontSize: 16 }}>Ahora no</button>
+        <button className="btn btn-primary tap" onClick={onActivar} style={{ flex: 1.4, minHeight: 50, fontSize: 16 }}>Activar avisos</button>
+      </div>
+    </section>
   );
 }
 

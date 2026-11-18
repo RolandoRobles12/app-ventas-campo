@@ -55,3 +55,19 @@ export const sincronizarEquipoProgramado = onSchedule(
     }
   },
 );
+
+// Recordatorios de citas a la tablet del vendedor: el resumen de las 9:00 y
+// los avisos 60 y 30 minutos antes de cada cita (ver _server/recordatorios.ts).
+// Cada 5 minutos: un aviso puede llegar hasta 5 min después de su hora.
+export const recordatoriosDeCitas = onSchedule(
+  { schedule: 'every 5 minutes', timeZone: 'America/Mexico_City', timeoutSeconds: 120 },
+  async () => {
+    const { enviarRecordatorios } = await import('./_server/recordatorios.js');
+    try {
+      const r = await enviarRecordatorios();
+      if (r.resumenes || r.avisos) console.log(`Recordatorios: ${r.resumenes} resúmenes, ${r.avisos} avisos de cita.`);
+    } catch (err) {
+      console.error('Recordatorios de citas fallaron:', err);
+    }
+  },
+);
