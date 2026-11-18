@@ -159,3 +159,73 @@ export async function dealsDeCampo(ownerIds: string[], desde: Date, hasta: Date)
   deals.catch(() => dealsCache.delete(llave));
   return deals;
 }
+
+// ---- Solicitudes para ligar a una visita (app del vendedor) ----
+//
+// El vendedor elige, al registrar "Hizo solicitud", cuál de sus solicitudes
+// de HubSpot es la de ese negocio. Aquí la caché es de segundos (no de 15
+// min como en el Tablero): justo acaba de crearla y tiene que verla.
+
+export interface SolicitudHubspot { id: string; nombre: string; creado: number; ownerId: string | null; pipeline: string | null }
+
+const CACHE_LIGAR_MS = 20_000;
+const ligarCache = new Map<string, { en: number; lista: Promise<SolicitudHubspot[]> }>();
+
+const aSolicitud = (d: { id: string; properties: Record<string, string | null> }): SolicitudHubspot => ({
+  id: d.id,
+  nombre: (d.properties.dealname || '').trim() || `Solicitud ${d.id}`,
+  creado: fechaMs(d.properties.createdate) ?? 0,
+  ownerId: d.properties.hubspot_owner_id ?? null,
+  pipeline: d.properties.pipeline ?? null,
+});
+
+// Solicitudes del pipeline de campo de un owner creadas en [desde, hasta),
+// la más reciente primero. `fresco` se salta la caché (botón "Actualizar").
+export function solicitudesDeOwner(ownerId: string, desde: number, hasta: number, fresco = false): Promise<SolicitudHubspot[]> {
+  const llave = `${ownerId}|${desde}|${hasta}`;
+  const enCache = ligarCache.get(llave);
+  if (!fresco && enCache && Date.now() - enCache.en < CACHE_LIGAR_MS) return enCache.lista;
+  const lista = hsFetch<{ results: { id: string; properties: Record<string, string | null> }[] }>('/crm/v3/objects/deals/search', {
+    method: 'POST',
+    body: JSON.stringify({
+      filterGroups: [{
+        filters: [
+          { propertyName: 'pipeline', operator: 'EQ', value: PIPELINE_CAMPO },
+          { propertyName: 'hubspot_owner_id', operator: 'EQ', value: ownerId },
+          { propertyName: 'createdate', operator: 'GTE', value: String(desde) },
+          { propertyName: 'createdate', operator: 'LT', value: String(hasta) },
+        ],
+      }],
+      properties: ['dealname', 'createdate', 'hubspot_owner_id', 'pipeline'],
+      sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
+      limit: 100,
+    }),
+  }).then((r) => r.results.map(aSolicitud));
+  ligarCache.set(llave, { en: Date.now(), lista });
+  lista.catch(() => ligarCache.delete(llave));
+  return lista;
+}
+
+// Deals por id (para el Tablero: una solicitud ligada a mano puede haberse
+// creado fuera del rango que se consultó por fecha).
+export async function dealsPorId(ids: string[]): Promise<(DealCampo & { nombre: string; pipeline: string | null })[]> {
+  const out: (DealCampo & { nombre: string; pipeline: string | null })[] = [];
+  const unicos = [...new Set(ids)];
+  for (let i = 0; i < unicos.length; i += 100) {
+    const r = await hsFetch<{ results: { id: string; properties: Record<string, string | null> }[] }>('/crm/v3/objects/deals/batch/read', {
+      method: 'POST',
+      body: JSON.stringify({
+        properties: ['dealname', 'createdate', 'hubspot_owner_id', 'pipeline', PROP_APROBADO, PROP_RECHAZADO],
+        inputs: unicos.slice(i, i + 100).map((id) => ({ id })),
+      }),
+    });
+    for (const d of r.results) {
+      const s = aSolicitud(d);
+      out.push({
+        id: s.id, ownerId: s.ownerId ?? '', creado: s.creado, nombre: s.nombre, pipeline: s.pipeline,
+        aprobado: fechaMs(d.properties[PROP_APROBADO]), rechazado: fechaMs(d.properties[PROP_RECHAZADO]),
+      });
+    }
+  }
+  return out;
+}

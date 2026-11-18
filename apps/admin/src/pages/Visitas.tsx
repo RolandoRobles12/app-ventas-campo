@@ -20,6 +20,7 @@ const ORIGENES = [
 const ALERTAS = [
   { value: 'ubicacion', label: 'Ubicación por revisar' },
   { value: 'gps', label: 'GPS sospechoso' },
+  { value: 'solicitud', label: 'Solicitud sin ligar' },
 ];
 
 function alertasTexto(v: VisitaListItem): string {
@@ -28,6 +29,7 @@ function alertasTexto(v: VisitaListItem): string {
     v.ubicacionReportada === 'aceptada' && 'Ubicación corregida',
     v.fueraDeCerco && 'Enviada sin señal fuera del cerco',
     v.sospechaGps?.includes('salto') && 'GPS sospechoso: salto imposible',
+    v.solicitudPendiente && 'Solicitud sin ligar',
   ].filter(Boolean).join('; ');
 }
 
@@ -136,14 +138,14 @@ export function Visitas() {
         filas.push(...r.items);
         cursor = r.nextCursor ?? undefined;
       } while (cursor && filas.length < MAX_EXPORTAR);
-      const encabezado = ['Fecha', 'Hora', 'Vendedor', 'Vendedor activo hoy', 'Producto', 'Negocio', 'Dirección', 'Origen', 'Cuenta como negocio nuevo', 'Resultado', 'Notas', 'Fotos', 'Hecha en el negocio', 'Distancia al negocio (m)', 'Alertas', 'Latitud', 'Longitud'];
+      const encabezado = ['Fecha', 'Hora', 'Vendedor', 'Vendedor activo hoy', 'Producto', 'Negocio', 'Dirección', 'Origen', 'Cuenta como negocio nuevo', 'Resultado', 'Notas', 'Fotos', 'Hecha en el negocio', 'Distancia al negocio (m)', 'Alertas', 'Solicitud en HubSpot (id)', 'Solicitud en HubSpot', 'Latitud', 'Longitud'];
       const lineas = filas.map((v) => {
         const d = new Date(v.createdAt);
         return [
           d.toLocaleDateString('es-MX'), d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }), v.vendedorNombre, v.vendedorActivo ? 'Sí' : 'No', v.producto,
           v.nombreNegocio, v.direccion, v.esNegocioNuevo ? 'Negocio nuevo' : 'Ruta (DENUE)',
           v.esNegocioNuevo ? (v.propio === false ? 'No, ya era de alguien' : 'Sí') : '', v.resultado, v.notas ?? '', (v.fotos ?? []).length,
-          v.ubicacionValida == null ? (v.esNegocioNuevo ? 'No se puede medir (negocio nuevo)' : 'No se puede medir (sin GPS o sin ubicación)') : v.ubicacionValida ? 'Sí' : 'No', v.distanciaValidacionMetros ?? '', alertasTexto(v), v.lat ?? '', v.lng ?? '',
+          v.ubicacionValida == null ? (v.esNegocioNuevo ? 'No se puede medir (negocio nuevo)' : 'No se puede medir (sin GPS o sin ubicación)') : v.ubicacionValida ? 'Sí' : 'No', v.distanciaValidacionMetros ?? '', alertasTexto(v), v.dealId ?? '', v.dealNombre ?? '', v.lat ?? '', v.lng ?? '',
         ].map(celdaCsv).join(',');
       });
       // BOM para que Excel abra bien los acentos.
@@ -317,7 +319,16 @@ export function Visitas() {
                 {!v.vendedorActivo && <div><span title="Ya no está activo en la base de colaboradores" style={{ fontSize: 10.5, color: '#6f7d75', background: '#eef1ee', borderRadius: 999, padding: '1px 7px' }}>ya no activo</span></div>}
               </div>
               <div><span style={prodBadgeStyle(v.producto)}>{v.producto}</span></div>
-              <div><span style={resultadoBadgeStyle(v.resultado)}>{v.resultado}</span></div>
+              <div>
+                <span style={resultadoBadgeStyle(v.resultado)}>{v.resultado}</span>
+                {v.dealId ? (
+                  <div style={{ fontSize: 11, color: '#5a665f', marginTop: 3 }} title={v.vinculoSolicitud === 'auto' ? 'Se ligó sola: era la solicitud de este vendedor creada más cerca de la hora de la visita.' : v.vinculoSolicitud === 'admin' ? 'La ligó un administrador.' : 'La eligió el vendedor al registrar la visita.'}>
+                    HubSpot: {v.dealNombre || v.dealId}{v.vinculoSolicitud === 'auto' ? ' · se ligó sola' : ''}
+                  </div>
+                ) : v.solicitudPendiente ? (
+                  <div><span style={pill('#94500f', '#fdecdb')} title="Todavía no se sabe cuál es su solicitud en HubSpot. Se liga sola cuando aparece, o el vendedor la liga desde su app.">Solicitud sin ligar</span></div>
+                ) : null}
+              </div>
               <div>
                 {v.ubicacionValida === null ? (
                   // No cuenta ni a favor ni en contra: se dice por qué no se puede medir.

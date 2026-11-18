@@ -13,6 +13,8 @@ import { useRecorrido } from '../recorrido';
 import { actualizarZonas, evaluarZona, useZonasRestringidas } from '../zonas';
 import { AvisoZona } from '../components/AvisoZona';
 import { useAvisos } from '../notificaciones';
+import { SelectorSolicitud } from '../components/SelectorSolicitud';
+import { api } from '../api';
 import { Pantalla } from '../components/AppShell';
 import { ParadaFila } from '../components/ParadaFila';
 import { EstadoConexion } from '../components/EstadoConexion';
@@ -52,6 +54,8 @@ export function Hoy() {
   const [pendientesNuevosHoy, setPendientesNuevosHoy] = useState(0);
   const zonas = useZonasRestringidas(vendedor?.id);
   const avisos = useAvisos(vendedor?.id);
+  // Visita "Hizo solicitud" que se está ligando con su solicitud de HubSpot.
+  const [ligando, setLigando] = useState<{ visitaId: string; nombreNegocio: string } | null>(null);
   const [cargando, setCargando] = useState(false);
   const [menu, setMenu] = useState(false);
   const ultimaCarga = useRef(0);
@@ -143,6 +147,7 @@ export function Hoy() {
             onNuevo={() => navigate('/visita/nueva')}
           />
           {avisos.mostrarInvitacion && <InvitacionAvisos onActivar={avisos.activar} onPosponer={avisos.posponer} />}
+          {!!progreso?.solicitudesSinLigar?.length && <SinLigar items={progreso.solicitudesSinLigar} onLigar={setLigando} />}
           {siguiente ? <SiguienteParada parada={siguiente} /> : lista && <SinRutaHoy hayProximos={ruta.proximos.length > 0} />}
           <button data-tour="nuevo" className="btn btn-secondary tap" onClick={() => navigate('/visita/nueva')} style={{ width: '100%' }}>
             <IconMas size={22} stroke={2.6} /> Registrar negocio nuevo
@@ -201,6 +206,14 @@ export function Hoy() {
           </>}
         </div>
       </div>
+
+      {ligando && (
+        <HojaLigar
+          vendedorId={vendedor.id} visita={ligando}
+          onCerrar={() => setLigando(null)}
+          onLigada={(nombre) => { setLigando(null); setAviso(`Solicitud ligada: ${nombre}`); cargar(); }}
+        />
+      )}
 
       {hoja && (
         <HojaLlamada
@@ -338,6 +351,68 @@ function Barra({ pct, completa, alto }: { pct: number; completa: boolean; alto: 
   return (
     <div style={{ height: alto, borderRadius: 8, background: '#e6efe9', overflow: 'hidden', marginTop: 6 }}>
       <div style={{ height: '100%', width: `${pct}%`, borderRadius: 8, background: completa ? 'var(--aviva-green-500)' : 'var(--aviva-green-700)', transition: 'width .4s ease' }} />
+    </div>
+  );
+}
+
+// "Hizo solicitud" que quedaron sin su solicitud de HubSpot (no aparecía
+// todavía o no había señal). Se ligan solas si aparecen, pero aquí puede
+// hacerlo él.
+function SinLigar({ items, onLigar }: { items: { visitaId: string; nombreNegocio: string; createdAt: string }[]; onLigar: (v: { visitaId: string; nombreNegocio: string }) => void }) {
+  return (
+    <section className="card aparecer" style={{ padding: '16px 18px', border: '2px solid #bcd3f0' }}>
+      <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink-900)' }}>
+        {items.length === 1 ? 'Tienes 1 solicitud sin ligar' : `Tienes ${items.length} solicitudes sin ligar`}
+      </div>
+      <div style={{ fontSize: 14.5, fontWeight: 600, color: '#5a665f', marginTop: 3, lineHeight: 1.45 }}>Elige cuál es en HubSpot para que cuente como tuya.</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+        {items.map((v) => (
+          <div key={v.visitaId} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="ellipsis" style={{ fontSize: 15.5, fontWeight: 800, color: 'var(--ink-800)' }}>{v.nombreNegocio}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: '#8a978f' }}>{etiquetaDia(fechaLocal(new Date(v.createdAt)))} · {new Date(v.createdAt).toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' })}</div>
+            </div>
+            <button className="btn btn-primary tap" onClick={() => onLigar(v)} style={{ minHeight: 46, fontSize: 15, padding: '0 16px', flex: 'none' }}>Ligar</button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function HojaLigar({ vendedorId, visita, onCerrar, onLigada }: {
+  vendedorId: string; visita: { visitaId: string; nombreNegocio: string }; onCerrar: () => void; onLigada: (nombre: string) => void;
+}) {
+  const [dealId, setDealId] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState('');
+  const ligar = async () => {
+    if (!dealId) return;
+    setGuardando(true);
+    setError('');
+    try {
+      const r = await api.ligarSolicitud(visita.visitaId, dealId);
+      onLigada(r.nombre);
+    } catch (err: any) {
+      setError(err.message || 'No se pudo ligar. Intenta de nuevo.');
+    } finally {
+      setGuardando(false);
+    }
+  };
+  return (
+    <div onClick={onCerrar} style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(10,25,17,.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={(e) => e.stopPropagation()} className="aparecer" style={{ width: '100%', maxWidth: 620, maxHeight: '88%', overflowY: 'auto', background: '#fff', borderRadius: '24px 24px 0 0', padding: '20px 18px 24px' }}>
+        <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '1px', color: '#6f7d75' }}>LIGAR SOLICITUD</div>
+        <div style={{ fontSize: 21, fontWeight: 800, color: 'var(--ink-900)', marginTop: 2 }}>{visita.nombreNegocio}</div>
+        <SelectorSolicitud vendedorId={vendedorId} visitaId={visita.visitaId} valor={dealId} onChange={setDealId} />
+        {error && <div style={{ color: '#b23a2b', fontSize: 15, fontWeight: 700, marginTop: 12 }}>{error}</div>}
+        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+          <button className="btn btn-ghost tap" style={{ flex: 1 }} onClick={onCerrar}>Después</button>
+          <button className="btn btn-primary tap" style={{ flex: 1.4, opacity: dealId && !guardando ? 1 : 0.6 }} disabled={!dealId || guardando} onClick={ligar}>
+            {guardando ? 'Ligando…' : 'Ligar solicitud'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

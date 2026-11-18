@@ -145,6 +145,10 @@ export interface VisitaListItem {
   ubicacionReportada?: 'pendiente' | 'aceptada' | 'descartada' | null;
   // Señales de GPS falso ('salto': habría tenido que ir a más de 150 km/h).
   sospechaGps?: string[];
+  // "Hizo solicitud": la solicitud de HubSpot ligada (por el vendedor, sola
+  // o por un admin) o si sigue sin ligar.
+  dealId?: string | null; dealNombre?: string | null; solicitudPendiente?: boolean;
+  vinculoSolicitud?: 'vendedor' | 'auto' | 'admin' | null;
 }
 export interface VisitasResponse { items: VisitaListItem[]; nextCursor: string | null }
 export interface HistorialNegocio {

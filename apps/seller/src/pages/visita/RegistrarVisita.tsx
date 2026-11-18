@@ -12,6 +12,7 @@ import { telHref, textoTelefono } from '../../llamadas';
 import { evaluarZona, useZonasRestringidas } from '../../zonas';
 import { AvisoZona } from '../../components/AvisoZona';
 import { useConfigApp } from '../../configApp';
+import { PENDIENTE, SelectorSolicitud } from '../../components/SelectorSolicitud';
 import { IconAtras, IconCamara, IconCheck, IconInfo, IconMas, IconNavegar, IconPin, IconTelefono, IconX } from '../../icons';
 
 const GIROS = ['Abarrotes', 'Ferretería', 'Papelería', 'Alimentos', 'Belleza', 'Taller', 'Servicios', 'Otro'];
@@ -20,6 +21,7 @@ const GIROS = ['Abarrotes', 'Ferretería', 'Papelería', 'Alimentos', 'Belleza',
 const MAX_FOTOS = 5;
 // "Cerrado o no existe" se registra desde donde sea: no hay a qué acercarse.
 const NO_VALIDO = 'No es un negocio válido o existente';
+const SOLICITUD = 'Se realizó solicitud';
 const REAGENDA = 'Se reagenda visita';
 const NOTAS_RAPIDAS = ['No estaba el dueño', 'Pidió que regrese', 'Ya tiene crédito', 'Lo va a pensar', 'Negocio cerrado hoy'];
 
@@ -66,6 +68,9 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
   // "El negocio está en otro lugar": deja registrar fuera del cerco y manda
   // su ubicación para que el líder la revise.
   const [otroLugar, setOtroLugar] = useState(false);
+  // "Hizo solicitud": cuál de sus solicitudes de HubSpot es (id del deal,
+  // PENDIENTE = "todavía no aparece", null = sin elegir).
+  const [solicitud, setSolicitud] = useState<string | null>(null);
 
   // La lista manda el negocio en el estado de navegación: abre al instante y
   // sin depender de la red. El caché es el respaldo si se entra por URL.
@@ -135,7 +140,9 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
   const faltaNombre = nueva && !nombre.trim();
   const faltaResultado = !resultado;
   const faltaFoto = fotos.length === 0;
-  const faltantes = [faltaNombre && 'nombre', faltaResultado && 'resultado', faltaFoto && 'foto'].filter(Boolean) as string[];
+  const pideSolicitud = resultado === SOLICITUD && !practica;
+  const faltaSolicitud = pideSolicitud && !solicitud;
+  const faltantes = [faltaNombre && 'nombre', faltaResultado && 'resultado', faltaSolicitud && 'cuál solicitud', faltaFoto && 'foto'].filter(Boolean) as string[];
 
   // Cerco: un negocio de su ruta con ubicación conocida (del DENUE, o de
   // cuando lo registraron en la calle) solo se registra estando a `radio`
@@ -176,7 +183,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
     if (faltantes.length) {
       setIntento(true);
       setError('');
-      const primero = faltaNombre ? refs.nombre : faltaResultado ? refs.resultado : refs.foto;
+      const primero = faltaNombre ? refs.nombre : faltaResultado || faltaSolicitud ? refs.resultado : refs.foto;
       primero.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
@@ -207,17 +214,19 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
       if (resultado === REAGENDA) campos.reagendarPara = reagendarPara;
       if (cerco === 'lejos' && otroLugar) campos.negocioEnOtroLugar = 'true';
     }
+    if (pideSolicitud && solicitud && solicitud !== PENDIENTE) campos.dealId = solicitud;
     // Un negocio nuevo también puede quedar para otro día (entra a su ruta).
     if (nueva && resultado === REAGENDA) campos.reagendarPara = reagendarPara;
     const capturadoEn = Date.now();
 
-    const terminar = (pendiente: boolean, duplicado: string | null = null) => {
+    // Cómo quedó la solicitud: ligada, o sin ligar (y por qué).
+    const terminar = (pendiente: boolean, duplicado: string | null = null, estadoSolicitud: string | null = pideSolicitud ? (solicitud === PENDIENTE ? 'pendiente' : 'ligada') : null) => {
       if (!nueva) {
         marcarVisitaLocal(vendedor.id, prospecto!.id, resultado === REAGENDA
           ? { estado: 'por_visitar', fechaPlan: reagendarPara, reagendado: true }
           : { estado: 'visitado' });
       }
-      navigate('/visita/exito', { replace: true, state: { nombre: nombreNegocio, resultado, fotos: fotos.length, pendiente, duplicado, reagendarPara: resultado === REAGENDA ? reagendarPara : null } });
+      navigate('/visita/exito', { replace: true, state: { nombre: nombreNegocio, resultado, fotos: fotos.length, pendiente, duplicado, solicitud: estadoSolicitud, reagendarPara: resultado === REAGENDA ? reagendarPara : null } });
     };
 
     // Sin señal, la visita no se pierde: queda en la tablet (IndexedDB) y
@@ -234,7 +243,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
       }
       const urls = await subirFotos(vendedor.id, fotos.map((f) => f.file));
       const r = await api.registrarVisita({ ...campos, capturadoEn, fotos: urls });
-      terminar(false, r.duplicado ?? null);
+      terminar(false, r.duplicado ?? null, !pideSolicitud ? null : r.solicitud?.ok ? 'ligada' : r.solicitud ? r.solicitud.motivo : 'pendiente');
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -366,6 +375,8 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
               );
             })}
           </div>
+
+          {pideSolicitud && <SelectorSolicitud vendedorId={vendedor.id} valor={solicitud} onChange={setSolicitud} />}
 
           {resultado === REAGENDA && (
             <div className="aparecer" style={{ marginTop: 16, background: '#f2f7fd', borderRadius: 16, padding: 14 }}>

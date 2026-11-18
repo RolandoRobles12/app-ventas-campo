@@ -26,6 +26,7 @@ import { llamadasRouter } from './routes/llamadas.js';
 import { zonasRestringidasRouter } from './routes/zonasRestringidas.js';
 import { configRouter } from './routes/config.js';
 import { notificacionesRouter } from './routes/notificaciones.js';
+import { solicitudesRouter } from './routes/solicitudes.js';
 
 export const app = express();
 const origins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -64,6 +65,8 @@ app.use('/api/zonas-restringidas', zonasRestringidasRouter);
 app.use('/api/config', configRouter);
 // El vendedor registra su tablet para recibir los recordatorios de citas.
 app.use('/api/notificaciones', notificacionesRouter);
+// Ligar "Hizo solicitud" con su solicitud de HubSpot: el vendedor las suyas, el admin cualquiera.
+app.use('/api/solicitudes', solicitudesRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);

@@ -11,6 +11,7 @@ import { evaluarPunto, zonasDeVendedor } from '../zonasRestringidas.js';
 import { buscarDuplicado, type MotivoDuplicado } from '../duplicados.js';
 import { leerConfigApp } from '../configApp.js';
 import { sospechasGps, type SospechaGps } from '../sospechaGps.js';
+import { ligar, SOLICITUD, type ResultadoLigar, type Vinculo } from '../solicitudes.js';
 
 export const visitasRouter = Router();
 
@@ -64,6 +65,12 @@ export interface VisitaDoc {
   ubicacionReportada?: 'pendiente' | 'aceptada' | 'descartada';
   // Señales de GPS falso (ver sospechaGps.ts).
   sospechaGps?: SospechaGps[];
+  // "Hizo solicitud": la solicitud de HubSpot que le corresponde (ver
+  // solicitudes.ts). solicitudPendiente = todavía sin ligar.
+  dealId?: string | null;
+  dealNombre?: string | null;
+  solicitudPendiente?: boolean;
+  vinculoSolicitud?: Vinculo;
   createdAt: Timestamp;
 }
 
@@ -115,6 +122,10 @@ function shape(id: string, v: VisitaDoc) {
     fueraDeCerco: !!v.fueraDeCerco,
     ubicacionReportada: v.ubicacionReportada ?? null,
     sospechaGps: v.sospechaGps ?? [],
+    dealId: v.dealId ?? null,
+    dealNombre: v.dealNombre ?? null,
+    solicitudPendiente: !!v.solicitudPendiente,
+    vinculoSolicitud: v.vinculoSolicitud ?? null,
     createdAt: toIso(v.createdAt),
   };
 }
@@ -180,6 +191,10 @@ async function conVendedor<T extends VisitaDoc & { id: string }>(visitas: T[]) {
       fueraDeCerco: !!v.fueraDeCerco,
       ubicacionReportada: v.ubicacionReportada ?? null,
       sospechaGps: v.sospechaGps ?? [],
+      dealId: v.dealId ?? null,
+      dealNombre: v.dealNombre ?? null,
+      solicitudPendiente: !!v.solicitudPendiente,
+      vinculoSolicitud: v.vinculoSolicitud ?? null,
       createdAt: toIso(v.createdAt),
     };
   });
@@ -205,10 +220,11 @@ const origenDe = (v: { esNegocioNuevo?: boolean }) => (v.esNegocioNuevo ? 'nuevo
 // Alertas para el líder: 'ubicacion' (reportó que el negocio está en otro
 // lugar y falta revisarlo, o llegó sin señal fuera del cerco) y 'gps'
 // (señales de GPS falso).
-export const ALERTAS_VISITA = ['ubicacion', 'gps'] as const;
+export const ALERTAS_VISITA = ['ubicacion', 'gps', 'solicitud'] as const;
 function tieneAlerta(v: VisitaDoc, alertas: string[]): boolean {
   return (alertas.includes('ubicacion') && (v.ubicacionReportada === 'pendiente' || !!v.fueraDeCerco))
-    || (alertas.includes('gps') && !!v.sospechaGps?.length);
+    || (alertas.includes('gps') && !!v.sospechaGps?.length)
+    || (alertas.includes('solicitud') && !!v.solicitudPendiente);
 }
 
 visitasRouter.get('/', requireAdmin, async (req, res) => {
@@ -375,7 +391,7 @@ function fotoUrlValida(url: string, vendedorId: string): boolean {
 }
 
 visitasRouter.post('/', async (req, res) => {
-  const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy, capturadoEn, reagendarPara, telefono, negocioEnOtroLugar, fotos: fotosRaw } = req.body as Record<string, string> & { fotos?: unknown };
+  const { vendedorId, prospectoId, esNegocioNuevo, nombreNegocio, direccion, giro, resultado, notas, lat, lng, gpsAccuracy, capturadoEn, reagendarPara, telefono, negocioEnOtroLugar, dealId, fotos: fotosRaw } = req.body as Record<string, string> & { fotos?: unknown };
   if (!vendedorId || !resultado) return res.status(400).json({ error: 'vendedorId y resultado son requeridos' });
   if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
 
@@ -520,6 +536,8 @@ visitasRouter.post('/', async (req, res) => {
     ...(fueraDeCerco ? { fueraDeCerco: true } : {}),
     ...(ubicacionReportada ? { ubicacionReportada } : {}),
     ...(sospecha.length ? { sospechaGps: sospecha } : {}),
+    // Queda pendiente hasta ligarla (abajo, si el vendedor ya la eligió).
+    ...(resultado === SOLICITUD ? { solicitudPendiente: true } : {}),
     // Una visita registrada sin señal se reenvía después desde la cola local
     // del teléfono; capturadoEn conserva la hora real en que se hizo la visita
     // para que el avance del día y la racha no se muevan al día del reenvío.
@@ -527,6 +545,16 @@ visitasRouter.post('/', async (req, res) => {
   };
   const ref = await db.collection('visitas').add(visitaData);
 
+  // La solicitud que eligió. Si no se puede ligar (ya la tiene otra visita,
+  // HubSpot no responde…), la visita se guarda igual y queda sin ligar: se
+  // liga después desde "Mi ruta" o sola (ver solicitudes.ts). Nunca se
+  // rechaza la visita por esto: una visita en cola se perdería.
+  let solicitud: ResultadoLigar | null = null;
+  if (resultado === SOLICITUD && typeof dealId === 'string' && /^\d{1,20}$/.test(dealId)) {
+    solicitud = await ligar(ref.id, dealId, 'vendedor').catch(() => ({ ok: false as const, motivo: 'error' as const }));
+  }
+  const final = solicitud?.ok ? { ...visitaData, dealId, dealNombre: solicitud.nombre, solicitudPendiente: false, vinculoSolicitud: 'vendedor' as const } : visitaData;
+
   // `duplicado`: la app le avisa que este negocio no cuenta como nuevo.
-  res.status(201).json({ ...shape(ref.id, visitaData), duplicado });
+  res.status(201).json({ ...shape(ref.id, final), duplicado, solicitud });
 });

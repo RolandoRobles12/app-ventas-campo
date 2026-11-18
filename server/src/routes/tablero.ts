@@ -5,7 +5,7 @@ import { diasEntre, esFechaIso, fechaMx, hoyMx, inicioDiaMx, sumarDias, diaSeman
 import { getVendedoresDocs, resolveVendedorIds } from './_filters.js';
 import { productosPorId, type VendedorDoc } from './vendedores.js';
 import { configGuardada } from '../rutas/planificador.js';
-import { dealsDeCampo, hubspotConfigurado, ownersPorEmail, type DealCampo } from '../integrations/hubspot.js';
+import { dealsDeCampo, dealsPorId, hubspotConfigurado, ownersPorEmail, type DealCampo } from '../integrations/hubspot.js';
 
 // Tablero: el embudo de campo (meta de la ruta → visitados → reales → con
 // interés → solicitudes en HubSpot → aprobadas) para cualquier persona que
@@ -42,6 +42,8 @@ interface VisitaTablero {
   // de propios (no cuenta si ya era de alguien).
   nuevo: boolean;
   propio: boolean;
+  // La solicitud de HubSpot que se le ligó (a mano o sola), si ya tiene.
+  dealId: string | null;
 }
 
 // Una visita solo se puede comprobar si la tablet mandó GPS y el negocio
@@ -161,7 +163,7 @@ const ultimoDia = (r: Rango) => fechaMx(new Date(r.end - 1));
 // ---------- Lecturas ----------
 
 async function visitasEnRango(ids: string[] | null, r: { start: number; end: number }, soloSolicitudes = false): Promise<VisitaTablero[]> {
-  const campos = ['vendedorId', 'resultado', 'createdAt', 'negocioId', 'prospectoId', 'ubicacionValida', 'esNegocioNuevo', 'propio', 'gpsAccuracy'];
+  const campos = ['vendedorId', 'resultado', 'createdAt', 'negocioId', 'prospectoId', 'ubicacionValida', 'esNegocioNuevo', 'propio', 'gpsAccuracy', 'dealId'];
   const base = (q: FirebaseFirestore.Query) => {
     const x = soloSolicitudes ? q.where('resultado', '==', SOLICITUD) : q;
     return x.where('createdAt', '>=', Timestamp.fromMillis(r.start)).where('createdAt', '<', Timestamp.fromMillis(r.end)).select(...campos);
@@ -171,13 +173,14 @@ async function visitasEnRango(ids: string[] | null, r: { start: number; end: num
   return snaps.flatMap((s) => s.docs.map((d) => {
     const v = d.data() as {
       vendedorId: string; resultado: string; createdAt: Timestamp; negocioId?: string | null; prospectoId?: string | null;
-      ubicacionValida?: boolean | null; esNegocioNuevo?: boolean; propio?: boolean; gpsAccuracy?: number | null;
+      ubicacionValida?: boolean | null; esNegocioNuevo?: boolean; propio?: boolean; gpsAccuracy?: number | null; dealId?: string | null;
     };
     return {
       id: d.id, vendedorId: v.vendedorId, resultado: v.resultado, createdAt: v.createdAt.toMillis(),
       negocio: v.negocioId || v.prospectoId || `visita:${d.id}`, ubicacionValida: v.ubicacionValida ?? null,
       sinComprobar: motivoSinComprobar(v),
       nuevo: !!v.esNegocioNuevo, propio: !!v.esNegocioNuevo && v.propio !== false,
+      dealId: v.dealId ?? null,
     };
   }));
 }
@@ -201,6 +204,30 @@ async function planeadosEnRango(desde: string, hasta: string, ids: Set<string>):
 }
 
 // ---------- Confirmación contra HubSpot ----------
+
+// Las solicitudes ligadas a mano (o solas) que no salieron en la búsqueda
+// por fecha: p. ej. una que HubSpot creó horas después de la visita.
+async function faltantesPorId(solicitudes: VisitaTablero[], deals: DealCampo[]): Promise<DealCampo[]> {
+  const ya = new Set(deals.map((d) => d.id));
+  const faltan = [...new Set(solicitudes.map((v) => v.dealId).filter((id): id is string => !!id && !ya.has(id)))];
+  return faltan.length ? dealsPorId(faltan) : [];
+}
+
+// Primero cuentan las solicitudes ligadas (el vendedor eligió cuál era, o
+// se ligó sola después); las visitas sin ligar —las de antes de poder
+// elegirla— se emparejan por hora con las solicitudes que quedaron libres.
+export function confirmar(solicitudes: VisitaTablero[], deals: DealCampo[], ownerDe: Map<string, string>, extra: DealCampo[] = []): Map<string, DealCampo> {
+  const porId = new Map([...deals, ...extra].map((d) => [d.id, d]));
+  const out = new Map<string, DealCampo>();
+  for (const v of solicitudes) {
+    const deal = v.dealId ? porId.get(v.dealId) : undefined;
+    if (deal) out.set(v.id, deal);
+  }
+  const usados = new Set([...out.values()].map((d) => d.id));
+  const sinLigar = solicitudes.filter((v) => !v.dealId);
+  for (const [visita, deal] of emparejar(sinLigar, deals.filter((d) => !usados.has(d.id)), ownerDe)) out.set(visita, deal);
+  return out;
+}
 
 // Empareja cada visita marcada como "Hizo solicitud" con un deal del mismo
 // vendedor creado a ±30 min. Se arman todas las parejas posibles y se
@@ -416,7 +443,7 @@ tableroRouter.get('/', async (req, res) => {
         [...ownerDe.values()],
         new Date(rangoSolicitudes.start - VENTANA_CONFIRMACION_MS), new Date(rangoSolicitudes.end + VENTANA_CONFIRMACION_MS),
       );
-      confirmadas = emparejar(solicitudes, deals, ownerDe);
+      confirmadas = confirmar(solicitudes, deals, ownerDe, await faltantesPorId(solicitudes, deals));
     } catch (err) {
       console.error('Tablero: HubSpot falló:', err);
       hubspot = { estado: 'error', mensaje: (err as Error).message, vendedoresSinCuenta: [] };

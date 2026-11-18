@@ -71,3 +71,19 @@ export const recordatoriosDeCitas = onSchedule(
     }
   },
 );
+
+// "Hizo solicitud" que quedaron sin su solicitud de HubSpot (aún no aparecía
+// o no había señal): se ligan solas con la solicitud del vendedor creada más
+// cerca de la hora de la visita (ver _server/solicitudes.ts).
+export const ligarSolicitudesPendientes = onSchedule(
+  { schedule: 'every 15 minutes', timeZone: 'America/Mexico_City', timeoutSeconds: 300 },
+  async () => {
+    const { ligarPendientes } = await import('./_server/solicitudes.js');
+    try {
+      const r = await ligarPendientes();
+      if (r.ligadas || r.pendientes) console.log(`Solicitudes: ${r.ligadas} ligadas solas, ${r.pendientes} siguen pendientes.`);
+    } catch (err) {
+      console.error('Ligar solicitudes pendientes falló:', err);
+    }
+  },
+);
