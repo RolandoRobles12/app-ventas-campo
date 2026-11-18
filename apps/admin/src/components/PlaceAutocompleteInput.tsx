@@ -18,6 +18,10 @@ export function PlaceAutocompleteInput({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
+  // El listener de Google se registra una sola vez: llama siempre a los
+  // callbacks del render más reciente (si no, usaría estado viejo).
+  const callbacks = useRef({ onChange, onPlaceSelected });
+  callbacks.current = { onChange, onPlaceSelected };
 
   useEffect(() => {
     let cancelled = false;
@@ -33,8 +37,8 @@ export function PlaceAutocompleteInput({
         const loc = place.geometry?.location;
         if (!loc) return; // el usuario tecleó/dio Enter sin elegir una sugerencia real
         const description = place.formatted_address || place.name || '';
-        onChange(description);
-        onPlaceSelected({ description, lat: loc.lat(), lng: loc.lng() });
+        callbacks.current.onChange(description);
+        callbacks.current.onPlaceSelected({ description, lat: loc.lat(), lng: loc.lng() });
       });
       autocompleteRef.current = ac;
     }).catch(() => {});

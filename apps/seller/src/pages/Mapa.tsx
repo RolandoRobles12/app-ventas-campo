@@ -4,7 +4,7 @@ import { loadGoogleMaps } from '@aviva/ui';
 import { useSession } from '../session';
 import { useUbicacion } from '../ubicacion';
 import { prospectosConCache, rutaEnCache, useCambiosDeRuta } from '../offline';
-import { agruparRuta, comoLlegarUrl, textoDistancia, type Parada } from '../ruta';
+import { agruparRuta, textoDistancia, type Parada } from '../ruta';
 import { IconNavegar, IconPin, IconX } from '../icons';
 import { evaluarZona, useZonasRestringidas } from '../zonas';
 import { AvisoZona } from '../components/AvisoZona';
@@ -163,9 +163,9 @@ export function Mapa() {
               </button>
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-              <a href={comoLlegarUrl(seleccion)} target="_blank" rel="noreferrer" className="btn btn-ghost tap" style={{ flex: 1, textDecoration: 'none' }}>
+              <button className="btn btn-ghost tap" style={{ flex: 1 }} onClick={() => navigate(`/llegar/${seleccion.id}`, { state: { prospecto: seleccion } })}>
                 <IconNavegar size={20} stroke={2.4} /> Cómo llegar
-              </a>
+              </button>
               <button className="btn btn-primary tap" style={{ flex: 1.3 }} onClick={() => navigate(`/visita/${seleccion.id}`, { state: { prospecto: seleccion } })}>
                 Registrar visita
               </button>

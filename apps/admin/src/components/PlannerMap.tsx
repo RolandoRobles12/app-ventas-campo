@@ -64,12 +64,16 @@ type OverlayArea =
 // google.maps.drawing.DrawingManager ya no existe en la API (v3.65+), así que
 // los polígonos se arman con clics.
 export function PlannerMap({
-  areas, areaActiva, onArea, restringidas, editandoRestringida, onEditandoRestringida,
+  areas, areaActiva, onArea, restringidas, editandoRestringida, onEditandoRestringida, onClicRestringida, restringidaEditable = true,
   existentes, preview, diaSeleccionado, onElegirDia, encuadrarToken, alto,
 }: {
   areas: AreaMapa[]; areaActiva: number; onArea: (i: number, cambio: Partial<AreaMapa>) => void;
   restringidas: ZonaProhibidaMapa[];
   editandoRestringida: LatLng[] | null; onEditandoRestringida: (pts: LatLng[]) => void;
+  // Si se da, un clic mientras se edita la zona restringida llama a esto en
+  // vez de agregar una esquina (p. ej. para mover el centro de un círculo).
+  onClicRestringida?: (p: LatLng) => void;
+  restringidaEditable?: boolean;
   existentes: (LatLng & { nombre: string })[];
   preview: PuntoPreview[]; diaSeleccionado: string | null; onElegirDia: (fecha: string) => void;
   encuadrarToken: number; alto: number | string;
@@ -81,12 +85,12 @@ export function PlannerMap({
 
   // Los listeners del mapa se registran una sola vez: leen siempre el valor
   // vigente de estos refs, no el del render en que se crearon.
-  const props = useRef({ areas, areaActiva, onArea, editandoRestringida, onEditandoRestringida, onElegirDia });
-  props.current = { areas, areaActiva, onArea, editandoRestringida, onEditandoRestringida, onElegirDia };
+  const props = useRef({ areas, areaActiva, onArea, editandoRestringida, onEditandoRestringida, onClicRestringida, onElegirDia });
+  props.current = { areas, areaActiva, onArea, editandoRestringida, onEditandoRestringida, onClicRestringida, onElegirDia };
 
   const clic = (p: LatLng) => {
-    const { areas: as, areaActiva: i, onArea: cambiar, editandoRestringida: r, onEditandoRestringida: cambiarR } = props.current;
-    if (r) return cambiarR([...r, p]);
+    const { areas: as, areaActiva: i, onArea: cambiar, editandoRestringida: r, onEditandoRestringida: cambiarR, onClicRestringida: clicR } = props.current;
+    if (r) return clicR ? clicR(p) : cambiarR([...r, p]);
     const a = as[i];
     if (!a) return;
     if (a.poligono) cambiar(i, { poligono: [...a.poligono, p] });
@@ -197,7 +201,8 @@ export function PlannerMap({
         (pts) => props.current.onEditandoRestringida(pts), (p) => clicRef.current(p));
     }
     editRestringida.current.poner(editandoRestringida);
-  }, [editandoRestringida, listo]);
+    editRestringida.current.poly.setOptions({ editable: restringidaEditable });
+  }, [editandoRestringida, restringidaEditable, listo]);
 
   const dibujando = !!editandoRestringida || !!areas[areaActiva]?.poligono;
   useEffect(() => {

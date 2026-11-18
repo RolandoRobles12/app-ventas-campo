@@ -31,3 +31,20 @@ export function etiquetaZonas(c: RutaConfig | null | undefined): string | null {
   const primera = c.zonas[0].etiqueta || (c.zonas[0].poligono ? 'Zona dibujada' : 'Punto en el mapa');
   return c.zonas.length > 1 ? `${primera} +${c.zonas.length - 1}` : primera;
 }
+
+// Círculo como contorno de `lados` esquinas: así una zona restringida
+// elegida con el buscador + radio se guarda igual que una dibujada.
+export function circuloComoPoligono(centro: ZonaPunto, radioM: number, lados = 32): ZonaPunto[] {
+  const dLat = radioM / 110_540;
+  const dLng = radioM / (111_320 * Math.cos((centro.lat * Math.PI) / 180));
+  return Array.from({ length: lados }, (_, i) => {
+    const a = (2 * Math.PI * i) / lados;
+    return { lat: +(centro.lat + dLat * Math.sin(a)).toFixed(6), lng: +(centro.lng + dLng * Math.cos(a)).toFixed(6) };
+  });
+}
+
+// Con el buscador, la zona restringida es un círculo alrededor del lugar
+// elegido (se guarda como contorno).
+export function conCentro<T extends { radio: number }>(z: T, centro: ZonaPunto, radio = z.radio): T & { centro: ZonaPunto; puntos: ZonaPunto[] } {
+  return { ...z, centro, radio, puntos: circuloComoPoligono(centro, radio) };
+}

@@ -5,7 +5,7 @@ import { useSession } from '../../session';
 import { CameraCapture } from '../../components/CameraCapture';
 import { antecedentesEnCache, cargarAntecedentes, guardarVisitaPendiente, marcarVisitaLocal, prospectosConCache, rutaEnCache } from '../../offline';
 import { subirFotos } from '../../uploadFotos';
-import { comoLlegarUrl, distanciaMetros, textoDistancia } from '../../ruta';
+import { distanciaMetros, textoDistancia } from '../../ruta';
 import { etiquetaDia, fechaLocal, sumarDias } from '../../fechas';
 import { RESULTADOS_UI, resultadoUI } from '../../resultados';
 import { telHref, textoTelefono } from '../../llamadas';
@@ -258,9 +258,9 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
               <span>{[prospecto.giro, prospecto.direccion].filter(Boolean).join(' · ')}</span>
             </div>
             {!practica && <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
-              <a href={comoLlegarUrl(prospecto)} target="_blank" rel="noreferrer" className="btn btn-ghost tap" style={{ flex: 1, minWidth: 160, textDecoration: 'none' }}>
+              <button className="btn btn-ghost tap" style={{ flex: 1, minWidth: 160 }} onClick={() => navigate(`/llegar/${prospecto.id}`, { state: { prospecto, desdeVisita: true } })}>
                 <IconNavegar size={20} stroke={2.4} /> Cómo llegar
-              </a>
+              </button>
               {prospecto.telefono && !prospecto.telefonoInvalido && (
                 <a href={telHref(prospecto.telefono)} className="btn btn-ghost tap" style={{ flex: 1, minWidth: 160, textDecoration: 'none' }}>
                   <IconTelefono size={20} /> Llamar

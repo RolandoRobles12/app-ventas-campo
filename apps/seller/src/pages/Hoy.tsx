@@ -6,7 +6,7 @@ import { useUbicacion } from '../ubicacion';
 import {
   listarVisitasPendientes, progresoConCache, progresoEnCache, prospectosConCache, rutaEnCache, useCambiosDeRuta,
 } from '../offline';
-import { agruparRuta, comoLlegarUrl, horaCita, siguienteParada, textoDistancia, textoHora, type Parada } from '../ruta';
+import { agruparRuta, horaCita, siguienteParada, textoDistancia, textoHora, type Parada } from '../ruta';
 import { agruparLlamadas } from '../llamadas';
 import { etiquetaDia, fechaLarga, fechaLocal } from '../fechas';
 import { useRecorrido } from '../recorrido';
@@ -346,12 +346,12 @@ function SiguienteParada({ parada }: { parada: Parada }) {
         {[parada.giro, parada.direccion].filter(Boolean).join(' · ')}
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
-        <a
-          href={comoLlegarUrl(parada)} target="_blank" rel="noreferrer" className="btn tap"
-          style={{ flex: 1, minWidth: 150, background: 'rgba(255,255,255,.14)', color: '#fff', textDecoration: 'none', border: '2px solid rgba(255,255,255,.35)' }}
+        <button
+          onClick={() => navigate(`/llegar/${parada.id}`, { state: { prospecto: parada } })} className="btn tap"
+          style={{ flex: 1, minWidth: 150, background: 'rgba(255,255,255,.14)', color: '#fff', border: '2px solid rgba(255,255,255,.35)' }}
         >
           <IconNavegar size={20} stroke={2.4} /> Cómo llegar
-        </a>
+        </button>
         <button
           className="btn tap"
           onClick={() => navigate(`/visita/${parada.id}`, { state: { prospecto: parada } })}

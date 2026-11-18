@@ -29,7 +29,7 @@ function vistoEnEsteTelefono(vendedorId: string): boolean {
 
 const PASOS: PasoRecorrido[] = [
   { objetivo: 'avance', titulo: 'Tu meta del día', texto: 'Aquí ves cuántas visitas llevas y cuántas te faltan. Si cumples varios días seguidos, sumas a tu racha 🔥.' },
-  { objetivo: 'siguiente', titulo: 'Tu siguiente parada', texto: 'Es el negocio más cercano (o tu próxima cita). "Cómo llegar" abre Google Maps; cuando estés ahí, toca "Registrar visita".' },
+  { objetivo: 'siguiente', titulo: 'Tu siguiente parada', texto: 'Es el negocio más cercano (o tu próxima cita). "Cómo llegar" te muestra el camino en el mapa; cuando estés ahí, toca "Registrar visita".' },
   { objetivo: 'vistas', titulo: 'Tu ruta y tus llamadas', texto: 'En "Llamar" están los negocios con teléfono. Llama antes de ir: si agendas una cita, aparece en tu ruta ese día y a esa hora.' },
   { objetivo: 'lista', titulo: 'El resto de tu día', texto: 'Toca cualquier negocio para registrar su visita. Van del más cercano al más lejano; los de otros días están más abajo.' },
   { objetivo: 'nuevo', titulo: '¿Un negocio fuera de tu ruta?', texto: 'Si visitas uno que no está en tu lista, regístralo aquí. También cuenta como visita.' },

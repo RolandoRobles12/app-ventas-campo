@@ -4,7 +4,8 @@ import { useToast } from '../toast';
 import { MultiSelectDropdown } from './MultiSelectDropdown';
 import { ROJO_PROHIBIDA } from './PlannerMap';
 import { boton } from './ui';
-import { centroide, distanciaKm } from '../lib/zonas';
+import { centroide, conCentro, distanciaKm } from '../lib/zonas';
+import { PlaceAutocompleteInput } from './PlaceAutocompleteInput';
 
 // La zona que se está creando o editando. Sus esquinas se marcan en el mapa
 // del planeador (por eso este estado vive en el Planeador).
@@ -15,7 +16,17 @@ export interface ZonaEnEdicion {
   mostrarMotivo: boolean;
   puntos: ZonaPunto[];
   vendedorIds: string[];
+  // Cómo se está armando: con el buscador (centro + radio, se guarda como
+  // contorno) o marcando las esquinas a mano.
+  modo: 'buscar' | 'dibujar';
+  lugar: string;
+  centro: ZonaPunto | null;
+  radio: number;
 }
+
+const RADIO_PROHIBIDA_INICIAL = 300;
+
+const textoRadio = (m: number) => (m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`);
 
 // "Donde no puede ir": las zonas restringidas del vendedor, dentro del
 // planeador. Se dibujan como las zonas de la ruta, en rojo; una zona se
@@ -53,7 +64,9 @@ export function ZonasProhibidas({
 
   const guardar = async () => {
     if (!editando) return;
-    if (editando.puntos.length < 3) return showToast('Marca en el mapa al menos 3 esquinas de la zona.', 'error');
+    if (editando.puntos.length < 3) {
+      return showToast(editando.modo === 'buscar' ? 'Busca el lugar o haz clic en el mapa para poner el centro.' : 'Marca en el mapa al menos 3 esquinas de la zona.', 'error');
+    }
     if (!editando.nombre.trim()) return showToast('Ponle un nombre a la zona.', 'error');
     setGuardando(true);
     try {
@@ -127,7 +140,7 @@ export function ZonasProhibidas({
             </div>
             <button
               style={{ ...boton.suave, padding: '5px 9px', fontSize: 12 }} disabled={!!editando}
-              onClick={() => { setEligiendo(false); setEditando({ id: z.id, nombre: z.nombre, motivo: z.motivo ?? '', mostrarMotivo: z.mostrarMotivo, puntos: z.puntos, vendedorIds: z.vendedorIds }); }}
+              onClick={() => { setEligiendo(false); setEditando({ id: z.id, nombre: z.nombre, motivo: z.motivo ?? '', mostrarMotivo: z.mostrarMotivo, puntos: z.puntos, vendedorIds: z.vendedorIds, modo: 'dibujar', lugar: '', centro: null, radio: RADIO_PROHIBIDA_INICIAL }); }}
             >Editar</button>
             <button style={{ ...boton.peligro, padding: '5px 9px', fontSize: 12 }} disabled={!!editando} onClick={() => quitar(z)} title={tambien.length ? 'Quitársela a este vendedor' : 'Borrar la zona'}>✕</button>
           </div>
@@ -136,9 +149,51 @@ export function ZonasProhibidas({
 
       {editando ? (
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontSize: 12.5, color: '#3a4a41', lineHeight: 1.5 }}>
-            Haz clic en el mapa para marcar las esquinas ({editando.puntos.length} {editando.puntos.length === 1 ? 'marcada' : 'marcadas'}, mínimo 3). Arrastra un punto para ajustarlo.
+          <div style={{ display: 'flex', background: '#f6eceb', borderRadius: 9, padding: 3 }}>
+            {([['buscar', 'Buscar en el mapa'], ['dibujar', 'Dibujar a mano']] as const).map(([m, l]) => (
+              <button
+                key={m} onClick={() => setEditando({ ...editando, modo: m })}
+                style={{ flex: 1, border: 'none', borderRadius: 7, padding: '7px 4px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', background: editando.modo === m ? '#fff' : 'transparent', color: editando.modo === m ? '#7a2a22' : '#8a6a66', boxShadow: editando.modo === m ? '0 1px 3px rgba(0,0,0,.1)' : 'none' }}
+              >{l}</button>
+            ))}
           </div>
+          {editando.modo === 'buscar' ? (
+            <>
+              <PlaceAutocompleteInput
+                value={editando.lugar}
+                onChange={(t) => setEditando({ ...editando, lugar: t })}
+                onPlaceSelected={(p) => setEditando({
+                  ...conCentro(editando, { lat: p.lat, lng: p.lng }),
+                  lugar: p.description,
+                  // El nombre sale del lugar si todavía no tiene uno.
+                  nombre: editando.nombre.trim() ? editando.nombre : p.description.split(',')[0].slice(0, 80),
+                })}
+                placeholder="Colonia, calle, mercado o lugar"
+              />
+              <div style={{ fontSize: 12, color: '#8a978f' }}>Elige una sugerencia, o haz clic en el mapa para poner el centro.</div>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#3a4a41', fontWeight: 600 }}>
+                  <span>Radio</span><span>{textoRadio(editando.radio)}</span>
+                </div>
+                <input
+                  type="range" min={100} max={2000} step={50} value={editando.radio} style={{ width: '100%', accentColor: '#c62828' }}
+                  onChange={(e) => {
+                    const radio = Number(e.target.value);
+                    setEditando(editando.centro ? conCentro(editando, editando.centro, radio) : { ...editando, radio });
+                  }}
+                />
+              </div>
+              {editando.centro && (
+                <button onClick={() => setEditando({ ...editando, modo: 'dibujar' })} style={{ background: 'none', border: 'none', color: '#a8322a', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', padding: 0, textAlign: 'left' }}>
+                  ¿No es redonda? Ajusta sus esquinas a mano
+                </button>
+              )}
+            </>
+          ) : (
+            <div style={{ fontSize: 12.5, color: '#3a4a41', lineHeight: 1.5 }}>
+              Haz clic en el mapa para marcar las esquinas ({editando.puntos.length} {editando.puntos.length === 1 ? 'marcada' : 'marcadas'}, mínimo 3). Arrastra un punto para ajustarlo.
+            </div>
+          )}
           <input value={editando.nombre} onChange={(e) => setEditando({ ...editando, nombre: e.target.value })} placeholder="Nombre de la zona, p. ej. Col. La Joya" style={input} maxLength={80} />
           <input value={editando.motivo} onChange={(e) => setEditando({ ...editando, motivo: e.target.value })} placeholder="Motivo (opcional), p. ej. Inseguridad" style={input} maxLength={200} />
           <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, color: editando.motivo.trim() ? '#3a4a41' : '#a7b1aa', cursor: 'pointer' }}>
@@ -158,7 +213,9 @@ export function ZonasProhibidas({
             />
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <button style={boton.suave} disabled={!editando.puntos.length} onClick={() => setEditando({ ...editando, puntos: editando.puntos.slice(0, -1) })}>Deshacer punto</button>
+            {editando.modo === 'dibujar' && (
+              <button style={boton.suave} disabled={!editando.puntos.length} onClick={() => setEditando({ ...editando, puntos: editando.puntos.slice(0, -1) })}>Deshacer punto</button>
+            )}
             <span style={{ flex: 1 }} />
             <button style={boton.suave} onClick={() => setEditando(null)}>Cancelar</button>
             <button style={{ ...boton.primario, opacity: guardando ? 0.6 : 1 }} disabled={guardando} onClick={guardar}>{guardando ? 'Guardando…' : 'Guardar zona'}</button>
@@ -182,7 +239,10 @@ export function ZonasProhibidas({
         </div>
       ) : (
         <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
-          <button style={boton.suave} onClick={() => setEditando({ nombre: '', motivo: '', mostrarMotivo: false, puntos: [], vendedorIds: [vendedor.id] })}>+ Dibujar zona</button>
+          <button
+            style={boton.suave}
+            onClick={() => setEditando({ nombre: '', motivo: '', mostrarMotivo: false, puntos: [], vendedorIds: [vendedor.id], modo: 'buscar', lugar: '', centro: null, radio: RADIO_PROHIBIDA_INICIAL })}
+          >+ Agregar zona</button>
           {deOtros.length > 0 && <button style={boton.suave} onClick={() => setEligiendo(true)}>Usar una de otro vendedor</button>}
         </div>
       )}
