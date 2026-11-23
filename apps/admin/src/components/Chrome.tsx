@@ -119,7 +119,6 @@ const llaveVisto = (email: string) => `aviva.admin.onboarding.${email}`;
 const NOVEDADES_VERSION = '2026-11b';
 const llaveNovedades = (email: string) => `aviva.admin.novedades.${email}`;
 const NOVEDADES: [string, string][] = [
-  ['Uso de la app', 'Nueva pantalla para ver cómo usan los vendedores la app: tiempo por pantalla, mapa de toques, toques de frustración, errores, dónde se atoran al registrar una visita y grabaciones de sesiones que puedes reproducir. Para ver a alguien en detalle, graba todas sus sesiones por unos días desde "Por vendedor".'],
   ['Rutas: varias zonas', 'Junta zonas vecinas en la misma ruta con "+ Agregar zona"; el recorrido de cada día pasa por todas.'],
   ['Rutas: meta de negocios nuevos', 'En "Ritmo", decide cuántas de sus visitas diarias son negocios que encuentra él en la calle. La ruta trae solo la diferencia.'],
   ['Rutas: donde no puede ir', 'Marca zonas en rojo (buscando un lugar o dibujándolas) para uno o varios vendedores. No se le planean negocios ahí y la app no le deja registrar visitas.'],
@@ -129,6 +128,7 @@ const NOVEDADES: [string, string][] = [
   ['Tipificación corregida', 'Si el vendedor marcó otro resultado pero sí hizo la solicitud (o al revés), lo corrige desde su app. En Visitas ves el resultado original y en el Tablero cuántas corrigió cada uno.'],
   ['Avisos de citas', 'Los vendedores reciben un aviso a las 9 am y 1 hora y 30 minutos antes de cada cita.'],
   ['Equipo', 'Solo es activo quien está en la base de colaboradores. Para probar la app con tu correo, crea un vendedor de prueba: no cuenta en los indicadores.'],
+  ['Uso de la app', 'Nueva pantalla para ver cómo usan los vendedores la app: tiempo por pantalla, mapa de toques, toques de frustración, errores, dónde se atoran al registrar una visita y grabaciones de sesiones que puedes reproducir. Para ver a alguien en detalle, graba todas sus sesiones por unos días desde "Por vendedor".'],
 ];
 
 function Novedades({ onCerrar, onRecorrido }: { onCerrar: () => void; onRecorrido: () => void }) {

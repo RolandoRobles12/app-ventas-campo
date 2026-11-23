@@ -5,6 +5,7 @@ import { diasEntre, esFechaIso, fechaMx, hoyMx, inicioDiaMx, sumarDias, diaSeman
 import { getVendedoresDocs, resolveVendedorIds } from './_filters.js';
 import { productosPorId, type VendedorDoc } from './vendedores.js';
 import { configGuardada } from '../rutas/planificador.js';
+import { idsDePrueba } from '../prueba.js';
 import { dealsDeCampo, dealsPorId, hubspotConfigurado, ownersPorEmail, type DealCampo } from '../integrations/hubspot.js';
 
 // Tablero: el embudo de campo (meta de la ruta → visitados → reales → con
@@ -399,11 +400,18 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
 
 // ---------- Ruta ----------
 
+// La respuesta completa se guarda un minuto por combinación de periodo y
+// filtros: volver al Tablero, cambiar de vista y regresar, o que dos
+// personas lo abran a la vez no repite las consultas. Si ya se está
+// calculando la misma, se espera esa misma.
+const CACHE_RESPUESTA_MS = 60_000;
+const MAX_RESPUESTAS = 50;
+const respuestas = new Map<string, { en: number; datos: Promise<unknown> }>();
+
 tableroRouter.get('/', async (req, res) => {
   const q = req.query as { vista?: string; fecha?: string; desde?: string; hasta?: string; productoIds?: string; vendedorIds?: string };
   const vista: Vista = q.vista === 'dia' || q.vista === 'semana' || q.vista === 'rango' ? q.vista : 'mes';
   const hoy = hoyMx();
-  const ahora = Date.now();
   // No se puede ver el futuro: una fecha posterior a hoy se trata como hoy.
   const fecha = esFechaIso(q.fecha) && q.fecha <= hoy ? q.fecha : hoy;
   let desdeQ = fecha;
@@ -414,29 +422,80 @@ tableroRouter.get('/', async (req, res) => {
     if (desdeQ > hastaQ) [desdeQ, hastaQ] = [hastaQ, desdeQ];
     if (diasEntre(desdeQ, hastaQ) >= MAX_DIAS_RANGO) desdeQ = sumarDias(hastaQ, -(MAX_DIAS_RANGO - 1));
   }
+  const vendedorIdsQ = [...new Set(parseCsvParam(q.vendedorIds))].sort();
+  const productoIdsQ = [...new Set(parseCsvParam(q.productoIds))].sort();
+
+  const llave = JSON.stringify([hoy, vista, desdeQ, hastaQ, vendedorIdsQ, productoIdsQ]);
+  const ahora = Date.now();
+  for (const [k, v] of respuestas) if (ahora - v.en > CACHE_RESPUESTA_MS) respuestas.delete(k);
+  let r = respuestas.get(llave);
+  if (!r) {
+    if (respuestas.size >= MAX_RESPUESTAS) respuestas.delete(respuestas.keys().next().value!);
+    const datos = calcularTablero(vista, desdeQ, hastaQ, hoy, ahora, vendedorIdsQ, productoIdsQ);
+    r = { en: ahora, datos };
+    respuestas.set(llave, r);
+    // Un cálculo que falla (o que dio error de HubSpot) no se queda guardado.
+    datos.then(
+      (d) => { if ((d as { hubspot: { estado: string } }).hubspot.estado === 'error' && respuestas.get(llave)?.datos === datos) respuestas.delete(llave); },
+      () => { if (respuestas.get(llave)?.datos === datos) respuestas.delete(llave); },
+    );
+  }
+  res.json(await r.datos);
+});
+
+async function calcularTablero(vista: Vista, desdeQ: string, hastaQ: string, hoy: string, ahora: number, vendedorIdsQ: string[], productoIdsQ: string[]) {
   const { actual, previo, enCurso, tendencia, tendenciaPor } = periodos(vista, desdeQ, hastaQ, ahora);
 
-  const filtro = await resolveVendedorIds(parseCsvParam(q.vendedorIds), parseCsvParam(q.productoIds));
+  const filtro = await resolveVendedorIds(vendedorIdsQ, productoIdsQ);
   const vendedoresDocs = await getVendedoresDocs(filtro);
   const vendedores = vendedoresDocs.map((d) => ({ id: d.id, ...(d.data() as VendedorDoc) }));
   const ids = vendedores.map((v) => v.id);
   const idsSet = new Set(ids);
-  // Sin filtro se lee por fecha (una sola consulta); las solicitudes sí van
-  // por vendedor para usar el índice vendedor+resultado+fecha.
-  const idsConsulta = filtro ? ids : null;
+  // Sin filtro elegido se lee por fecha (una sola consulta, sin partir de
+  // 30 en 30 vendedores) y se quitan en memoria los vendedores de prueba;
+  // en los conteos se restan los suyos. Las solicitudes sí van por vendedor
+  // para usar el índice vendedor+resultado+fecha.
+  const sinFiltro = !vendedorIdsQ.length && !productoIdsQ.length;
+  const idsConsulta = filtro && !sinFiltro ? ids : null;
+  const prueba = idsConsulta == null && filtro ? [...await idsDePrueba()] : [];
 
   const rangoSolicitudes = { start: Math.min(previo.start, tendencia[0]?.start ?? actual.start), end: actual.end };
+  const vacio = ids.length === 0;
+
+  // HubSpot no depende de las visitas: se consulta a la vez que Firestore.
+  // Dueño del deal = vendedor con el mismo correo (endpoint de owners).
+  const ownerDe = new Map<string, string>();
+  const hubspotConsulta: Promise<DealCampo[]> | null = hubspotConfigurado() && !vacio
+    ? (async () => {
+      const owners = await ownersPorEmail();
+      for (const v of vendedores) {
+        const owner = v.email ? owners.get(v.email.trim().toLowerCase()) : undefined;
+        if (owner) ownerDe.set(v.id, owner);
+      }
+      return dealsDeCampo(
+        [...ownerDe.values()],
+        new Date(rangoSolicitudes.start - VENTANA_CONFIRMACION_MS), new Date(rangoSolicitudes.end + VENTANA_CONFIRMACION_MS),
+      );
+    })()
+    : null;
+  // Se atrapa aquí para que un error de HubSpot no tumbe el Promise.all de Firestore.
+  const hubspotResultado = hubspotConsulta?.then((deals) => ({ deals, error: null }), (err: Error) => ({ deals: [] as DealCampo[], error: err }));
+
   // Visitas de los tramos anteriores de la tendencia: en un rango a elegir
   // salen de las mismas visitas del periodo; en día/semana/mes se cuentan.
   const tramosACont = vista === 'rango' ? [] : tendencia.slice(0, -1);
-  const vacio = ids.length === 0;
-  const [visitasAct, visitasPrev, solicitudesTodas, planAct, planPrev, conteos] = await Promise.all([
+  const contar = async (t: Rango) => {
+    const [todas, dePrueba] = await Promise.all([contarVisitas(idsConsulta, t), prueba.length ? contarVisitas(prueba, t) : 0]);
+    return todas - dePrueba;
+  };
+  const [visitasAct, visitasPrev, solicitudesTodas, planAct, planPrev, conteos, nombresProducto] = await Promise.all([
     vacio ? [] : visitasEnRango(idsConsulta, actual),
     vacio ? [] : visitasEnRango(idsConsulta, previo),
     vacio ? [] : visitasEnRango(ids, rangoSolicitudes, true),
     vacio ? [] : planeadosEnRango(actual.desde, ultimoDia(actual), idsSet),
     vacio ? [] : planeadosEnRango(previo.desde, ultimoDia(previo), idsSet),
-    Promise.all(tramosACont.map((t) => (vacio ? 0 : contarVisitas(idsConsulta, t)))),
+    Promise.all(tramosACont.map((t) => (vacio ? 0 : contar(t)))),
+    productosPorId(vendedores.map((v) => v.productoId)),
   ]);
   const solo = <T extends { vendedorId: string }>(l: T[]) => l.filter((v) => idsSet.has(v.vendedorId));
   const propiosPorDia = new Map(vendedores.map((v) => [v.id, configGuardada(v.rutaConfig)?.propiosPorDia ?? 0]));
@@ -444,26 +503,17 @@ tableroRouter.get('/', async (req, res) => {
   const act = solo(visitasAct);
   const solicitudes = solo(solicitudesTodas);
 
-  // HubSpot: dueño del deal = vendedor con el mismo correo (endpoint de owners).
-  const ownerDe = new Map<string, string>();
   let hubspot: {
     estado: 'ok' | 'sin_configurar' | 'error'; mensaje?: string; vendedoresSinCuenta: string[];
   } = { estado: hubspotConfigurado() ? 'ok' : 'sin_configurar', vendedoresSinCuenta: [] };
   let confirmadas = new Map<string, DealCampo>();
-  if (hubspot.estado === 'ok' && ids.length) {
+  if (hubspot.estado === 'ok' && hubspotResultado) {
     try {
-      const owners = await ownersPorEmail();
-      for (const v of vendedores) {
-        const owner = v.email ? owners.get(v.email.trim().toLowerCase()) : undefined;
-        if (owner) ownerDe.set(v.id, owner);
-      }
+      const { deals, error } = await hubspotResultado;
+      if (error) throw error;
       // Solo importa quién no tiene cuenta si tuvo solicitudes en el periodo.
       const conSolicitud = new Set(solicitudes.filter((s) => s.createdAt >= actual.start).map((s) => s.vendedorId));
       hubspot.vendedoresSinCuenta = vendedores.filter((v) => conSolicitud.has(v.id) && !ownerDe.has(v.id)).map((v) => v.nombre);
-      const deals = await dealsDeCampo(
-        [...ownerDe.values()],
-        new Date(rangoSolicitudes.start - VENTANA_CONFIRMACION_MS), new Date(rangoSolicitudes.end + VENTANA_CONFIRMACION_MS),
-      );
       confirmadas = confirmar(solicitudes, deals, ownerDe, await faltantesPorId(solicitudes, deals));
     } catch (err) {
       console.error('Tablero: HubSpot falló:', err);
@@ -476,7 +526,6 @@ tableroRouter.get('/', async (req, res) => {
 
   // Por producto (el producto actual de cada vendedor).
   const productoDe = new Map(vendedores.map((v) => [v.id, v.productoId]));
-  const nombresProducto = await productosPorId(vendedores.map((v) => v.productoId));
   const productosConDatos = [...new Set([...act, ...planAct].map((x) => productoDe.get(x.vendedorId) ?? ''))].filter(Boolean);
   const porProducto = productosConDatos.map((pid) => {
     const de = <T extends { vendedorId: string }>(l: T[]) => l.filter((x) => productoDe.get(x.vendedorId) === pid);
@@ -504,7 +553,7 @@ tableroRouter.get('/', async (req, res) => {
 
   const describir = (r: Rango) => ({ desde: r.desde, hasta: r.hasta, inicio: new Date(r.start).toISOString(), fin: new Date(r.end).toISOString() });
 
-  res.json({
+  return {
     vista, hoy, enCurso, tendenciaPor,
     periodo: describir(actual),
     anterior: describir(previo),
@@ -519,5 +568,5 @@ tableroRouter.get('/', async (req, res) => {
       const visitas = vista === 'rango' || i === tendencia.length - 1 ? enRango(act, r).length : conteos[i];
       return { desde: r.desde, hasta: r.hasta, parcial: r.parcial, visitas, marcadas: s.marcadas, solicitudes: s.solicitudes, aprobadas: s.aprobadas, rechazadas: s.rechazadas, desembolsadas: s.desembolsadas, montoDesembolsado: s.montoDesembolsado };
     }),
-  });
-});
+  };
+}

@@ -4,9 +4,9 @@
 // La integración anterior se apagó por costos (ago-2026): copiaba todos los
 // deals a Firestore cada 30 min y consultaba HubSpot en cada carga de la
 // pantalla del vendedor. Esta solo consulta cuando un admin abre el Tablero,
-// trae únicamente los deals del pipeline de campo de los vendedores en el
-// rango pedido, y guarda la respuesta en memoria unos minutos para que
-// varias personas viendo el Tablero no repitan la consulta.
+// trae únicamente los deals del pipeline de campo de los meses que toca el
+// periodo, y guarda cada mes en memoria unos minutos para que varias
+// personas (y varias vistas o filtros) no repitan la consulta.
 //
 // Requiere HUBSPOT_TOKEN: token de una Private App con los scopes de lectura
 // crm.objects.deals.read y crm.objects.owners.read.
@@ -105,12 +105,14 @@ const fechaMs = (v: string | null | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-const dealsCache = new Map<string, { en: number; deals: Promise<DealCampo[]> }>();
-
-async function buscarDeals(ownerIds: string[], desde: number, hasta: number): Promise<DealCampo[]> {
+// Busca deals del pipeline de campo creados en [desde, hasta). Con
+// ownerIds = null trae los de todos los owners del pipeline.
+async function buscarDeals(ownerIds: string[] | null, desde: number, hasta: number): Promise<DealCampo[]> {
   const deals: DealCampo[] = [];
-  for (let i = 0; i < ownerIds.length; i += MAX_VALORES_IN) {
-    const bloque = ownerIds.slice(i, i + MAX_VALORES_IN);
+  const bloques: (string[] | null)[] = [];
+  if (ownerIds) for (let i = 0; i < ownerIds.length; i += MAX_VALORES_IN) bloques.push(ownerIds.slice(i, i + MAX_VALORES_IN));
+  else bloques.push(null);
+  for (const bloque of bloques) {
     let after: string | undefined;
     let leidos = 0;
     do {
@@ -126,7 +128,7 @@ async function buscarDeals(ownerIds: string[], desde: number, hasta: number): Pr
               { propertyName: 'pipeline', operator: 'EQ', value: PIPELINE_CAMPO },
               { propertyName: 'createdate', operator: 'GTE', value: String(desde) },
               { propertyName: 'createdate', operator: 'LT', value: String(hasta) },
-              { propertyName: 'hubspot_owner_id', operator: 'IN', values: bloque },
+              ...(bloque ? [{ propertyName: 'hubspot_owner_id', operator: 'IN', values: bloque }] : []),
             ],
           }],
           properties: ['createdate', 'hubspot_owner_id', PROP_APROBADO, PROP_RECHAZADO, PROP_DESEMBOLSADO, PROP_MONTO],
@@ -156,24 +158,57 @@ async function buscarDeals(ownerIds: string[], desde: number, hasta: number): Pr
   return deals;
 }
 
+// Caché por mes de calendario (UTC), con los deals de todo el pipeline de
+// campo. Antes la llave era "estos owners + este rango exacto": el rango de
+// un periodo en curso termina "ahora" y cambiaba cada minuto, y cada filtro
+// de producto o vendedor pedía otra búsqueda, así que casi nunca se
+// reutilizaba y cada apertura del Tablero esperaba a HubSpot. Así, el mes
+// de hoy y los anteriores se consultan una vez cada 15 min y todas las
+// vistas y filtros salen de ahí (el filtro por owner y por fecha se hace en
+// memoria).
+const dealsPorMes = new Map<number, { en: number; deals: Promise<DealCampo[]> }>();
+// La búsqueda de HubSpot admite pocas peticiones por segundo: los meses se
+// piden de pocos en pocos.
+const MESES_EN_PARALELO = 3;
+
+const inicioMesUtc = (t: number) => { const d = new Date(t); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1); };
+const mesSiguienteUtc = (inicio: number) => { const d = new Date(inicio); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1); };
+
+function dealsDelMes(inicio: number): Promise<DealCampo[]> {
+  const ahora = Date.now();
+  const enCache = dealsPorMes.get(inicio);
+  if (enCache && ahora - enCache.en < CACHE_DEALS_MS) return enCache.deals;
+  const deals = buscarDeals(null, inicio, mesSiguienteUtc(inicio));
+  dealsPorMes.set(inicio, { en: ahora, deals });
+  // Una consulta que falla no se queda en la caché.
+  deals.catch(() => { if (dealsPorMes.get(inicio)?.deals === deals) dealsPorMes.delete(inicio); });
+  return deals;
+}
+
+async function enTandas<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let siguiente = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (siguiente < items.length) {
+      const i = siguiente++;
+      out[i] = await fn(items[i]);
+    }
+  }));
+  return out;
+}
+
 // Deals del pipeline de campo de esos owners creados en [desde, hasta).
 export async function dealsDeCampo(ownerIds: string[], desde: Date, hasta: Date): Promise<DealCampo[]> {
   if (!ownerIds.length) return [];
-  const ids = [...new Set(ownerIds)].sort();
-  // El rango se redondea al minuto para que dos aperturas seguidas del
-  // Tablero reutilicen la misma consulta.
-  const d = Math.floor(desde.getTime() / 60_000) * 60_000;
-  const h = Math.ceil(hasta.getTime() / 60_000) * 60_000;
-  const llave = `${ids.join(',')}|${d}|${h}`;
+  const owners = new Set(ownerIds);
+  const d = desde.getTime();
+  const h = hasta.getTime();
   const ahora = Date.now();
-  for (const [k, v] of dealsCache) if (ahora - v.en > CACHE_DEALS_MS) dealsCache.delete(k);
-  const enCache = dealsCache.get(llave);
-  if (enCache) return enCache.deals;
-  const deals = buscarDeals(ids, d, h);
-  dealsCache.set(llave, { en: ahora, deals });
-  // Una consulta que falla no se queda en la caché.
-  deals.catch(() => dealsCache.delete(llave));
-  return deals;
+  for (const [k, v] of dealsPorMes) if (ahora - v.en > CACHE_DEALS_MS) dealsPorMes.delete(k);
+  const meses: number[] = [];
+  for (let m = inicioMesUtc(d); m < h; m = mesSiguienteUtc(m)) meses.push(m);
+  const porMes = await enTandas(meses, MESES_EN_PARALELO, dealsDelMes);
+  return porMes.flat().filter((x) => owners.has(x.ownerId) && x.creado >= d && x.creado < h);
 }
 
 // ---- Solicitudes para ligar a una visita (app del vendedor) ----
