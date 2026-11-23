@@ -18,6 +18,7 @@ import { RecorridoProvider } from './recorrido';
 import { iniciarAnalitica, MedicionPantallas } from './analitica';
 import { iniciarGrabacion } from './grabacion';
 import type { Vendedor } from './api';
+import { AvisoLogin } from './components/QueMide';
 
 // Medición de uso de la app (lo ve el admin en "Uso de la app"): eventos
 // ligeros siempre y, en algunas sesiones, la grabación. Arranca antes del
@@ -75,7 +76,7 @@ function AppShellConSesion() {
 function App() {
   return (
     <AuthProvider>
-      <RequireAuth>
+      <RequireAuth aviso={<AvisoLogin />}>
         <SessionProvider>
           <AppShellConSesion />
         </SessionProvider>

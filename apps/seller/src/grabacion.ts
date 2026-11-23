@@ -75,6 +75,12 @@ async function bytesEnCola(): Promise<number> {
 
 // ——— Compresión ———
 
+// Los botones "Llamar" llevan el número en el enlace (tel:…): rrweb graba
+// los atributos tal cual, así que el número se quita antes de guardar.
+export function sinTelefonos(json: string): string {
+  return json.replace(/tel:[^"\\]*/g, 'tel:****');
+}
+
 async function comprimir(texto: string): Promise<Blob> {
   const stream = new Blob([texto]).stream().pipeThrough(new CompressionStream('gzip'));
   return new Response(stream).blob();
@@ -128,7 +134,7 @@ function cortarFragmento(): Promise<void> {
   reiniciarStats();
   cortando = cortando.then(async () => {
     try {
-      const blob = await comprimir(JSON.stringify(lote));
+      const blob = await comprimir(sinTelefonos(JSON.stringify(lote)));
       if (blob.size > MAX_BYTES_FRAGMENTO) return;
       if (datos.sesionId === sesionGrabada) bytesSesion += blob.size;
       if (bytesSesion > MAX_BYTES_SESION || datos.seq >= MAX_FRAGMENTOS_SESION || (await bytesEnCola()) + blob.size > MAX_BYTES_COLA) {
