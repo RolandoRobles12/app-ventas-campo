@@ -27,6 +27,8 @@ import { zonasRestringidasRouter } from './routes/zonasRestringidas.js';
 import { configRouter } from './routes/config.js';
 import { notificacionesRouter } from './routes/notificaciones.js';
 import { solicitudesRouter } from './routes/solicitudes.js';
+import { interaccionesRouter } from './routes/interacciones.js';
+import { grabacionesRouter } from './routes/grabaciones.js';
 
 export const app = express();
 const origins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -67,6 +69,10 @@ app.use('/api/config', configRouter);
 app.use('/api/notificaciones', notificacionesRouter);
 // Ligar "Hizo solicitud" con su solicitud de HubSpot: el vendedor las suyas, el admin cualquiera.
 app.use('/api/solicitudes', solicitudesRouter);
+// Uso de la app: el vendedor manda sus eventos y fragmentos de grabación;
+// el resumen, las grabaciones y a quién grabar son solo de admin.
+app.use('/api/interacciones', interaccionesRouter);
+app.use('/api/grabaciones', grabacionesRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);

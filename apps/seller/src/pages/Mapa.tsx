@@ -118,7 +118,8 @@ export function Mapa() {
 
   return (
     <div style={{ position: 'relative', height: '100%', minHeight: 400 }}>
-      <div ref={contenedor} style={{ position: 'absolute', inset: 0, background: '#e7ece4' }} />
+      {/* rr-block: el mapa no se graba en las sesiones (pesa mucho y no aporta). */}
+      <div ref={contenedor} className="rr-block" style={{ position: 'absolute', inset: 0, background: '#e7ece4' }} />
       {error && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 30, textAlign: 'center', fontSize: 16, fontWeight: 700, color: '#5a665f' }}>{error}</div>
       )}

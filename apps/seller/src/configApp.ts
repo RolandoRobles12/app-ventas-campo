@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
 
-// Ajustes que el admin cambia desde el panel (hoy, la distancia máxima al
-// negocio para registrar una visita). Se guardan en la tablet para que el
-// cerco funcione sin señal; el servidor aplica la misma regla.
+// Ajustes que el admin cambia desde el panel (la distancia máxima al
+// negocio para registrar una visita y qué % de sesiones se graban). Se
+// guardan en la tablet para que el cerco funcione sin señal; el servidor
+// aplica la misma regla.
 
-export interface ConfigApp { radioCercoMetros: number }
+export interface ConfigApp { radioCercoMetros: number; grabacionPorcentaje: number }
 
 const LLAVE = 'aviva.configApp';
-const POR_DEFECTO: ConfigApp = { radioCercoMetros: 150 };
+const POR_DEFECTO: ConfigApp = { radioCercoMetros: 150, grabacionPorcentaje: 0 };
 
-function enCache(): ConfigApp {
+export function enCache(): ConfigApp {
   try {
     return { ...POR_DEFECTO, ...(JSON.parse(localStorage.getItem(LLAVE) || 'null') ?? {}) };
   } catch {
@@ -21,10 +22,18 @@ function enCache(): ConfigApp {
 export function useConfigApp(): ConfigApp {
   const [config, setConfig] = useState<ConfigApp>(enCache);
   useEffect(() => {
-    api.config().then((c) => {
-      try { localStorage.setItem(LLAVE, JSON.stringify(c)); } catch { /* sin espacio: queda la copia anterior */ }
-      setConfig({ ...POR_DEFECTO, ...c });
-    }).catch(() => {});
+    cargarConfig().then((c) => { if (c) setConfig(c); });
   }, []);
   return config;
+}
+
+// La config del servidor (y la guarda en la tablet); null sin señal.
+export async function cargarConfig(): Promise<ConfigApp | null> {
+  try {
+    const c = await api.config();
+    try { localStorage.setItem(LLAVE, JSON.stringify(c)); } catch { /* sin espacio: queda la copia anterior */ }
+    return { ...POR_DEFECTO, ...c };
+  } catch {
+    return null;
+  }
 }

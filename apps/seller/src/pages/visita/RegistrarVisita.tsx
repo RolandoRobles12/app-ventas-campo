@@ -5,6 +5,7 @@ import { useSession } from '../../session';
 import { CameraCapture } from '../../components/CameraCapture';
 import { antecedentesEnCache, cargarAntecedentes, guardarVisitaPendiente, marcarVisitaLocal, prospectosConCache, rutaEnCache } from '../../offline';
 import { subirFotos } from '../../uploadFotos';
+import { nuevoId, track } from '../../analitica';
 import { distanciaMetros, textoDistancia } from '../../ruta';
 import { etiquetaDia, fechaLocal, sumarDias } from '../../fechas';
 import { RESULTADOS_UI, resultadoUI } from '../../resultados';
@@ -121,6 +122,13 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
   fotosRef.current = fotos;
   useEffect(() => () => fotosRef.current.forEach((f) => URL.revokeObjectURL(f.preview)), []);
 
+  // Medición de uso: cada vez que se abre el registro es un intento; sus
+  // pasos (resultado, foto, guardar) forman el embudo de "Uso de la app".
+  const [intentoId] = useState(nuevoId);
+  const paso = (nombre: string, datos: Record<string, string | number | boolean | undefined> = {}) =>
+    track(nombre, { intento: intentoId, ...(practica ? { practica: true } : {}), ...datos });
+  useEffect(() => { paso('visita_abierta', { tipo: nueva ? 'nuevo' : 'ruta' }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!vendedor) return null;
   if (!nueva && !prospecto && buscando) return <div style={{ padding: 28, textAlign: 'center', color: '#6f7d75', fontWeight: 600 }}>Cargando…</div>;
   if (!nueva && !prospecto) {
@@ -162,6 +170,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
   };
 
   const tomarFoto = (file: File) => {
+    paso('visita_foto', { fotos: fotos.length + 1 });
     setFotos((prev) => [...prev, { file, preview: URL.createObjectURL(file) }]);
     setCamara(false);
   };
@@ -169,11 +178,14 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
   const agregarNota = (n: string) => setNotas((prev) => (prev.includes(n) ? prev : prev ? `${prev.trim()}. ${n}` : n));
 
   const guardar = async () => {
+    paso('visita_guardar');
     if (bloqueada) {
+      paso('visita_bloqueada', { motivo: 'zona' });
       setError('Estás en una zona donde no puedes visitar negocios: esta visita no se puede registrar aquí.');
       return;
     }
     if (fueraDeCerco) {
+      paso('visita_bloqueada', { motivo: cerco, ...(distanciaNegocio != null ? { metros: Math.round(distanciaNegocio) } : {}) });
       setError(cerco === 'lejos' ? `Estás a ${textoDistancia(distanciaNegocio)} del negocio: acércate a menos de ${radio} m para registrar la visita.`
         : cerco === 'impreciso' ? 'Tu GPS no es preciso ahora. Sal a la calle o espera unos segundos.'
           : cerco === 'sin_gps' ? 'Necesitamos tu ubicación para registrar la visita. Revisa que esté encendida.'
@@ -181,6 +193,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
       return;
     }
     if (faltantes.length) {
+      paso('visita_bloqueada', { motivo: 'faltantes', falta: faltantes.join(', ') });
       setIntento(true);
       setError('');
       const primero = faltaNombre ? refs.nombre : faltaResultado || faltaSolicitud ? refs.resultado : refs.foto;
@@ -192,6 +205,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
 
     const nombreNegocio = nueva ? nombre.trim() : prospecto!.nombre;
     if (practica) {
+      paso('visita_guardada', { resultado });
       setGuardando(false);
       navigate('/visita/exito', { replace: true, state: { nombre: nombreNegocio, resultado, fotos: fotos.length, practica: true, reagendarPara: resultado === REAGENDA ? reagendarPara : null } });
       return;
@@ -221,6 +235,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
 
     // Cómo quedó la solicitud: ligada, o sin ligar (y por qué).
     const terminar = (pendiente: boolean, duplicado: string | null = null, estadoSolicitud: string | null = pideSolicitud ? (solicitud === PENDIENTE ? 'pendiente' : 'ligada') : null) => {
+      paso('visita_guardada', { resultado, sinSenal: pendiente, fotos: fotos.length });
       if (!nueva) {
         marcarVisitaLocal(vendedor.id, prospecto!.id, resultado === REAGENDA
           ? { estado: 'por_visitar', fechaPlan: reagendarPara, reagendado: true }
@@ -246,10 +261,14 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
       terminar(false, r.duplicado ?? null, !pideSolicitud ? null : r.solicitud?.ok ? 'ligada' : r.solicitud ? r.solicitud.motivo : 'pendiente');
     } catch (err) {
       if (err instanceof ApiError) {
+        paso('visita_bloqueada', { motivo: 'rechazada', estado: err.status });
         setError(err.message);
       } else {
         // fetch tronó a mitad del envío: es falta de red, no un rechazo
-        await encolar().catch(() => setError('No se pudo guardar la visita. Intenta de nuevo.'));
+        await encolar().catch(() => {
+          paso('visita_bloqueada', { motivo: 'error' });
+          setError('No se pudo guardar la visita. Intenta de nuevo.');
+        });
       }
     } finally {
       setGuardando(false);
@@ -303,7 +322,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
             </div>}
             {!practica && (prospecto.telefono && !prospecto.telefonoInvalido && !editarTelefono ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 14, fontWeight: 600, color: '#5a665f' }}>
-                Tel. {textoTelefono(prospecto.telefono)}
+                <span className="rr-mask">Tel. {textoTelefono(prospecto.telefono)}</span>
                 <button className="tap" onClick={() => setEditarTelefono(true)} style={{ fontSize: 14, fontWeight: 800, color: 'var(--aviva-green-700)', padding: '6px 4px' }}>¿Está mal? Corrígelo</button>
               </div>
             ) : (
@@ -358,7 +377,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
                 <button
                   key={r.valor}
                   className="tap"
-                  onClick={() => setResultado(r.valor)}
+                  onClick={() => { setResultado(r.valor); if (r.valor !== resultado) paso('visita_resultado', { resultado: r.valor }); }}
                   aria-pressed={activo}
                   style={{
                     minHeight: 84, borderRadius: 16, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',

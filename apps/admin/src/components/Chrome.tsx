@@ -20,6 +20,7 @@ const SECCIONES: { titulo: string; items: { to: string; label: string; icon: Rea
       { to: '/en-vivo', label: 'En vivo', icon: icono(<><circle cx="12" cy="12" r="2" /><path d="M16.2 7.8a6 6 0 0 1 0 8.5M7.8 16.2a6 6 0 0 1 0-8.5M19.1 4.9a10 10 0 0 1 0 14.2M4.9 19.1a10 10 0 0 1 0-14.2" /></>) },
       { to: '/visitas', label: 'Visitas', icon: icono(<><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>) },
       { to: '/llamadas', label: 'Llamadas', icon: icono(<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.6a2 2 0 0 1-.5 2.1L8.1 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.6 2.6.7a2 2 0 0 1 1.9 2Z" />) },
+      { to: '/uso', label: 'Uso de la app', icon: icono(<><rect x="5" y="2" width="14" height="20" rx="2.5" /><path d="M9.5 11.5l1.8 1.8 3.4-3.6" /><line x1="11" y1="18.5" x2="13" y2="18.5" /></>) },
     ],
   },
   {
@@ -104,6 +105,7 @@ const PASOS_ADMIN: PasoRecorrido[] = [
   { objetivo: 'nav/en-vivo', titulo: 'En vivo', texto: 'Dónde está cada vendedor ahorita, cuántas visitas lleva hoy (de su ruta y negocios nuevos) y cuándo dio señal por última vez.' },
   { objetivo: 'nav/visitas', titulo: 'Visitas', texto: 'Cada visita con su foto, su resultado y si se hizo en el negocio. Filtra por origen (negocios nuevos o de la ruta) y por alertas: ubicaciones que reportaron los vendedores (las aceptas o descartas aquí), GPS sospechoso y solicitudes sin ligar.' },
   { objetivo: 'nav/llamadas', titulo: 'Llamadas y agenda', texto: 'A qué negocios llamaron los vendedores, qué pasó y las visitas que agendaron. El vendedor recibe avisos de sus citas a las 9 am, 1 hora y 30 minutos antes.' },
+  { objetivo: 'nav/uso', titulo: 'Uso de la app', texto: 'Cómo usan los vendedores la app: cuánto tiempo y en qué pantallas, dónde tocan, dónde se atoran al registrar una visita, los errores y sesiones grabadas que puedes reproducir como video.' },
   { objetivo: 'nav/rutas', titulo: 'Rutas', texto: 'Arma la ruta de cada vendedor: una o varias zonas vecinas, giros y meta de visitas por día (de ellas, cuántos negocios nuevos encuentra él). En el mismo paso marcas las zonas donde no puede ir.' },
   { objetivo: 'nav/equipo', titulo: 'Equipo', texto: 'Los vendedores llegan solos desde la base de colaboradores (quien no está en la base queda como ya no activo). Aquí eliges productos y giros, qué tan cerca del negocio deben registrar las visitas y tus vendedores de prueba.' },
   { objetivo: 'nav/usuarios', titulo: 'Administradores', texto: 'Quién puede entrar a este panel.' },
@@ -114,9 +116,10 @@ const llaveVisto = (email: string) => `aviva.admin.onboarding.${email}`;
 
 // Qué cambió en el panel, para quien ya lo usaba. Sale una vez por versión
 // (por navegador): subir NOVEDADES_VERSION al cambiar la lista.
-const NOVEDADES_VERSION = '2026-11';
+const NOVEDADES_VERSION = '2026-11b';
 const llaveNovedades = (email: string) => `aviva.admin.novedades.${email}`;
 const NOVEDADES: [string, string][] = [
+  ['Uso de la app', 'Nueva pantalla para ver cómo usan los vendedores la app: tiempo por pantalla, mapa de toques, toques de frustración, errores, dónde se atoran al registrar una visita y grabaciones de sesiones que puedes reproducir. Para ver a alguien en detalle, graba todas sus sesiones por unos días desde "Por vendedor".'],
   ['Rutas: varias zonas', 'Junta zonas vecinas en la misma ruta con "+ Agregar zona"; el recorrido de cada día pasa por todas.'],
   ['Rutas: meta de negocios nuevos', 'En "Ritmo", decide cuántas de sus visitas diarias son negocios que encuentra él en la calle. La ruta trae solo la diferencia.'],
   ['Rutas: donde no puede ir', 'Marca zonas en rojo (buscando un lugar o dibujándolas) para uno o varios vendedores. No se le planean negocios ahí y la app no le deja registrar visitas.'],

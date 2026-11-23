@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@aviva/ui": "*",
+    "@rrweb/record": "2.2.2",
     "firebase": "^11.0.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

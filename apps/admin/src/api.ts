@@ -41,6 +41,8 @@ export interface Vendedor {
   // Vendedor de prueba de un admin: no cuenta en los indicadores.
   prueba?: boolean;
   rutaAnterior: { etiqueta: string; poligonos: ZonaPunto[][] | null } | null;
+  // Se graban todas sus sesiones de la app hasta este día (YYYY-MM-DD).
+  grabarHasta?: string | null;
 }
 
 export interface Prospecto {
@@ -181,6 +183,54 @@ export interface CitaProxima {
 }
 export interface Usuario { email: string; nombre: string | null; createdAt: string }
 
+// ——— Uso de la app (medición de cómo usan los vendedores la app) ———
+export interface UsoVendedor {
+  id: string; nombre: string; iniciales: string; color: string; grabarHasta: string | null;
+  sesiones: number; dias: number; minutos: number; minutosPorDia: number;
+  toques: number; rabia: number; muertos: number; errores: number;
+  visitasAbiertas: number; visitasGuardadas: number; ultima: string | null;
+}
+export interface UsoResumen {
+  totales: {
+    sesiones: number; vendedores: number; minutos: number; toques: number; rabia: number; muertos: number;
+    errores: number; cortesSenal: number; minutosSinSenal: number; inicios: { instalada: number; navegador: number };
+  };
+  dispositivos: { nombre: string; sesiones: number }[];
+  pantallas: { pantalla: string; vistas: number; minutos: number; toques: number; rabia: number; vendedores: number }[];
+  objetivos: { pantalla: string; objetivo: string; toques: number; rabia: number; muertos: number }[];
+  mapaToques: { pantalla: string; celdas: { x: number; y: number; n: number; r: number }[] }[];
+  rejilla: { x: number; y: number };
+  embudos: { clave: string; titulo: string; pasos: { accion: string; etiqueta: string; intentos: number }[] }[];
+  bloqueos: { motivo: string; etiqueta: string; veces: number }[];
+  errores: { mensaje: string; veces: number; vendedores: number; ultima: string; pantalla: string | null }[];
+  porDia: { dia: string; minutos: number; vendedores: number; sesiones: number; toques: number }[];
+  porHora: number[];
+  vendedores: UsoVendedor[];
+  truncado: boolean;
+}
+export interface Grabacion {
+  id: string; vendedorId: string; vendedorNombre: string; iniciales: string; color: string;
+  inicio: string; fin: string; duracionSeg: number; motivo: 'muestreo' | 'pedida'; dispositivo: string | null;
+  fragmentos: number; bytes: number; toques: number; rabia: number; muertos: number; errores: number; pantallas: string[];
+}
+export interface GrabacionDetalle extends Grabacion {
+  lista: { seq: number; inicio: number; fin: number; bytes: number; toques: number; rabia: number; errores: number; pantallas: string[] }[];
+}
+
+// Un fragmento de grabación tal cual se subió (gzip): se descomprime aquí.
+async function reqFragmento(sesionId: string, seq: number): Promise<unknown[]> {
+  const token = await getIdToken();
+  const res = await fetch(`/api/grabaciones/${encodeURIComponent(sesionId)}/fragmentos/${seq}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new Error(`Error ${res.status}`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  // Si algo en el camino ya lo descomprimió, llega como JSON directo.
+  const esGzip = bytes[0] === 0x1f && bytes[1] === 0x8b;
+  const texto = esGzip
+    ? await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text()
+    : new TextDecoder().decode(bytes);
+  return JSON.parse(texto) as unknown[];
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await getIdToken();
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
@@ -266,7 +316,16 @@ export const api = {
   borrarVendedorPrueba: (id: string) => req<{ borrados: Record<string, number> }>(`/equipo/prueba/${id}`, { method: 'DELETE' }),
   revisarUbicacion: (visitaId: string, accion: 'aceptar' | 'descartar') =>
     req<{ ok: boolean; negocios?: number }>(`/visitas/${visitaId}/ubicacion`, post({ accion })),
-  config: () => req<{ radioCercoMetros: number }>('/config'),
-  guardarConfig: (data: { radioCercoMetros: number }) => req<{ radioCercoMetros: number }>('/config', { method: 'PUT', body: JSON.stringify(data) }),
+  config: () => req<{ radioCercoMetros: number; grabacionPorcentaje: number }>('/config'),
+  guardarConfig: (data: { radioCercoMetros?: number; grabacionPorcentaje?: number }) =>
+    req<{ radioCercoMetros: number; grabacionPorcentaje: number }>('/config', { method: 'PUT', body: JSON.stringify(data) }),
+
+  usoResumen: (f: Filtro) => req<UsoResumen>(`/interacciones/resumen${qs({ ...f })}`),
+  grabaciones: (f: Filtro) => req<{ items: Grabacion[]; truncado: boolean }>(`/grabaciones${qs({ ...f })}`),
+  grabacion: (sesionId: string) => req<GrabacionDetalle>(`/grabaciones/${encodeURIComponent(sesionId)}`),
+  fragmentoGrabacion: reqFragmento,
+  borrarGrabacion: (sesionId: string) => req<void>(`/grabaciones/${encodeURIComponent(sesionId)}`, { method: 'DELETE' }),
+  grabarVendedor: (vendedorId: string, dias: number) =>
+    req<{ grabarHasta: string | null }>(`/grabaciones/vendedor/${vendedorId}`, { method: 'PUT', body: JSON.stringify({ dias }) }),
   historialNegocio: (negocioId: string) => req<HistorialNegocio>(`/visitas/negocio/${encodeURIComponent(negocioId)}`),
 };

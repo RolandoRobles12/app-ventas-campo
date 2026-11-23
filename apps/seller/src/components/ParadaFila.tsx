@@ -13,6 +13,7 @@ export function ParadaFila({ parada, numero, hecha = false }: { parada: Parada; 
   return (
     <button
       className="tap card"
+      data-track="Parada de la ruta"
       // El negocio viaja en el estado de navegación: el formulario abre al
       // instante y funciona aunque no haya señal.
       onClick={() => navigate(`/visita/${parada.id}`, { state: { prospecto: parada } })}

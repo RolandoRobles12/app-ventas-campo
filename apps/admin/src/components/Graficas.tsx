@@ -25,7 +25,8 @@ function pasoLimpio(max: number): number {
 
 // Columnas por día (o por semana). Se rotulan solo el máximo y el último
 // periodo; el resto vive en el tooltip.
-export function Columnas({ serie, porSemana, alto = 210 }: { serie: { fecha: string; visitas: number }[]; porSemana: boolean; alto?: number }) {
+// `unidad`: cómo se llama lo que se cuenta en el tooltip ("visitas" por defecto).
+export function Columnas({ serie, porSemana, alto = 210, unidad = 'visitas' }: { serie: { fecha: string; visitas: number }[]; porSemana: boolean; alto?: number; unidad?: string }) {
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(...serie.map((s) => s.visitas), 0);
   const paso = pasoLimpio(Math.max(max, 1));
@@ -69,7 +70,7 @@ export function Columnas({ serie, porSemana, alto = 210 }: { serie: { fecha: str
                 )}
                 {hover === i && (
                   <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', bottom: `calc(${(s.visitas / tope) * 100}% + 6px)`, background: '#1f2a24', color: '#fff', borderRadius: 8, padding: '7px 10px', whiteSpace: 'nowrap', zIndex: 5, pointerEvents: 'none', boxShadow: '0 4px 12px rgba(0,0,0,.2)' }}>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>{s.visitas} visitas</div>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{s.visitas} {unidad}</div>
                     <div style={{ fontSize: 11.5, color: '#c5d6cb' }}>{porSemana ? `Semana del ${etiquetaDia(s.fecha, false)}` : etiquetaDia(s.fecha, false)}</div>
                   </div>
                 )}

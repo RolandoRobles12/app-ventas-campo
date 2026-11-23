@@ -13,6 +13,7 @@ import { Rutas } from './pages/Rutas';
 import { Planeador } from './pages/Planeador';
 import { Equipo } from './pages/Equipo';
 import { Usuarios } from './pages/Usuarios';
+import { Uso } from './pages/Uso';
 
 function AppShell() {
   const { isAdmin, loading } = useSession();
@@ -31,6 +32,7 @@ function AppShell() {
             <Route path="/en-vivo" element={<EnVivo />} />
             <Route path="/visitas" element={<Visitas />} />
             <Route path="/llamadas" element={<Llamadas />} />
+            <Route path="/uso" element={<Uso />} />
             <Route path="/rutas" element={<Rutas />} />
             <Route path="/rutas/:vendedorId" element={<Planeador />} />
             <Route path="/equipo" element={<Equipo />} />

@@ -39,6 +39,9 @@ export interface VendedorDoc {
   onboardingVisto?: Timestamp | null;
   // Última versión de "Novedades" que vio (ver POST /auth/novedades).
   novedadesVistas?: string | null;
+  // El admin pidió grabar sus sesiones de la app hasta este día (YYYY-MM-DD,
+  // inclusive), aparte del muestreo general (ver routes/grabaciones.ts).
+  grabarHasta?: string | null;
 }
 
 export async function productosPorId(ids: string[]): Promise<Map<string, string>> {
@@ -77,6 +80,7 @@ export function shapeVendedor(id: string, v: VendedorDoc, productoNombre?: strin
     rutaConfig: configGuardada(v.rutaConfig),
     onboardingVisto: toIso(v.onboardingVisto ?? null),
     novedadesVistas: v.novedadesVistas ?? null,
+    grabarHasta: v.grabarHasta ?? null,
     // Para precargar el planeador cuando aún no hay rutaConfig.
     rutaAnterior: v.rutaConfig ? null : {
       etiqueta: [v.colonia, v.ciudad].filter(Boolean).join(', '),
