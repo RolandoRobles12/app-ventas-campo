@@ -183,10 +183,13 @@ function Bienvenida({ onRecorrido, onCerrar, onNovedades }: { onRecorrido: () =>
           {punto('Primera vez', 'la app le muestra una guía y le deja practicar una visita que no se guarda. Puede repetirla tocando sus iniciales.')}
         </ul>
         <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.6px', color: '#6f7d75', marginBottom: 8 }}>EN ESTE PANEL</div>
-        <p style={{ margin: 0 }}>
-          Ves cómo va el equipo (Tablero y En vivo), cada visita con su evidencia, las llamadas y citas, y armas las rutas.
-          Casi todas las pantallas se filtran por producto, vendedor y fechas.
-        </p>
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          {punto('Tablero y En vivo', 'el embudo de la meta (ruta + negocios nuevos) a la solicitud, su aprobación y su desembolso con el monto; y cómo va cada vendedor hoy.')}
+          {punto('Rutas', 'una o varias zonas vecinas, giros y meta de visitas por día (de ellas, cuántos negocios nuevos encuentra él), y las zonas donde no puede ir.')}
+          {punto('Visitas', 'cada visita con su evidencia, y alertas para revisar: ubicaciones que reportaron los vendedores, GPS sospechoso y solicitudes sin ligar.')}
+          {punto('Equipo', 'llega solo de la base de colaboradores. Aquí fijas qué tan cerca del negocio se registran las visitas y creas vendedores de prueba para usar la app sin afectar los números.')}
+        </ul>
+        <p style={{ margin: '10px 0 0' }}>Casi todas las pantallas se filtran por producto, vendedor y fechas.</p>
       </div>
     </Modal>
   );
