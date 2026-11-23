@@ -407,6 +407,20 @@ function bloque(visitas: VisitaTablero[], solicitudes: VisitaTablero[], planeado
 const CACHE_RESPUESTA_MS = 60_000;
 const MAX_RESPUESTAS = 50;
 const respuestas = new Map<string, { en: number; datos: Promise<unknown> }>();
+// Cuánto se espera a HubSpot antes de responder solo con las visitas.
+const ESPERA_HUBSPOT_MS = 25_000;
+
+// Correos de todo el equipo (para buscar en HubSpot con los mismos owners
+// sin importar el filtro). Cambia poco: se lee cada 5 min.
+let correosMemo: { en: number; correos: Promise<string[]> } | null = null;
+function correosDelEquipo(): Promise<string[]> {
+  if (correosMemo && Date.now() - correosMemo.en < 5 * 60_000) return correosMemo.correos;
+  const correos = db.collection('vendedores').select('email').get()
+    .then((snap) => snap.docs.map((d) => String(d.get('email') ?? '').trim().toLowerCase()).filter(Boolean));
+  correosMemo = { en: Date.now(), correos };
+  correos.catch(() => { correosMemo = null; });
+  return correos;
+}
 
 tableroRouter.get('/', async (req, res) => {
   const q = req.query as { vista?: string; fecha?: string; desde?: string; hasta?: string; productoIds?: string; vendedorIds?: string };
@@ -463,23 +477,35 @@ async function calcularTablero(vista: Vista, desdeQ: string, hastaQ: string, hoy
   const vacio = ids.length === 0;
 
   // HubSpot no depende de las visitas: se consulta a la vez que Firestore.
-  // Dueño del deal = vendedor con el mismo correo (endpoint de owners).
+  // Dueño del deal = vendedor con el mismo correo (endpoint de owners). Se
+  // buscan los deals de los owners de todo el equipo, aunque haya filtro:
+  // así cambiar de producto o vendedor reutiliza la misma búsqueda.
   const ownerDe = new Map<string, string>();
   const hubspotConsulta: Promise<DealCampo[]> | null = hubspotConfigurado() && !vacio
     ? (async () => {
-      const owners = await ownersPorEmail();
+      const [owners, equipo] = await Promise.all([ownersPorEmail(), correosDelEquipo()]);
       for (const v of vendedores) {
         const owner = v.email ? owners.get(v.email.trim().toLowerCase()) : undefined;
         if (owner) ownerDe.set(v.id, owner);
       }
+      const ownersEquipo = new Set(ownerDe.values());
+      for (const email of equipo) { const o = owners.get(email); if (o) ownersEquipo.add(o); }
       return dealsDeCampo(
-        [...ownerDe.values()],
+        [...ownersEquipo],
         new Date(rangoSolicitudes.start - VENTANA_CONFIRMACION_MS), new Date(rangoSolicitudes.end + VENTANA_CONFIRMACION_MS),
       );
     })()
     : null;
-  // Se atrapa aquí para que un error de HubSpot no tumbe el Promise.all de Firestore.
-  const hubspotResultado = hubspotConsulta?.then((deals) => ({ deals, error: null }), (err: Error) => ({ deals: [] as DealCampo[], error: err }));
+  // Se atrapa aquí para que un error de HubSpot no tumbe el Promise.all de
+  // Firestore. Si HubSpot tarda demasiado, el Tablero sale con las visitas
+  // y avisa; la búsqueda sigue por detrás y queda en caché para la próxima.
+  const hubspotResultado = hubspotConsulta
+    ? Promise.race([
+      hubspotConsulta.then((deals) => ({ deals, error: null as Error | null })),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`tardó más de ${ESPERA_HUBSPOT_MS / 1000} s; se sigue consultando, vuelve a cargar en un momento`)), ESPERA_HUBSPOT_MS)),
+    ]).catch((err: Error) => ({ deals: [] as DealCampo[], error: err }))
+    : null;
+  hubspotConsulta?.catch(() => {});
 
   // Visitas de los tramos anteriores de la tendencia: en un rango a elegir
   // salen de las mismas visitas del periodo; en día/semana/mes se cuentan.
