@@ -96,6 +96,11 @@ function cambio(actual: number | null | undefined, previo: number | null | undef
 }
 const colorTono = (t: 'bien' | 'mal' | 'neutro') => (t === 'bien' ? '#1c7a4f' : t === 'mal' ? '#b23a2b' : '#6f7d75');
 
+// Tableros ya cargados en esta sesión del navegador (por periodo y filtros).
+const cacheTablero = new Map<string, { en: number; data: TableroData }>();
+const FRESCO_MS = 60_000;
+const MAX_CACHE = 30;
+
 export function Tablero() {
   const { productos, vendedoresFiltrados, fProductos, fVendedores, setFProductos, setFVendedores } = useFilters();
   const [params, setParams] = useSearchParams();
@@ -114,13 +119,29 @@ export function Tablero() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setCargando(true);
-    setError('');
     const periodo = vista === 'rango' ? { desde: desdeRango, hasta: hastaRango } : { fecha };
-    api.tablero({ vista, ...periodo, productoIds: fProductos, vendedorIds: fVendedores })
-      .then(setData)
-      .catch((e) => setError(e.message || 'No se pudo cargar el tablero.'))
-      .finally(() => setCargando(false));
+    const filtros = { vista, ...periodo, productoIds: fProductos, vendedorIds: fVendedores };
+    const llave = JSON.stringify(filtros);
+    // Lo ya visto en esta sesión se muestra al instante; si tiene más de un
+    // minuto, se vuelve a pedir por detrás y se reemplaza al llegar.
+    const guardado = cacheTablero.get(llave);
+    if (guardado) setData(guardado.data);
+    setError('');
+    if (guardado && Date.now() - guardado.en < FRESCO_MS) { setCargando(false); return; }
+    let vigente = true;
+    // Con datos guardados no se atenúa la pantalla: se actualiza sin estorbar.
+    setCargando(!guardado);
+    api.tablero(filtros)
+      .then((d) => {
+        cacheTablero.delete(llave);
+        cacheTablero.set(llave, { en: Date.now(), data: d });
+        if (cacheTablero.size > MAX_CACHE) cacheTablero.delete(cacheTablero.keys().next().value!);
+        // Si mientras tanto se eligió otro periodo, esta respuesta ya no se pinta.
+        if (vigente) setData(d);
+      })
+      .catch((e) => { if (vigente) setError(e.message || 'No se pudo cargar el tablero.'); })
+      .finally(() => { if (vigente) setCargando(false); });
+    return () => { vigente = false; };
   }, [vista, fecha, desdeRango, hastaRango, fProductos, fVendedores]);
 
   // Estado de las rutas (es de hoy, no del periodo): para "Requiere atención".
@@ -219,7 +240,7 @@ export function Tablero() {
       )}
 
       <div style={{ opacity: cargando && data ? 0.55 : 1, transition: 'opacity .15s' }}>
-        <Card titulo="Embudo del periodo" subtitulo={data ? `Cada paso sale del anterior. Debajo de cada número, cómo iba ${vista === 'rango' ? 'en los mismos días justo antes' : `en ${corto}`}.` : undefined}>
+        <Card titulo="Embudo del periodo" subtitulo={data ? `Cada paso sale del anterior: el número es cuántos llegaron y el porcentaje, qué parte del paso anterior. Abajo, cómo iba ${vista === 'rango' ? 'en los mismos días justo antes' : `en ${corto}`}.` : undefined}>
           {a && p ? (
             <>
               <Embudo a={a} p={p} hsOk={hsOk} corto={corto} />
@@ -273,30 +294,43 @@ export function Tablero() {
 const ALTOS = [100, 90, 80, 70, 60, 50, 42];
 const COLORES = ['#9aa8a0', '#7cc49c', '#5cb283', '#3b9a68', '#157347', '#0d3d24', '#062514'];
 
+// Qué parte del paso anterior llegó a este: el número entero va en la
+// figura y el porcentaje debajo, para leer el embudo de un vistazo.
+const pctDe = (n: number | null, base: number | null) => (n == null || !base ? null : Math.round((n / base) * 1000) / 10);
+
 function Embudo({ a, p, hsOk, corto }: { a: BloqueTablero; p: BloqueTablero; hsOk: boolean; corto: string }) {
-  const etapas: { n: number | null; prev: number | null; l: string; det: string; fuente?: boolean; sinFlecha?: boolean }[] = [
+  // `de`: cómo se nombra el paso cuando es la base del siguiente ("62% de los visitados").
+  const etapas: { n: number | null; prev: number | null; l: string; de: string; det: string; fuente?: boolean; sinFlecha?: boolean }[] = [
     {
-      n: a.meta, prev: p.meta, l: a.metaPropios ? 'Meta' : 'Meta de la ruta',
+      n: a.meta, prev: p.meta, l: a.metaPropios ? 'Meta' : 'Meta de la ruta', de: 'de la meta',
       det: a.metaPropios ? `${num(a.metaRuta)} planeados en la ruta + ${num(a.metaPropios)} nuevos que encuentran ellos` : 'negocios planeados para estos días',
     },
-    { n: a.negociosVisitados, prev: p.negociosVisitados, l: 'Visitados', det: 'negocios distintos, en persona' },
-    { n: a.negociosReales, prev: p.negociosReales, l: 'Reales', det: a.noValidos ? `sin ${num(a.noValidos)} cerrados o que no existen` : 'ninguno cerrado o inexistente' },
-    { n: a.interesados, prev: p.interesados, l: 'Con interés', det: 'solicitud, información o volver otro día' },
+    { n: a.negociosVisitados, prev: p.negociosVisitados, l: 'Visitados', de: 'de los visitados', det: 'negocios distintos, en persona' },
+    { n: a.negociosReales, prev: p.negociosReales, l: 'Reales', de: 'de los reales', det: a.noValidos ? `sin ${num(a.noValidos)} cerrados o que no existen` : 'ninguno cerrado o inexistente' },
+    { n: a.interesados, prev: p.interesados, l: 'Con interés', de: 'de los interesados', det: 'solicitud, información o volver otro día' },
     hsOk
-      ? { n: a.solicitudes, prev: p.solicitudes, l: 'Solicitudes', det: 'la que el vendedor ligó a su visita, en HubSpot', fuente: true }
-      : { n: a.marcadas, prev: p.marcadas, l: 'Solicitudes marcadas', det: 'en campo, sin confirmar en HubSpot' },
+      ? { n: a.solicitudes, prev: p.solicitudes, l: 'Solicitudes', de: 'de las solicitudes', det: 'la que el vendedor ligó a su visita, en HubSpot', fuente: true }
+      : { n: a.marcadas, prev: p.marcadas, l: 'Solicitudes marcadas', de: 'de las solicitudes', det: 'en campo, sin confirmar en HubSpot' },
   ];
   // Mientras la aprobación sea preliminar, comparar aprobadas contra un
   // periodo que ya tuvo tiempo de resolverse siempre daría "▼".
   if (hsOk) {
-    etapas.push({ n: a.aprobadas, prev: p.aprobadas, l: 'Aprobadas', det: `${num(a.rechazadas)} rechazadas · ${num(a.enProceso)} en revisión`, fuente: true, sinFlecha: esPreliminar(a) });
+    etapas.push({ n: a.aprobadas, prev: p.aprobadas, l: 'Aprobadas', de: 'de las aprobadas', det: `${num(a.rechazadas)} rechazadas · ${num(a.enProceso)} en revisión`, fuente: true, sinFlecha: esPreliminar(a) });
     // La venta: incluye las que ya se desembolsaron.
-    etapas.push({ n: a.desembolsadas, prev: p.desembolsadas, l: 'Desembolsadas', det: `${dinero(a.montoDesembolsado)} desembolsados`, fuente: true, sinFlecha: esPreliminar(a) });
+    etapas.push({ n: a.desembolsadas, prev: p.desembolsadas, l: 'Desembolsadas', de: 'de las desembolsadas', det: `${dinero(a.montoDesembolsado)} desembolsados`, fuente: true, sinFlecha: esPreliminar(a) });
   }
+  // El primer paso con número es la base del "% del total" (la meta, o los
+  // visitados si no hubo ruta planeada).
+  const iBase = etapas.findIndex((e) => e.n);
+  const baseEtapa = iBase >= 0 ? etapas[iBase] : null;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${etapas.length}, minmax(0, 1fr))`, overflowX: 'auto' }}>
       {etapas.map((e, i) => {
         const c = e.sinFlecha ? null : cambio(e.n, e.prev, 'pct');
+        const anterior = i ? etapas[i - 1] : null;
+        const paso = anterior ? pctDe(e.n, anterior.n) : null;
+        // El "% del total" solo aporta desde el segundo paso después de la base.
+        const delTotal = baseEtapa && i > iBase + 1 ? pctDe(e.n, baseEtapa.n) : null;
         return (
           <div key={e.l} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '0 4px', minWidth: 120 }}>
             <div style={{ height: ALTOS[0], width: '100%', display: 'flex', alignItems: 'center' }}>
@@ -306,7 +340,23 @@ function Embudo({ a, p, hsOk, corto }: { a: BloqueTablero; p: BloqueTablero; hsO
                 clipPath: i === 0 ? 'polygon(0 0, 92% 0, 100% 50%, 92% 100%, 0 100%)' : 'polygon(0 0, 92% 0, 100% 50%, 92% 100%, 0 100%, 8% 50%)',
               }}>{num(e.n)}</div>
             </div>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: '#263238', marginTop: 10 }}>
+            <div
+              title={anterior ? `${num(e.n)} de ${num(anterior.n)} ${anterior.l.toLowerCase()}${delTotal != null ? ` · ${pctTxt(delTotal)} ${baseEtapa!.de}` : ''}` : 'El punto de partida del embudo'}
+              style={{ marginTop: 8, minHeight: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
+            >
+              {anterior ? (
+                <>
+                  <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5, background: '#eef6f1', color: '#0f5132', borderRadius: 999, padding: '2px 10px', fontVariantNumeric: 'tabular-nums' }}>
+                    <b style={{ fontSize: 16, fontWeight: 700 }}>{pctTxt(paso)}</b>
+                    <span style={{ fontSize: 11.5, fontWeight: 500 }}>{anterior.de}</span>
+                  </span>
+                  {delTotal != null && <span style={{ fontSize: 11, color: '#8a978f', marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>{pctTxt(delTotal)} {baseEtapa!.de}</span>}
+                </>
+              ) : (
+                <span style={{ fontSize: 11.5, color: '#8a978f' }}>punto de partida</span>
+              )}
+            </div>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: '#263238', marginTop: 6 }}>
               {e.l}{e.fuente && <Fuente />}
             </div>
             <div style={{ fontSize: 11.5, color: '#8a978f', marginTop: 3, lineHeight: 1.4 }}>{e.det}</div>
