@@ -22,8 +22,8 @@ import { SESION_ID } from './interacciones.js';
 export const grabacionesRouter = Router();
 
 // Los fragmentos de más de un mes se borran solos (ver limpiarAnalitica).
-export const DIAS_GRABACIONES = 30;
-export const DIAS_INTERACCIONES = 120;
+export const DIAS_GRABACIONES = 365;
+export const DIAS_INTERACCIONES = 365;
 const MAX_FRAGMENTOS = 1500;
 const MAX_BYTES_FRAGMENTO = 3 * 1024 * 1024;
 const MAX_LISTA = 300;
