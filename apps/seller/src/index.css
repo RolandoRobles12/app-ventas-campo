@@ -73,6 +73,22 @@ a { color: inherit; }
 .resultados-grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
 @media (min-width: 700px) { .resultados-grid { grid-template-columns: repeat(3, 1fr); } }
 
+/* Cámara: visor arriba y botones abajo; en una pantalla acostada y baja
+   (teléfono horizontal) los botones van a la derecha para no comerse el visor. */
+.camara { display: flex; flex-direction: column; }
+.camara-controles {
+  flex: none; display: flex; gap: 12px; background: rgba(0,0,0,.55);
+  padding: 18px 20px calc(24px + env(safe-area-inset-bottom));
+}
+.camara-controles-centro { flex-direction: column; align-items: center; gap: 10px; }
+@media (orientation: landscape) and (max-height: 640px) {
+  .camara { flex-direction: row; }
+  .camara-controles { flex-direction: column; justify-content: center; width: 210px; padding: 76px 16px 16px; }
+  .camara-controles-centro { width: 140px; }
+  /* Los botones tienen flex:1 en línea (para repartirse el ancho abajo). */
+  .camara-controles > button { flex: none !important; }
+}
+
 @keyframes aparecer { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .aparecer { animation: aparecer .2s ease-out; }
 @keyframes girar { to { transform: rotate(360deg); } }
