@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { usePantallaModal } from '../analitica';
 
 const MAX_LADO_PX = 1280;
 
@@ -14,6 +15,7 @@ interface CameraCaptureProps {
 // archivos: solo un <video> en vivo, un botón que congela el frame actual, y
 // una vista previa donde se confirma o se vuelve a tomar antes de usar la foto.
 export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
+  usePantallaModal('Cámara');
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState('');

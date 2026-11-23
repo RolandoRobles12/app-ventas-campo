@@ -14,6 +14,8 @@ export interface Vendedor {
   onboardingVisto?: string | null;
   // Última versión de "Novedades" que vio.
   novedadesVistas?: string | null;
+  // El admin pidió grabar sus sesiones de la app hasta este día (YYYY-MM-DD).
+  grabarHasta?: string | null;
 }
 
 export interface Prospecto {
@@ -155,7 +157,12 @@ export const api = {
     req<{ ok: boolean }>('/solicitudes/corregir', { method: 'POST', body: JSON.stringify({ visitaId, resultado }) }),
   descartarSinVisita: (vendedorId: string, dealId: string) =>
     req<void>('/solicitudes/sin-visita/descartar', { method: 'POST', body: JSON.stringify({ vendedorId, dealId }) }),
-  config: () => req<{ radioCercoMetros: number }>('/config'),
+  config: () => req<{ radioCercoMetros: number; grabacionPorcentaje?: number }>('/config'),
+  // Medición de uso (ver analitica.ts y grabacion.ts).
+  registrarInteracciones: (lote: { vendedorId: string; sesionId: string; eventos: unknown[] }) =>
+    req<{ guardados: number }>('/interacciones', { method: 'POST', body: JSON.stringify(lote) }),
+  registrarFragmento: (data: Record<string, unknown>) =>
+    req<{ ok: boolean }>('/grabaciones/fragmento', { method: 'POST', body: JSON.stringify(data) }),
   registrarTokenPush: (vendedorId: string, token: string) =>
     req<void>('/notificaciones/token', { method: 'POST', body: JSON.stringify({ vendedorId, token }) }),
   zonasRestringidas: (vendedorId: string) =>

@@ -91,3 +91,19 @@ export const ligarSolicitudesPendientes = onSchedule(
     }
   },
 );
+
+// Medición de uso de la app: borra las grabaciones de sesiones de más de 30
+// días (con sus archivos en Storage) y los eventos de uso de más de 120 días
+// (ver _server/routes/grabaciones.ts).
+export const limpiarAnalitica = onSchedule(
+  { schedule: '20 3 * * *', timeZone: 'America/Mexico_City', timeoutSeconds: 540 },
+  async () => {
+    const { limpiarAnalitica: limpiar } = await import('./_server/routes/grabaciones.js');
+    try {
+      const r = await limpiar();
+      if (r.grabaciones || r.interacciones) console.log(`Limpieza de uso de la app: ${r.grabaciones} grabaciones, ${r.interacciones} lotes de eventos.`);
+    } catch (err) {
+      console.error('Limpieza de uso de la app falló:', err);
+    }
+  },
+);

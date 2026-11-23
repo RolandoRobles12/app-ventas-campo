@@ -1,3 +1,4 @@
+import { useEffect, useLayoutEffect } from 'react';
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { AuthProvider, RequireAuth } from '@aviva/ui';
 import { SessionProvider, useSession } from './session';
@@ -14,6 +15,21 @@ import { LocationGate } from './components/LocationGate';
 import { UbicacionProvider } from './ubicacion';
 import { OfflineSync } from './offline';
 import { RecorridoProvider } from './recorrido';
+import { iniciarAnalitica, MedicionPantallas } from './analitica';
+import { iniciarGrabacion } from './grabacion';
+import type { Vendedor } from './api';
+import { AvisoLogin } from './components/QueMide';
+
+// Medición de uso de la app (lo ve el admin en "Uso de la app"): eventos
+// ligeros siempre y, en algunas sesiones, la grabación. Arranca antes del
+// permiso de ubicación para ver también a quien se queda atorado ahí.
+function Medicion({ vendedor }: { vendedor: Vendedor }) {
+  // useLayoutEffect: queda lista antes de que las pantallas registren su
+  // primera vista (esas van en useEffect).
+  useLayoutEffect(() => iniciarAnalitica(vendedor.id), [vendedor.id]);
+  useEffect(() => iniciarGrabacion(vendedor), [vendedor.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <MedicionPantallas />;
+}
 
 function AppShellConSesion() {
   const { vendedor, loading } = useSession();
@@ -28,6 +44,7 @@ function AppShellConSesion() {
 
   return (
     <AppShell>
+      <Medicion vendedor={vendedor} />
       {/* Sin ubicación habilitada no se puede usar la app: el gate bloquea
           todo, y el GPS compartido y la sincronización solo arrancan cuando
           ya hay ubicación. */}
@@ -59,7 +76,7 @@ function AppShellConSesion() {
 function App() {
   return (
     <AuthProvider>
-      <RequireAuth>
+      <RequireAuth aviso={<AvisoLogin />}>
         <SessionProvider>
           <AppShellConSesion />
         </SessionProvider>

@@ -1,7 +1,8 @@
-import { getStorage } from 'firebase-admin/storage';
 import { db, Timestamp } from './db.js';
 import { chunkArray } from './firestore-helpers.js';
 import { colorPara, inicialesDe } from './equipo.js';
+import { bucket } from './storageBucket.js';
+import { borrarGrabacionesDe } from './routes/grabaciones.js';
 
 // Vendedores de prueba: para que un admin use la app del vendedor en
 // producción con su propio correo sin ensuciar nada.
@@ -49,7 +50,8 @@ export async function crearVendedorPrueba(datos: { email: string; nombre: string
 // compartidas solo pierden a este vendedor.
 export async function borrarVendedorPrueba(vendedorId: string): Promise<Record<string, number>> {
   const conteo: Record<string, number> = {};
-  for (const col of ['visitas', 'prospectos', 'llamadas', 'ubicaciones', 'pushTokens', 'solicitudesLigadas']) {
+  conteo.grabaciones = await borrarGrabacionesDe(vendedorId);
+  for (const col of ['visitas', 'prospectos', 'llamadas', 'ubicaciones', 'pushTokens', 'solicitudesLigadas', 'interacciones']) {
     const snap = await db.collection(col).where('vendedorId', '==', vendedorId).select().get();
     for (const lote of chunkArray(snap.docs, 400)) {
       const batch = db.batch();
@@ -65,8 +67,7 @@ export async function borrarVendedorPrueba(vendedorId: string): Promise<Record<s
   }
   // Fotos de sus visitas (mejor esfuerzo: si Storage no responde, se quedan).
   try {
-    const bucket = getStorage().bucket(process.env.STORAGE_BUCKET || `${process.env.GCLOUD_PROJECT || 'app-campo-aviva'}.firebasestorage.app`);
-    await bucket.deleteFiles({ prefix: `visitas/${vendedorId}/` });
+    await bucket().deleteFiles({ prefix: `visitas/${vendedorId}/` });
   } catch (err) {
     console.warn('No se pudieron borrar las fotos de prueba:', (err as Error).message);
   }

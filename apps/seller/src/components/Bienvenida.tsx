@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { IconCalendario, IconCamara, IconCheck, IconNube, IconRuta, IconSiguiente, IconTelefono, IconTienda } from '../icons';
+import { IconCalendario, IconCamara, IconCheck, IconInfo, IconNube, IconRuta, IconSiguiente, IconTelefono, IconTienda } from '../icons';
+import { usePantallaModal } from '../analitica';
 
 type Siguiente = 'recorrido' | 'practica' | 'empezar';
 
@@ -61,6 +62,12 @@ const diapositivas = (nombre: string): Diapositiva[] => [
     texto: 'Si te quedas sin internet, sigue trabajando normal.',
     puntos: ['Tus visitas y llamadas se guardan en el teléfono', 'Se envían solas en cuanto regresa la señal', 'Arriba ves "Al día" cuando ya se envió todo'],
   },
+  {
+    Icon: IconInfo, color: '#1d5fae', fondo: '#e2ecfb',
+    titulo: 'Así mejoramos la app',
+    texto: 'Registramos cómo usas la app, incluso grabando la pantalla, para mejorarla para ti.',
+    puntos: ['Nunca lo que escribes, tus fotos ni nada fuera de la app'],
+  },
 ];
 
 // Bienvenida de la primera vez: qué es la app y para qué sirve, en
@@ -69,6 +76,7 @@ const diapositivas = (nombre: string): Diapositiva[] => [
 export function Bienvenida({ nombre, onSalir }: { nombre: string; onSalir: (siguiente: Siguiente) => void }) {
   const lista = diapositivas(nombre);
   const [i, setI] = useState(0);
+  usePantallaModal('Bienvenida');
   const final = i === lista.length;
   const d = lista[i];
 

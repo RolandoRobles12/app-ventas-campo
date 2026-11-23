@@ -177,7 +177,8 @@ export function ComoLlegar() {
 
   return (
     <div style={{ position: 'relative', height: '100%', minHeight: 400 }}>
-      <div ref={contenedor} style={{ position: 'absolute', inset: 0, background: '#e7ece4' }} />
+      {/* rr-block: el mapa no se graba en las sesiones (pesa mucho y no aporta). */}
+      <div ref={contenedor} className="rr-block" style={{ position: 'absolute', inset: 0, background: '#e7ece4' }} />
 
       <div style={{ position: 'absolute', top: 12, left: 12, right: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
         <button

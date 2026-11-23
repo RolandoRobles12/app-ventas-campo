@@ -20,6 +20,7 @@ import { Pantalla } from '../components/AppShell';
 import { ParadaFila } from '../components/ParadaFila';
 import { EstadoConexion } from '../components/EstadoConexion';
 import { HojaLlamada, VistaLlamadas } from '../components/Llamadas';
+import { QueMideLaApp } from '../components/QueMide';
 import { IconAbajo, IconCalendario, IconCamara, IconCheck, IconFuego, IconInfo, IconMas, IconNavegar, IconRecargar, IconRuta, IconSalir, IconTelefono, IconTienda } from '../icons';
 
 const RECARGA_AL_VOLVER_MS = 2 * 60 * 1000;
@@ -61,6 +62,7 @@ export function Hoy() {
   const [eligiendoVisita, setEligiendoVisita] = useState<{ dealId: string; nombre: string; creado: number } | null>(null);
   const [cargando, setCargando] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [queMide, setQueMide] = useState(false);
   const ultimaCarga = useRef(0);
 
   const cargar = useCallback(() => {
@@ -250,6 +252,7 @@ export function Hoy() {
         </div>
       )}
 
+      {queMide && <QueMideLaApp onCerrar={() => setQueMide(false)} />}
       {menu && (
         <div onClick={() => setMenu(false)} style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(10,25,17,.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
           <div onClick={(e) => e.stopPropagation()} className="aparecer" style={{ width: '100%', maxWidth: 560, background: '#fff', borderRadius: '24px 24px 0 0', padding: '22px 20px 26px' }}>
@@ -272,6 +275,9 @@ export function Hoy() {
               </button>
               <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start' }} onClick={() => { setMenu(false); recorrido.practicar(); }}>
                 <IconCamara size={20} /> Practicar una visita
+              </button>
+              <button className="btn btn-ghost tap" style={{ justifyContent: 'flex-start' }} onClick={() => { setMenu(false); setQueMide(true); }}>
+                <IconInfo size={20} /> Qué registra la app
               </button>
             </div>
             {avisos.estado === 'denied' && (

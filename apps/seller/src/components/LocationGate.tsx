@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { usePantallaModal } from '../analitica';
 
 type Estado =
   | { status: 'verificando' }
@@ -65,6 +66,13 @@ export function LocationGate({ children }: { children: ReactNode }) {
   }, [verificar]);
 
   if (estado.status === 'ok') return <>{children}</>;
+  return <Bloqueo estado={estado} verificar={verificar} />;
+}
+
+// La pantalla de "activa tu ubicación" (cuenta como pantalla propia en la
+// medición de uso: ahí se atora quien no da el permiso).
+function Bloqueo({ estado, verificar }: { estado: Exclude<Estado, { status: 'ok' }>; verificar: () => void }) {
+  usePantallaModal(estado.status === 'verificando' ? 'Buscando ubicación' : 'Permiso de ubicación');
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 28px', textAlign: 'center' }}>

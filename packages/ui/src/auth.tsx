@@ -64,7 +64,9 @@ export async function getIdToken(): Promise<string | null> {
   return auth.currentUser ? auth.currentUser.getIdToken() : null;
 }
 
-export function RequireAuth({ children }: { children: ReactNode }) {
+// `aviso`: texto opcional bajo el botón de entrar (la app del vendedor avisa
+// ahí qué registra de su uso).
+export function RequireAuth({ children, aviso }: { children: ReactNode; aviso?: ReactNode }) {
   const { user, loading, error, signInWithGoogle } = useAuth();
 
   if (loading) return null;
@@ -95,6 +97,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
             Iniciar sesión con Google
           </button>
           {error && <p style={{ margin: '16px 0 0', fontSize: 13, color: 'var(--aviva-red-600, #d64545)', fontWeight: 600 }}>{error}</p>}
+          {aviso}
         </div>
       </div>
     );

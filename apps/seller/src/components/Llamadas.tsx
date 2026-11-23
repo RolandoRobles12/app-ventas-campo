@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { nuevoId, track, usePantallaModal } from '../analitica';
 import { ApiError, type ResultadoLlamada } from '../api';
 import { guardarLlamada } from '../offline';
 import { horaCita, textoDistancia, textoHora, type Parada } from '../ruta';
@@ -74,9 +75,9 @@ function LlamadaFila({ parada, onAbrir, mostrarDia }: { parada: Parada; onAbrir:
   return (
     <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 12px 12px 16px' }}>
       {/* Tocar el nombre abre la hoja sin marcar (p. ej. si llamó desde otro teléfono). */}
-      <button className="tap" onClick={() => onAbrir(parada)} style={{ flex: 1, minWidth: 0, textAlign: 'left', padding: '2px 0' }}>
+      <button className="tap" data-track="Negocio (abrir hoja)" onClick={() => onAbrir(parada)} style={{ flex: 1, minWidth: 0, textAlign: 'left', padding: '2px 0' }}>
         <span className="ellipsis" style={{ display: 'block', fontSize: 17, fontWeight: 800, color: 'var(--ink-900)' }}>{parada.nombre}</span>
-        <span className="ellipsis" style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#3a4a41', marginTop: 2 }}>
+        <span className="ellipsis rr-mask" style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#3a4a41', marginTop: 2 }}>
           {textoTelefono(parada.telefono!)}{distancia ? ` · a ${distancia}` : ''}
         </span>
         <span style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
@@ -98,6 +99,7 @@ function LlamadaFila({ parada, onAbrir, mostrarDia }: { parada: Parada; onAbrir:
       </button>
       <a
         href={telHref(parada.telefono!)}
+        data-track="Llamar"
         // La hoja se abre un instante después, para que esté lista al volver
         // del marcador.
         onClick={() => setTimeout(() => onAbrir(parada), 700)}
@@ -126,6 +128,15 @@ export function HojaLlamada({ parada, vendedorId, onCerrar, onGuardada }: {
   const [guardando, setGuardando] = useState(false);
   const [intento, setIntento] = useState(false);
   const [error, setError] = useState('');
+  usePantallaModal('Hoja de llamada');
+  // Un id por cada vez que se abre la hoja: agrupa sus pasos en el embudo.
+  // (Con el mismo id, un evento repetido no cuenta doble.)
+  const [intentoId] = useState(nuevoId);
+  useEffect(() => { track('llamada_abierta', { intento: intentoId }); }, [intentoId]);
+  const elegirResultado = (r: ResultadoLlamada) => {
+    setResultado(r);
+    track('llamada_resultado', { intento: intentoId, resultado: r });
+  };
 
   const ahora = new Date();
   const horaPasada = resultado === 'cita' && !!hora && dia === hoy
@@ -150,6 +161,7 @@ export function HojaLlamada({ parada, vendedorId, onCerrar, onGuardada }: {
           : resultado === 'no_contesto' ? 'Anotado. Inténtalo más tarde.'
             : resultado === 'no_interesa' ? 'Anotado. Ya no aparece en tus llamadas.'
               : telefonoNuevo.trim() ? 'Número actualizado.' : 'Anotado. Lo quitamos de tus llamadas.';
+      track('llamada_guardada', { intento: intentoId, resultado, sinSenal: pendiente });
       onGuardada(pendiente ? `${base} Se enviará cuando haya señal.` : base);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'No se pudo guardar. Intenta de nuevo.');
@@ -165,7 +177,7 @@ export function HojaLlamada({ parada, vendedorId, onCerrar, onGuardada }: {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '1px', color: '#6f7d75' }}>¿CÓMO TE FUE CON LA LLAMADA?</div>
             <div style={{ fontSize: 21, fontWeight: 800, color: 'var(--ink-900)', marginTop: 4, lineHeight: 1.2 }}>{parada.nombre}</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#6f7d75', marginTop: 3 }}>{textoTelefono(parada.telefono!)}</div>
+            <div className="rr-mask" style={{ fontSize: 15, fontWeight: 600, color: '#6f7d75', marginTop: 3 }}>{textoTelefono(parada.telefono!)}</div>
           </div>
           <a href={telHref(parada.telefono!)} className="btn btn-ghost tap" style={{ flex: 'none', minHeight: 48, padding: '0 14px', fontSize: 15, textDecoration: 'none' }}>
             <IconTelefono size={18} /> Volver a marcar
@@ -179,7 +191,7 @@ export function HojaLlamada({ parada, vendedorId, onCerrar, onGuardada }: {
               <button
                 key={r.valor}
                 className="tap"
-                onClick={() => setResultado(r.valor)}
+                onClick={() => elegirResultado(r.valor)}
                 aria-pressed={activo}
                 style={{
                   minHeight: 68, borderRadius: 16, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',

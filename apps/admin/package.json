@@ -13,7 +13,8 @@
     "@aviva/ui": "*",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^6.28.0"
+    "react-router-dom": "^6.28.0",
+    "rrweb-player": "2.2.2"
   },
   "devDependencies": {
     "@types/google.maps": "^3.65.2",
