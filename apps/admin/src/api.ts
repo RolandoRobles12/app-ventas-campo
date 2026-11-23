@@ -198,7 +198,8 @@ export interface UsoResumen {
   dispositivos: { nombre: string; sesiones: number }[];
   pantallas: { pantalla: string; vistas: number; minutos: number; toques: number; rabia: number; vendedores: number }[];
   objetivos: { pantalla: string; objetivo: string; toques: number; rabia: number; muertos: number }[];
-  mapaToques: { pantalla: string; celdas: { x: number; y: number; n: number; r: number }[] }[];
+  // abajo: toques más abajo de lo que se ve al abrir la pantalla (desplazó).
+  mapaToques: { pantalla: string; abajo?: number; celdas: { x: number; y: number; n: number; r: number }[] }[];
   rejilla: { x: number; y: number };
   embudos: { clave: string; titulo: string; pasos: { accion: string; etiqueta: string; intentos: number }[] }[];
   bloqueos: { motivo: string; etiqueta: string; veces: number }[];
@@ -221,7 +222,10 @@ export interface GrabacionDetalle extends Grabacion {
 async function reqFragmento(sesionId: string, seq: number): Promise<unknown[]> {
   const token = await getIdToken();
   const res = await fetch(`/api/grabaciones/${encodeURIComponent(sesionId)}/fragmentos/${seq}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-  if (!res.ok) throw new Error(`Error ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({} as { message?: string }));
+    throw new Error(body.message || `Error ${res.status}`);
+  }
   const bytes = new Uint8Array(await res.arrayBuffer());
   // Si algo en el camino ya lo descomprimió, llega como JSON directo.
   const esGzip = bytes[0] === 0x1f && bytes[1] === 0x8b;
@@ -324,6 +328,7 @@ export const api = {
   grabaciones: (f: Filtro) => req<{ items: Grabacion[]; truncado: boolean }>(`/grabaciones${qs({ ...f })}`),
   grabacion: (sesionId: string) => req<GrabacionDetalle>(`/grabaciones/${encodeURIComponent(sesionId)}`),
   fragmentoGrabacion: reqFragmento,
+  muestraPantalla: (pantalla: string) => req<{ sesionId: string; seq: number } | null>(`/grabaciones/muestra${qs({ pantalla })}`),
   borrarGrabacion: (sesionId: string) => req<void>(`/grabaciones/${encodeURIComponent(sesionId)}`, { method: 'DELETE' }),
   grabarVendedor: (vendedorId: string, dias: number) =>
     req<{ grabarHasta: string | null }>(`/grabaciones/vendedor/${vendedorId}`, { method: 'PUT', body: JSON.stringify({ dias }) }),

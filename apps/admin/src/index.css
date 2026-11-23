@@ -33,3 +33,7 @@ button { cursor: pointer; }
 .tile-click { transition: border-color .12s, box-shadow .12s; }
 .tile-click:hover { border-color: #9fd0b4 !important; box-shadow: 0 2px 8px rgba(21,115,71,.08); }
 .link-ver-visitas:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Mapa de toques: la pantalla grabada llena el teléfono, sin el marco del reproductor. */
+.fondo-mapa .rr-player { box-shadow: none !important; border-radius: 0 !important; background: transparent !important; float: none !important; }
+.fondo-mapa .rr-player__frame { overflow: hidden; }

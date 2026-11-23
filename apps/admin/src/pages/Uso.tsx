@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { api, type Grabacion, type UsoResumen, type UsoVendedor } from '../api';
 import { useFilters } from '../filters';
 import { haceCuanto, toISODate, etiquetaDia } from '../lib/dateRanges';
@@ -21,7 +21,7 @@ const AYUDA_FRUSTRACION = 'Tres o más toques seguidos (en menos de un segundo) 
 const AYUDA_MUERTOS = 'Toques en algo que no es un botón ni un campo (un texto, un ícono, un espacio vacío). Muchos en el mismo lugar indican que ahí el vendedor espera que pase algo.';
 const AYUDA_TIEMPO = 'Tiempo con la app abierta y en pantalla. Cada rato en una misma pantalla se cuenta hasta 10 minutos, para no inflar el número cuando la tablet se queda prendida sin usar.';
 const AYUDA_EMBUDO = 'Cada vez que el vendedor abre el registro (o la hoja de una llamada) es un intento. Las barras dicen cuántos intentos llegaron a cada paso; la caída entre pasos dice dónde se atoran o se salen. Las prácticas no cuentan.';
-const AYUDA_MAPA = 'Dónde tocan los vendedores en esta pantalla, relativo al tamaño de su pantalla (arriba es arriba). Más oscuro es más toques; los cuadros con borde rojo tuvieron toques de frustración.';
+const AYUDA_MAPA = 'Dónde tocan los vendedores en esta pantalla. El fondo es la pantalla real, tomada de una sesión grabada (lo escrito va tapado). Más intenso es más toques; los círculos punteados tuvieron toques de frustración. Los toques hechos después de desplazar la pantalla se cuentan aparte y están en la tabla.';
 
 const fmtMin = (min: number) => {
   if (min < 60) return `${Math.round(min)} min`;
@@ -298,66 +298,143 @@ function TablaPantallas({ datos }: { datos: UsoResumen }) {
   );
 }
 
-// Dónde tocan en cada pantalla: una rejilla sobre el contorno de un
-// teléfono, de un solo tono (más oscuro = más toques).
+// Dónde tocan en cada pantalla, como en Clarity: los toques encima de la
+// pantalla real. El fondo sale de un pedazo de grabación de esa pantalla
+// (congelado un momento después de abrirla, con lo escrito tapado); si
+// todavía no hay grabaciones de ella, se ve solo el contorno del teléfono.
+const CALOR = '#d9480f';
+const ANCHO_MAPA = 280;
+
+interface EventoRr { type: number; timestamp: number; data?: { tag?: string; payload?: { nombre?: string }; width?: number; height?: number } }
+type Player = InstanceType<typeof import('rrweb-player').default>;
+type EventosPlayer = ConstructorParameters<typeof import('rrweb-player').default>[0]['props']['events'];
+
+function FondoPantalla({ pantalla, ancho, onProporcion }: { pantalla: string; ancho: number; onProporcion: (altoSobreAncho: number | null) => void }) {
+  const contenedor = useRef<HTMLDivElement>(null);
+  const [estado, setEstado] = useState<'cargando' | 'sin' | 'ok'>('cargando');
+
+  useEffect(() => {
+    let cancelado = false;
+    let player: Player | null = null;
+    setEstado('cargando');
+    (async () => {
+      try {
+        const m = await api.muestraPantalla(pantalla);
+        if (cancelado) return;
+        if (!m) { setEstado('sin'); onProporcion(null); return; }
+        const eventos = ((await api.fragmentoGrabacion(m.sesionId, m.seq)) as EventoRr[]).sort((a, b) => a.timestamp - b.timestamp);
+        const meta = eventos.find((e) => e.type === 4);
+        if (cancelado || !meta || !contenedor.current) { if (!cancelado) { setEstado('sin'); onProporcion(null); } return; }
+        const t0 = eventos[0].timestamp;
+        const fin = eventos[eventos.length - 1].timestamp;
+        // Un momento después de que abrió la pantalla (para que ya haya
+        // cargado), sin pasarse a la siguiente.
+        const abre = eventos.find((e) => e.type === 5 && e.data?.tag === 'Pantalla' && e.data.payload?.nombre === pantalla);
+        const siguiente = abre && eventos.find((e) => e.type === 5 && e.data?.tag === 'Pantalla' && e.timestamp > abre.timestamp);
+        const desde = abre?.timestamp ?? t0;
+        const momento = Math.min(desde + 1500, (siguiente?.timestamp ?? fin + 1) - 50, fin) - t0;
+        const proporcion = (meta.data?.height || 860) / (meta.data?.width || 412);
+        const [{ default: PlayerClase }] = await Promise.all([import('rrweb-player'), import('rrweb-player/dist/style.css')]);
+        if (cancelado || !contenedor.current) return;
+        contenedor.current.innerHTML = '';
+        player = new PlayerClase({
+          target: contenedor.current,
+          props: { events: eventos as unknown as EventosPlayer, width: ancho, height: Math.round(ancho * proporcion), autoPlay: false, showController: false, mouseTail: false },
+        });
+        player.goto(Math.max(0, momento), false);
+        onProporcion(proporcion);
+        setEstado('ok');
+      } catch {
+        if (!cancelado) { setEstado('sin'); onProporcion(null); }
+      }
+    })();
+    return () => {
+      cancelado = true;
+      try { (player as unknown as { $destroy?: () => void } | null)?.$destroy?.(); } catch { /* ya no estaba */ }
+    };
+  }, [pantalla, ancho]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <>
+      {/* El reproductor trae su propio marco: se quita para que la pantalla llene el teléfono. */}
+      <div ref={contenedor} className="fondo-mapa" style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', opacity: estado === 'ok' ? 1 : 0 }} />
+      {estado !== 'ok' && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 22, textAlign: 'center', fontSize: 12.5, color: '#8a978f', lineHeight: 1.5 }}>
+          {estado === 'cargando' ? 'Cargando la pantalla…' : 'Todavía no hay una sesión grabada que pase por esta pantalla para usarla de fondo. Aparecerá sola en cuanto se grabe una.'}
+        </div>
+      )}
+    </>
+  );
+}
+
 function MapaToques({ datos }: { datos: UsoResumen }) {
   const opciones = useMemo(() => datos.mapaToques
-    .map((m) => ({ pantalla: m.pantalla, total: m.celdas.reduce((s, c) => s + c.n, 0) }))
+    .map((m) => ({ pantalla: m.pantalla, total: m.celdas.reduce((s, c) => s + c.n, 0) + (m.abajo ?? 0) }))
     .sort((a, b) => b.total - a.total), [datos]);
   const [elegida, setElegida] = useState<string | null>(null);
   const [hover, setHover] = useState<{ x: number; y: number; n: number; r: number } | null>(null);
+  const [proporcion, setProporcion] = useState<number | null>(null);
   const pantalla = elegida && opciones.some((o) => o.pantalla === elegida) ? elegida : opciones[0]?.pantalla ?? null;
-  const celdas = datos.mapaToques.find((m) => m.pantalla === pantalla)?.celdas ?? [];
+  const mapa = datos.mapaToques.find((m) => m.pantalla === pantalla);
+  const celdas = mapa?.celdas ?? [];
+  const abajo = mapa?.abajo ?? 0;
   const max = Math.max(1, ...celdas.map((c) => c.n));
   const objetivos = datos.objetivos.filter((o) => o.pantalla === pantalla).slice(0, 12);
   const totalPantalla = opciones.find((o) => o.pantalla === pantalla)?.total ?? 0;
-  const ANCHO = 230;
-  const ALTO = Math.round(ANCHO * 2.05);
-  const cw = ANCHO / datos.rejilla.x;
-  const ch = ALTO / datos.rejilla.y;
+  const ALTO = Math.round(ANCHO_MAPA * (proporcion ?? 2.1));
+  const radio = (ANCHO_MAPA / datos.rejilla.x) * 1.3;
 
   return (
     <Card
       titulo={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>Mapa de toques <Ayuda texto={AYUDA_MAPA} /></span>}
-      subtitulo="Dónde tocan en cada pantalla y qué es lo que más tocan"
+      subtitulo="Dónde tocan en cada pantalla, sobre la pantalla real, y qué es lo que más tocan"
       style={{ marginBottom: 16 }}
       accion={opciones.length > 0 && (
-        <select className="fsel" value={pantalla ?? ''} onChange={(e) => setElegida(e.target.value)} aria-label="Pantalla">
+        <select className="fsel" value={pantalla ?? ''} onChange={(e) => { setElegida(e.target.value); setHover(null); }} aria-label="Pantalla">
           {opciones.map((o) => <option key={o.pantalla} value={o.pantalla}>{o.pantalla} · {o.total} toques</option>)}
         </select>
       )}
     >
       {!pantalla ? <div style={{ color: '#9aa39c', fontSize: 12.5 }}>Sin toques en este periodo.</div> : (
         <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          <div style={{ flex: 'none' }}>
-            <div style={{ position: 'relative', width: ANCHO + 16, padding: 8, borderRadius: 26, background: '#263238' }}>
-              <svg width={ANCHO} height={ALTO} style={{ display: 'block', borderRadius: 18, background: '#f6f9f7' }} onMouseLeave={() => setHover(null)} role="img" aria-label={`Mapa de toques de ${pantalla}`}>
-                {celdas.map((c) => {
-                  const f = c.n / max;
-                  return (
-                    <rect
-                      key={`${c.x},${c.y}`}
-                      x={c.x * ANCHO - cw / 2 + 1} y={c.y * ALTO - ch / 2 + 1} width={cw - 2} height={ch - 2} rx={2}
-                      fill={VERDE} fillOpacity={0.12 + 0.88 * f}
-                      stroke={c.r ? ROJO : 'none'} strokeWidth={c.r ? 1.5 : 0}
-                      onMouseEnter={() => setHover(c)}
+          <div style={{ flex: 'none', width: ANCHO_MAPA + 16 }}>
+            <div style={{ position: 'relative', padding: 8, borderRadius: 26, background: '#263238' }}>
+              <div style={{ position: 'relative', width: ANCHO_MAPA, height: ALTO, borderRadius: 18, overflow: 'hidden', background: '#f6f9f7' }}>
+                <FondoPantalla key={pantalla} pantalla={pantalla} ancho={ANCHO_MAPA} onProporcion={setProporcion} />
+                <svg width={ANCHO_MAPA} height={ALTO} style={{ position: 'absolute', inset: 0 }} onMouseLeave={() => setHover(null)} role="img" aria-label={`Mapa de toques de ${pantalla}`}>
+                  <defs><filter id="difuso" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation={radio / 2.2} /></filter></defs>
+                  <g filter="url(#difuso)">
+                    {celdas.map((c) => (
+                      <circle key={`h${c.x},${c.y}`} cx={c.x * ANCHO_MAPA} cy={c.y * ALTO} r={radio} fill={CALOR} fillOpacity={0.25 + 0.6 * (c.n / max)} />
+                    ))}
+                  </g>
+                  {celdas.map((c) => (
+                    <circle
+                      key={`p${c.x},${c.y}`} cx={c.x * ANCHO_MAPA} cy={c.y * ALTO} r={Math.max(4, radio * 0.55)}
+                      fill="transparent" stroke={c.r ? '#7a1d0a' : 'none'} strokeWidth={c.r ? 2 : 0} strokeDasharray={c.r ? '3 2' : undefined}
+                      onMouseEnter={() => setHover(c)} style={{ cursor: 'default' }}
                     />
-                  );
-                })}
-              </svg>
-              {hover && (
-                <div style={{ position: 'absolute', left: 8 + hover.x * ANCHO, top: 8 + hover.y * ALTO - 10, transform: 'translate(-50%, -100%)', background: '#1f2a24', color: '#fff', borderRadius: 8, padding: '6px 9px', whiteSpace: 'nowrap', pointerEvents: 'none', fontSize: 12.5, zIndex: 5 }}>
-                  <b>{hover.n}</b> {hover.n === 1 ? 'toque' : 'toques'}{hover.r ? <span style={{ color: '#ffb4a8' }}> · {hover.r} de frustración</span> : null}
-                </div>
-              )}
+                  ))}
+                </svg>
+                {hover && (
+                  <div style={{ position: 'absolute', left: hover.x * ANCHO_MAPA, top: hover.y * ALTO - 12, transform: 'translate(-50%, -100%)', background: '#1f2a24', color: '#fff', borderRadius: 8, padding: '6px 9px', whiteSpace: 'nowrap', pointerEvents: 'none', fontSize: 12.5, zIndex: 5 }}>
+                    <b>{hover.n}</b> {hover.n === 1 ? 'toque' : 'toques'}{hover.r ? <span style={{ color: '#ffb4a8' }}> · {hover.r} de frustración</span> : null}
+                  </div>
+                )}
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 11.5, color: '#6f7d75' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 11.5, color: '#6f7d75', flexWrap: 'wrap' }}>
               <span>Menos</span>
-              <span style={{ width: 80, height: 8, borderRadius: 2, background: `linear-gradient(90deg, rgba(21,115,71,.12), ${VERDE})` }} />
-              <span>Más</span>
-              <span style={{ width: 10, height: 10, border: `1.5px solid ${ROJO}`, borderRadius: 2, marginLeft: 10 }} />
+              <span style={{ width: 70, height: 8, borderRadius: 2, background: `linear-gradient(90deg, rgba(217,72,15,.25), ${CALOR})` }} />
+              <span>Más toques</span>
+              <span style={{ width: 11, height: 11, border: '2px dashed #7a1d0a', borderRadius: '50%', marginLeft: 8 }} />
               <span>Frustración</span>
             </div>
+            {abajo > 0 && (
+              <div style={{ marginTop: 6, fontSize: 12, color: '#5a665f', lineHeight: 1.45 }}>
+                + {abajo} {abajo === 1 ? 'toque' : 'toques'} más abajo, después de desplazar la pantalla (están en la tabla).
+              </div>
+            )}
           </div>
           <div style={{ flex: 1, minWidth: 300 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#263238', marginBottom: 8 }}>Lo más tocado en {pantalla} <span style={{ fontWeight: 400, color: '#8a978f' }}>· {totalPantalla} toques</span></div>

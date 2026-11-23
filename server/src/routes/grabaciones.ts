@@ -13,24 +13,31 @@ import { SESION_ID } from './interacciones.js';
 // reproduce. Los campos de texto van enmascarados y las fotos/mapas
 // bloqueados desde la app.
 //
-// Flujo: la app junta la grabación en fragmentos de ~30 s, los comprime
-// (gzip) y los sube directo a Storage en grabaciones/{uid}/{sesionId}/ (las
-// reglas solo dejan crear en la carpeta del propio uid y nadie puede leer
-// desde el cliente). Después avisa aquí cada fragmento para indexarlo en
-// `grabaciones/{sesionId}`. El admin baja los fragmentos a través de esta
-// API (Admin SDK), nunca con un enlace público.
+// Flujo: la app junta la grabación en fragmentos de ~1 min (cada uno empieza
+// con la pantalla completa, así que se puede reproducir solo aunque falte
+// otro), los comprime (gzip) y los manda aquí. Cada fragmento se guarda en
+// Firestore, en `grabaciones/{sesionId}/fragmentos/{seq}`, y la sesión se
+// indexa en `grabaciones/{sesionId}`. El admin los baja por esta API.
+//
+// Antes los fragmentos iban a Firebase Storage, pero la cuenta de servicio
+// de la función no tenía permiso de leer el bucket y ninguna grabación se
+// podía ver. Firestore usa los permisos que ya usa todo el backend. Las
+// grabaciones viejas (con `path` en Storage) se siguen intentando leer.
 export const grabacionesRouter = Router();
 
 // Los fragmentos de más de un mes se borran solos (ver limpiarAnalitica).
 export const DIAS_GRABACIONES = 365;
 export const DIAS_INTERACCIONES = 365;
 const MAX_FRAGMENTOS = 1500;
-const MAX_BYTES_FRAGMENTO = 3 * 1024 * 1024;
+// Un documento de Firestore admite hasta 1 MiB.
+const MAX_BYTES_FRAGMENTO = 900 * 1024;
 const MAX_LISTA = 300;
 const MAX_DIAS_GRABAR = 14;
 
 export interface Fragmento {
-  seq: number; path: string; inicio: number; fin: number; bytes: number; eventos: number;
+  // null: el contenido está en Firestore (fragmentos/{seq}); texto: archivo
+  // viejo en Storage.
+  seq: number; path: string | null; inicio: number; fin: number; bytes: number; eventos: number;
   toques: number; rabia: number; muertos: number; errores: number; pantallas: string[];
 }
 
@@ -57,28 +64,29 @@ const entero = (v: unknown, min: number, max: number): number | null => {
 // La app avisa que subió un fragmento.
 grabacionesRouter.post('/fragmento', async (req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
-  const { vendedorId, sesionId, path } = b;
-  if (typeof vendedorId !== 'string' || !vendedorId || typeof sesionId !== 'string' || !SESION_ID.test(sesionId) || typeof path !== 'string') {
-    return res.status(400).json({ error: 'datos_invalidos', message: 'vendedorId, sesionId y path son requeridos' });
+  const { vendedorId, sesionId, datos } = b;
+  if (typeof vendedorId !== 'string' || !vendedorId || typeof sesionId !== 'string' || !SESION_ID.test(sesionId) || typeof datos !== 'string') {
+    return res.status(400).json({ error: 'datos_invalidos', message: 'vendedorId, sesionId y datos son requeridos' });
   }
   const uid = req.user!.uid;
-  // Solo archivos de la carpeta de esta sesión, subidos con esta misma cuenta.
-  const prefijo = `grabaciones/${uid}/${sesionId}/`;
-  if (!path.startsWith(prefijo) || !/^[A-Za-z0-9._-]+$/.test(path.slice(prefijo.length))) {
-    return res.status(400).json({ error: 'path_invalido', message: 'El fragmento no está en la carpeta de esta sesión.' });
+  const contenido = Buffer.from(datos, 'base64');
+  // Tiene que ser gzip (empieza con 1f 8b) y caber en un documento.
+  if (contenido.length < 18 || contenido[0] !== 0x1f || contenido[1] !== 0x8b) {
+    return res.status(400).json({ error: 'datos_invalidos', message: 'El fragmento no viene comprimido.' });
   }
+  if (contenido.length > MAX_BYTES_FRAGMENTO) return res.status(413).json({ error: 'fragmento_grande', message: 'El fragmento es demasiado grande.' });
   const ahora = Date.now();
   const seq = entero(b.seq, 0, MAX_FRAGMENTOS - 1);
   const inicio = entero(b.inicio, ahora - 7 * 86_400_000, ahora + 300_000);
   const fin = entero(b.fin, ahora - 7 * 86_400_000, ahora + 300_000);
-  const bytes = entero(b.bytes, 1, MAX_BYTES_FRAGMENTO);
-  if (seq == null || inicio == null || fin == null || bytes == null || fin < inicio) {
+  const bytes = contenido.length;
+  if (seq == null || inicio == null || fin == null || fin < inicio) {
     return res.status(400).json({ error: 'datos_invalidos', message: 'Fragmento con datos inválidos.' });
   }
   if (!(await puedeActuarComoVendedor(req.user!.email, vendedorId))) return vendedorAjeno(res);
 
   const frag: Fragmento = {
-    seq, path, inicio, fin, bytes,
+    seq, path: null, inicio, fin, bytes,
     eventos: entero(b.eventos, 0, 1_000_000) ?? 0,
     toques: entero(b.toques, 0, 100_000) ?? 0,
     rabia: entero(b.rabia, 0, 100_000) ?? 0,
@@ -111,6 +119,7 @@ grabacionesRouter.post('/fragmento', async (req, res) => {
       actualizadoEn: Timestamp.now(),
     };
     tx.set(ref, data);
+    tx.set(ref.collection('fragmentos').doc(String(seq)), { datos: contenido, creado: Timestamp.now() });
     return 'ok' as const;
   });
   if (resultado === 'ajena') return res.status(403).json({ error: 'sesion_ajena', message: 'Esta sesión es de otra cuenta.' });
@@ -147,6 +156,23 @@ grabacionesRouter.get('/', requireAdmin, async (req, res) => {
   res.json({ items: grabs.map((x) => shapeLista(x.id, x.g, nombres)), truncado: docs.length >= MAX_LISTA });
 });
 
+// Solo admin: un pedazo de grabación reciente que pase por `pantalla`, para
+// usarlo de fondo en el mapa de toques (la pantalla tal como la ve el
+// vendedor). null si todavía no hay ninguno.
+grabacionesRouter.get('/muestra', requireAdmin, async (req, res) => {
+  const pantalla = typeof req.query.pantalla === 'string' ? req.query.pantalla.slice(0, 40) : '';
+  if (!pantalla) return res.status(400).json({ error: 'pantalla_requerida' });
+  const snap = await db.collection('grabaciones').where('pantallas', 'array-contains', pantalla)
+    .orderBy('createdAt', 'desc').limit(10).get();
+  for (const d of snap.docs) {
+    const g = d.data() as GrabacionDoc;
+    // Solo pedazos guardados en Firestore (los viejos de Storage no se leen).
+    const frag = g.fragmentos.find((f) => !f.path && f.pantallas.includes(pantalla));
+    if (frag) return res.json({ sesionId: d.id, seq: frag.seq });
+  }
+  res.json(null);
+});
+
 // Solo admin: el detalle de una sesión (sus fragmentos, para el reproductor).
 grabacionesRouter.get('/:sesionId', requireAdmin, async (req, res) => {
   const snap = await db.collection('grabaciones').doc(req.params.sesionId).get();
@@ -165,15 +191,29 @@ grabacionesRouter.get('/:sesionId/fragmentos/:seq', requireAdmin, async (req, re
   const snap = await db.collection('grabaciones').doc(req.params.sesionId).get();
   const g = snap.data() as GrabacionDoc | undefined;
   const frag = g?.fragmentos.find((f) => f.seq === Number(req.params.seq));
-  if (!frag) return res.status(404).json({ error: 'not_found' });
-  try {
-    const [contenido] = await bucket().file(frag.path).download();
+  if (!frag) return res.status(404).json({ error: 'not_found', message: 'Este pedazo no está en la grabación.' });
+  const enviar = (contenido: Buffer) => {
     res.set('Content-Type', 'application/octet-stream');
     res.set('Cache-Control', 'private, max-age=3600');
     res.send(contenido);
+  };
+  if (!frag.path) {
+    const d = await snap.ref.collection('fragmentos').doc(String(frag.seq)).get();
+    const datos = d.get('datos') as Buffer | Uint8Array | undefined;
+    if (!datos) return res.status(404).json({ error: 'fragmento_no_disponible', message: 'Este pedazo de la grabación no se guardó.' });
+    return enviar(Buffer.from(datos));
+  }
+  // Grabaciones viejas, en Storage.
+  try {
+    const [contenido] = await bucket().file(frag.path).download();
+    enviar(contenido);
   } catch (err) {
-    console.warn(`No se pudo leer el fragmento ${frag.path}:`, (err as Error).message);
-    res.status(404).json({ error: 'fragmento_no_disponible', message: 'Este pedazo de la grabación ya no está disponible.' });
+    const e = err as { code?: number | string; message?: string };
+    console.error(`No se pudo leer el fragmento ${frag.path} del bucket ${bucket().name}:`, e.code, e.message);
+    res.status(502).json({
+      error: 'storage_inaccesible',
+      message: `Esta grabación es de antes del cambio y su archivo no se pudo leer de Storage (${e.code ?? 'error'}: ${(e.message ?? '').slice(0, 160)}).`,
+    });
   }
 });
 
@@ -181,7 +221,13 @@ grabacionesRouter.get('/:sesionId/fragmentos/:seq', requireAdmin, async (req, re
 export async function borrarGrabacion(sesionId: string, g?: GrabacionDoc): Promise<void> {
   const ref = db.collection('grabaciones').doc(sesionId);
   const datos = g ?? ((await ref.get()).data() as GrabacionDoc | undefined);
-  if (datos) {
+  const frags = await ref.collection('fragmentos').select().get();
+  for (let i = 0; i < frags.docs.length; i += 400) {
+    const batch = db.batch();
+    frags.docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
+  if (datos?.fragmentos.some((f) => f.path)) {
     try {
       await bucket().deleteFiles({ prefix: `grabaciones/${datos.uid}/${sesionId}/` });
     } catch (err) {

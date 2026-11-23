@@ -1,9 +1,7 @@
-import { ref, uploadBytes } from 'firebase/storage';
-import { auth, storage } from '@aviva/ui';
 import { api, ApiError, type Vendedor } from './api';
 import { cargarConfig, enCache } from './configApp';
 import { fechaLocal } from './fechas';
-import { nombreDispositivo, nuevoId, onEvento, onNuevaSesion, pantallaActual, sesionActual, type Evento } from './analitica';
+import { nombreDispositivo, onEvento, onNuevaSesion, pantallaActual, sesionActual, type Evento } from './analitica';
 
 // Grabación de sesiones (como Microsoft Clarity, pero dentro de la app): el
 // admin la reproduce en "Uso de la app → Grabaciones". No es video: rrweb
@@ -16,17 +14,20 @@ import { nombreDispositivo, nuevoId, onEvento, onNuevaSesion, pantallaActual, se
 //
 // Qué sesiones se graban: las de los vendedores que el admin pidió grabar
 // (vendedor.grabarHasta) y un porcentaje al azar del resto (config). La
-// grabación se corta en fragmentos de 30 s, se comprime y se guarda en la
-// tablet (IndexedDB); se sube cuando hay señal y no está en ahorro de datos.
+// grabación se corta en fragmentos de 1 min, se comprime y se guarda en la
+// tablet (IndexedDB); se manda al servidor cuando hay señal y no está en
+// ahorro de datos. Cada fragmento empieza con la pantalla completa, así que
+// se puede reproducir aunque se haya perdido el anterior.
 
 type RrEvento = { timestamp: number; type: number };
 type Record = typeof import('@rrweb/record').record;
 
 const DB_NAME = 'aviva-grabacion';
 const STORE = 'fragmentos';
-const CORTAR_CADA_MS = 30 * 1000;
+const CORTAR_CADA_MS = 60 * 1000;
 const MAX_EVENTOS_FRAGMENTO = 3000;
-const MAX_BYTES_FRAGMENTO = 2.8 * 1024 * 1024;
+// El servidor lo guarda en un documento de Firestore (máx. 1 MiB).
+const MAX_BYTES_FRAGMENTO = 880 * 1024;
 // Tope por sesión y de lo que puede esperar en la tablet sin subirse.
 const MAX_BYTES_SESION = 20 * 1024 * 1024;
 const MAX_BYTES_COLA = 30 * 1024 * 1024;
@@ -36,8 +37,6 @@ interface FragmentoLocal {
   vendedorId: string; sesionId: string; seq: number; inicio: number; fin: number; eventos: number;
   toques: number; rabia: number; muertos: number; errores: number; pantallas: string[];
   motivo: 'pedida' | 'muestreo'; dispositivo: string; bytes: number; blob: Blob;
-  // Ya subido a Storage (falta avisar al servidor).
-  path?: string;
 }
 
 // ——— IndexedDB ———
@@ -121,17 +120,22 @@ function quiereGrabar(v: Vendedor, porcentaje: number): 'pedida' | 'muestreo' | 
 
 // Cierra lo grabado hasta ahora en un fragmento y lo deja en la cola. Lo
 // que se corta se toma al momento (antes de comprimir): así una sesión nueva
-// que empieza justo después no se mezcla con esta.
+// que empieza justo después no se mezcla con esta. El siguiente fragmento
+// arranca con una "foto" completa de la pantalla, para que cada uno se pueda
+// reproducir solo.
 function cortarFragmento(): Promise<void> {
   if (!eventos.length) return cortando;
   const lote = eventos;
   eventos = [];
+  if (activo) { try { record?.takeFullSnapshot(true); } catch { /* sin grabar */ } }
   const datos = {
     vendedorId, sesionId: sesionGrabada, seq: seq++, inicio: lote[0].timestamp, fin: lote[lote.length - 1].timestamp, eventos: lote.length,
     toques: stats.toques, rabia: stats.rabia, muertos: stats.muertos, errores: stats.errores, pantallas: [...stats.pantallas],
     motivo, dispositivo: nombreDispositivo(),
   };
   reiniciarStats();
+  // El siguiente fragmento empieza en la pantalla donde se quedó éste.
+  stats.pantallas.add(pantallaActual());
   cortando = cortando.then(async () => {
     try {
       const blob = await comprimir(sinTelefonos(JSON.stringify(lote)));
@@ -153,29 +157,28 @@ function cortarFragmento(): Promise<void> {
 // ——— Subida ———
 
 let subiendo = false;
+
+function aBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1] ?? '');
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(blob);
+  });
+}
+
 export async function subirPendientes(): Promise<void> {
   if (subiendo || !navigator.onLine || ahorroDeDatos() || !soportado()) return;
-  const uid = auth.currentUser?.uid;
-  if (!uid) return;
   subiendo = true;
   try {
     for (const { key, f } of await listarCola()) {
       try {
-        if (!f.path) {
-          const path = `grabaciones/${uid}/${f.sesionId}/${String(f.seq).padStart(5, '0')}-${nuevoId().slice(0, 8)}.gz`;
-          await uploadBytes(ref(storage, path), f.blob, { contentType: 'application/gzip' });
-          f.path = path;
-          await tx('readwrite', (s) => s.put(f, key));
-        }
-        const { blob: _blob, ...meta } = f;
-        await api.registrarFragmento(meta);
+        const { blob, ...meta } = f as FragmentoLocal & { path?: string };
+        delete meta.path;
+        await api.registrarFragmento({ ...meta, datos: await aBase64(blob) });
       } catch (err) {
-        const code = (err as { code?: string }).code;
-        // Rechazos que nunca van a pasar (reglas de Storage, datos que el
-        // servidor no acepta, otra cuenta): se tira el fragmento.
-        const definitivo = code === 'storage/unauthorized' || code === 'storage/invalid-argument'
-          || (err instanceof ApiError && err.status !== 401 && err.status < 500);
-        if (!definitivo) return;
+        // 4xx (menos 401): el servidor nunca lo va a aceptar, se tira.
+        if (!(err instanceof ApiError && err.status !== 401 && err.status < 500)) return;
       }
       await tx('readwrite', (s) => s.delete(key));
     }
@@ -225,9 +228,6 @@ function grabarSesion() {
     collectFonts: false,
     inlineImages: false,
     sampling: { mousemove: false, mouseInteraction: true, scroll: 200, media: 800, input: 'last' },
-    // Una "foto" completa de la pantalla cada 5 min: si se pierde un
-    // pedazo, el resto se sigue pudiendo reproducir.
-    checkoutEveryNms: 5 * 60 * 1000,
   });
 }
 

@@ -426,7 +426,7 @@ function Hoja({ titulo, subtitulo, onCerrar, children }: { titulo: string; subti
 function OpcionHoja({ activa, onClick, titulo, detalle }: { activa: boolean; onClick: () => void; titulo: string; detalle?: string }) {
   return (
     <button
-      className="tap" onClick={onClick} aria-pressed={activa}
+      className="tap" onClick={onClick} aria-pressed={activa} data-track="Opción de la lista"
       style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%', borderRadius: 14, padding: '12px 14px', background: activa ? '#fff' : '#fbfdfb', border: `2px solid ${activa ? 'var(--aviva-green-700)' : '#d7e6dc'}` }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -598,7 +598,7 @@ function SiguienteParada({ parada }: { parada: Parada }) {
   const distancia = textoDistancia(parada.distanciaM);
   const hora = horaCita(parada);
   return (
-    <section data-tour="siguiente" className="aparecer" style={{ background: 'var(--aviva-green-700)', borderRadius: 22, padding: '18px 20px 20px', color: '#fff' }}>
+    <section data-tour="siguiente" data-zona="Siguiente parada" className="aparecer" style={{ background: 'var(--aviva-green-700)', borderRadius: 22, padding: '18px 20px 20px', color: '#fff' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
         <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: '1px', color: '#9fd8b8' }}>
           {parada.atrasada ? 'ATRASADA · SIGUIENTE PARADA' : hora ? `CITA A LAS ${textoHora(hora).toUpperCase()}` : 'SIGUIENTE PARADA'}

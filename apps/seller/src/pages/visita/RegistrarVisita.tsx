@@ -305,7 +305,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
         )}
 
         {!nueva && prospecto && (
-          <section className="card" style={{ padding: 16 }}>
+          <section className="card" data-zona="Datos del negocio" style={{ padding: 16 }}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 15, fontWeight: 600, color: '#3a4a41', lineHeight: 1.45 }}>
               <span style={{ color: '#15915c', flex: 'none', marginTop: 1 }}><IconPin size={20} /></span>
               <span>{[prospecto.giro, prospecto.direccion].filter(Boolean).join(' · ')}</span>
@@ -343,7 +343,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
         {!nueva && antecedentes && antecedentes.length > 0 && <VisitadoAntes antecedentes={antecedentes} />}
 
         {nueva && (
-          <section className="card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <section className="card" data-zona="Datos del negocio nuevo" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div ref={refs.nombre}>
               <Etiqueta falta={intento && faltaNombre} aviso="escribe el nombre">Nombre del negocio</Etiqueta>
               <input className="field" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Tortillería La Espiga" style={intento && faltaNombre ? { borderColor: '#e29a90' } : undefined} />
@@ -368,7 +368,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
           </section>
         )}
 
-        <section ref={refs.resultado} className="card" style={{ padding: 18 }}>
+        <section ref={refs.resultado} className="card" data-zona="Cómo te fue" style={{ padding: 18 }}>
           <Etiqueta falta={intento && faltaResultado} aviso="elige una opción">¿Cómo te fue?</Etiqueta>
           <div className="resultados-grid">
             {RESULTADOS_UI.map((r) => {
@@ -417,7 +417,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
           )}
         </section>
 
-        <section ref={refs.foto} className="card" style={{ padding: 18 }}>
+        <section ref={refs.foto} className="card" data-zona="Fotos" style={{ padding: 18 }}>
           <Etiqueta falta={intento && faltaFoto} aviso="toma al menos una">
             Foto de evidencia {fotos.length > 0 && <span style={{ color: '#8a978f', fontWeight: 600 }}>({fotos.length}/{MAX_FOTOS})</span>}
           </Etiqueta>
@@ -459,7 +459,7 @@ export function RegistrarVisita({ nueva = false, practica = false }: { nueva?: b
           )}
         </section>
 
-        <section className="card" style={{ padding: 18 }}>
+        <section className="card" data-zona="Notas" style={{ padding: 18 }}>
           <Etiqueta>Notas <span style={{ fontWeight: 600, color: '#8a978f' }}>(opcional)</span></Etiqueta>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
             {NOTAS_RAPIDAS.map((n) => (
