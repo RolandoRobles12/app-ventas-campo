@@ -34,9 +34,9 @@ const diapositivas = (nombre: string): Diapositiva[] => [
     titulo: 'Registra cada visita',
     texto: 'Cuando estés en el negocio, toca "Registrar visita". Son tres pasos:',
     puntos: [
-      'Elige cómo te fue. Si hizo solicitud, elige cuál de tus solicitudes es (si todavía no aparece, la ligas después)',
+      'Elige cómo te fue. Si hizo solicitud, elige cuál de tus solicitudes es (si todavía no aparece o te equivocaste de resultado, lo arreglas después en "Mi ruta")',
       'Toma al menos una foto del negocio: es tu evidencia',
-      'Regístrala estando en el negocio: si estás lejos, la app te pide acercarte',
+      'Regístrala estando en el negocio: si estás lejos, la app te pide acercarte. Si el negocio en realidad está en otro lugar, dilo con el botón "El negocio está en otro lugar"',
     ],
   },
   {
