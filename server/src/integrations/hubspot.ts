@@ -36,17 +36,37 @@ export function hubspotConfigurado(): boolean {
   return !!process.env.HUBSPOT_TOKEN;
 }
 
-async function hsFetch<T>(path: string, init?: RequestInit, intentos = 4): Promise<T> {
+// La búsqueda (/search) de HubSpot admite pocas peticiones por segundo por
+// cuenta (y la cuenta la comparten otras integraciones). Todas las
+// búsquedas de este servidor pasan por un turno: se separan al menos
+// ESPACIO_BUSQUEDA_MS aunque se pidan a la vez (varios meses, varias
+// páginas, la app del vendedor ligando solicitudes).
+const ESPACIO_BUSQUEDA_MS = 350;
+let siguienteBusqueda = 0;
+const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function turnoBusqueda(): Promise<void> {
+  const ahora = Date.now();
+  const t = Math.max(ahora, siguienteBusqueda);
+  siguienteBusqueda = t + ESPACIO_BUSQUEDA_MS;
+  if (t > ahora) await dormir(t - ahora);
+}
+
+async function hsFetch<T>(path: string, init?: RequestInit, intentos = 6): Promise<T> {
+  const esBusqueda = path.endsWith('/search');
   for (let i = 0; i < intentos; i++) {
+    if (esBusqueda) await turnoBusqueda();
     const res = await fetch(`${HUBSPOT_BASE}${path}`, {
       ...init,
       headers: { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}`, 'Content-Type': 'application/json', ...(init?.headers || {}) },
     });
-    // La búsqueda tiene un límite de peticiones por segundo más estricto que
-    // el resto del API: un 429 ocasional se reintenta.
+    // Límite por segundo (429) o falla temporal: se espera cada vez más, con
+    // un poco de azar para que los reintentos no vuelvan a llegar juntos.
     if ((res.status === 429 || res.status >= 500) && i < intentos - 1) {
-      const espera = res.status === 429 ? (Number(res.headers.get('Retry-After')) || 1) * 1000 : 2 ** i * 1000;
-      await new Promise((r) => setTimeout(r, espera));
+      const retryAfter = Number(res.headers.get('Retry-After'));
+      const espera = (retryAfter > 0 ? retryAfter * 1000 : Math.min(1000 * 2 ** i, 8000)) + Math.random() * 500;
+      // Un 429 frena también las demás búsquedas en curso, no solo esta.
+      if (res.status === 429 && esBusqueda) siguienteBusqueda = Math.max(siguienteBusqueda, Date.now() + espera);
+      await dormir(espera);
       continue;
     }
     if (!res.ok) {
@@ -167,9 +187,9 @@ async function buscarDeals(ownerIds: string[] | null, desde: number, hasta: numb
 // vistas y filtros salen de ahí (el filtro por owner y por fecha se hace en
 // memoria).
 const dealsPorMes = new Map<number, { en: number; deals: Promise<DealCampo[]> }>();
-// La búsqueda de HubSpot admite pocas peticiones por segundo: los meses se
-// piden de pocos en pocos.
-const MESES_EN_PARALELO = 3;
+// Los meses se piden de dos en dos; de todos modos cada búsqueda espera su
+// turno (turnoBusqueda), así que esto no rebasa el límite por segundo.
+const MESES_EN_PARALELO = 2;
 
 const inicioMesUtc = (t: number) => { const d = new Date(t); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1); };
 const mesSiguienteUtc = (inicio: number) => { const d = new Date(inicio); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1); };
