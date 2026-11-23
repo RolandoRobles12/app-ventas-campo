@@ -65,12 +65,8 @@ const diapositivas = (nombre: string): Diapositiva[] => [
   {
     Icon: IconInfo, color: '#1d5fae', fondo: '#e2ecfb',
     titulo: 'Así mejoramos la app',
-    texto: 'La app registra cómo la usas para encontrar lo que se te complica y arreglarlo.',
-    puntos: [
-      'Qué pantallas abres, qué tocas y si algo falla; algunas veces, una grabación de la pantalla de la app',
-      'Nunca lo que escribes, tus fotos, la cámara, el micrófono ni nada fuera de la app',
-      'El detalle está en "Qué registra la app", tocando tus iniciales',
-    ],
+    texto: 'Registramos cómo usas la app, incluso grabando la pantalla, para mejorarla para ti.',
+    puntos: ['Nunca lo que escribes, tus fotos ni nada fuera de la app'],
   },
 ];
 

@@ -7,7 +7,7 @@ import { usePantallaModal } from '../analitica';
 export const NOVEDADES_VERSION = '2026-11b';
 
 const NOVEDADES = [
-  { Icon: IconInfo, color: '#1d5fae', fondo: '#e2ecfb', titulo: 'Mejoramos la app con tu uso', texto: 'Para encontrar lo que se te complica y arreglarlo, la app registra qué pantallas abres, qué tocas y si algo falla, y algunas veces graba la pantalla de la app. Nunca lo que escribes, tus fotos, la cámara ni el micrófono. Detalle en "Qué registra la app", tocando tus iniciales.' },
+  { Icon: IconInfo, color: '#1d5fae', fondo: '#e2ecfb', titulo: 'Mejoramos la app con tu uso', texto: 'Registramos cómo usas la app, incluso grabando la pantalla, para mejorarla para ti. Nunca lo que escribes ni tus fotos.' },
   { Icon: IconPin, color: '#8f3025', fondo: '#fdecea', titulo: 'Registra estando en el negocio', texto: 'Si estás lejos, la app no deja guardar la visita y te dice a cuántos metros estás. Si el negocio en realidad está en otro lugar, dilo con el botón "El negocio está en otro lugar".' },
   { Icon: IconDocumento, color: '#15703f', fondo: '#dcf1e5', titulo: '"Hizo solicitud": elige cuál es', texto: 'Te mostramos tus solicitudes de hoy para que elijas la de ese negocio. Si todavía no aparece, guarda la visita: te la recordamos en "Mi ruta" para ligarla después. Si te equivocaste de resultado, también lo corriges desde ahí.' },
   { Icon: IconNavegar, color: '#1d5fae', fondo: '#e2ecfb', titulo: '"Cómo llegar" sin salir de la app', texto: 'Te marcamos el camino en el mapa, a pie o en auto, y te avisamos cuando llegaste.' },
