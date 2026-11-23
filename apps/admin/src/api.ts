@@ -221,7 +221,10 @@ export interface GrabacionDetalle extends Grabacion {
 async function reqFragmento(sesionId: string, seq: number): Promise<unknown[]> {
   const token = await getIdToken();
   const res = await fetch(`/api/grabaciones/${encodeURIComponent(sesionId)}/fragmentos/${seq}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-  if (!res.ok) throw new Error(`Error ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({} as { message?: string }));
+    throw new Error(body.message || `Error ${res.status}`);
+  }
   const bytes = new Uint8Array(await res.arrayBuffer());
   // Si algo en el camino ya lo descomprimió, llega como JSON directo.
   const esGzip = bytes[0] === 0x1f && bytes[1] === 0x8b;

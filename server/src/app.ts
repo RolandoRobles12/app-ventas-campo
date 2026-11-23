@@ -34,7 +34,9 @@ export const app = express();
 const origins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
 
 app.use(cors({ origin: origins.length ? origins : true }));
-app.use(express.json());
+// 2 MB: los fragmentos de grabación de sesiones (gzip en base64) llegan en
+// el body (ver routes/grabaciones.ts); el resto de las peticiones son chicas.
+app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 

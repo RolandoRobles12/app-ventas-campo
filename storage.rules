@@ -26,20 +26,5 @@ service firebase.storage {
         && request.resource.size < 20 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
-
-    // Grabaciones de sesiones de la app del vendedor (ver
-    // server/src/routes/grabaciones.ts). Cada cuenta solo puede CREAR
-    // fragmentos en su propia carpeta (su uid de Firebase Auth), sin
-    // sobrescribir ni borrar. Nadie las lee desde el navegador: el admin las
-    // ve a través de la API, que las baja con el Admin SDK.
-    match /grabaciones/{uid}/{sesionId}/{archivo} {
-      allow read: if false;
-      allow create: if request.auth != null
-        && request.auth.uid == uid
-        && request.auth.token.email != null
-        && request.auth.token.email.lower().matches('.*@avivacredito[.]com$')
-        && request.resource.size < 3 * 1024 * 1024
-        && request.resource.contentType == 'application/gzip';
-    }
   }
 }

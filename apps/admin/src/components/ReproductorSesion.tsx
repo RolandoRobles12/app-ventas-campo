@@ -65,11 +65,13 @@ export function ReproductorSesion({ sesionId, onClose }: { sesionId: string; onC
         setProgreso({ hechos: 0, total: det.lista.length });
         const eventos: EventoRr[] = [];
         let perdidos = 0;
+        let primerError = '';
         for (let i = 0; i < det.lista.length; i++) {
           try {
             eventos.push(...((await api.fragmentoGrabacion(sesionId, det.lista[i].seq)) as EventoRr[]));
-          } catch {
+          } catch (e) {
             perdidos++;
+            if (!primerError) primerError = (e as Error).message;
           }
           if (cancelado) return;
           setProgreso({ hechos: i + 1, total: det.lista.length });
@@ -77,8 +79,12 @@ export function ReproductorSesion({ sesionId, onClose }: { sesionId: string; onC
         setFaltantes(perdidos);
         eventos.sort((a, b) => a.timestamp - b.timestamp);
         const inicio = eventos.findIndex((e) => e.type === TIPO_FULL_SNAPSHOT);
+        if (perdidos && perdidos === det.lista.length) {
+          setError(`No se pudo bajar ningún pedazo de esta grabación. ${primerError}`);
+          return;
+        }
         if (inicio < 0 || eventos.length < 2) {
-          setError('Esta grabación está incompleta: falta el inicio de la pantalla, así que no se puede reproducir.');
+          setError('Los pedazos que sí se bajaron no traen la pantalla completa, así que no se pueden reproducir.');
           return;
         }
         // El reproductor necesita empezar con la descripción de la pantalla
@@ -168,7 +174,7 @@ export function ReproductorSesion({ sesionId, onClose }: { sesionId: string; onC
           </div>
           <aside style={{ width: 300, flex: 'none', borderLeft: '1px solid #eef2ee', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ padding: '14px 16px 8px', fontSize: 13, fontWeight: 600, color: '#263238' }}>Momentos <span style={{ fontWeight: 400, color: '#8a978f' }}>· toca uno para ir ahí</span></div>
-            {faltantes > 0 && <div style={{ margin: '0 16px 8px', fontSize: 12, color: '#94500f' }}>Faltan {faltantes} pedazos de la grabación (no se subieron): puede haber saltos.</div>}
+            {faltantes > 0 && !error && <div style={{ margin: '0 16px 8px', fontSize: 12, color: '#94500f' }}>{faltantes === 1 ? 'No se pudo bajar 1 pedazo' : `No se pudieron bajar ${faltantes} pedazos`} de la grabación: puede haber saltos.</div>}
             <div className="adm-scroll" style={{ flex: 1, overflowY: 'auto', padding: '0 8px 12px' }}>
               {momentos.length === 0 && listo && <div style={{ padding: '6px 8px', fontSize: 12.5, color: '#9aa39c' }}>Sin momentos marcados.</div>}
               {momentos.map((m, i) => (
