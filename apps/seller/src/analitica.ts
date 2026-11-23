@@ -145,8 +145,26 @@ export function MedicionPantallas(): null {
 
 // ——— Toques ———
 
-function etiquetaDe(el: Element | null): string {
-  if (!el) return '(sin nombre)';
+// Qué se tocó, como etiqueta estable (para agrupar): nunca datos que cambian
+// de un negocio a otro (nombres, teléfonos, montos) ni lo escrito.
+//   - Botones y enlaces: data-track, aria-label o title; si no hay, su texto
+//     (los que muestran datos, como las opciones de una lista, llevan
+//     data-track).
+//   - Campos: de qué campo se trata.
+//   - Lo que no es botón: la zona de la pantalla (data-zona), nunca su texto.
+function zonaDe(el: Element): string | null {
+  const z = el.closest('[data-zona]')?.getAttribute('data-zona');
+  if (z) return z;
+  if (el.closest('header')) return 'Encabezado';
+  if (el.closest('nav')) return 'Barra de abajo';
+  return null;
+}
+
+function etiquetaDe(el: Element, interactivo: boolean): string {
+  if (!interactivo) {
+    const zona = zonaDe(el);
+    return zona ? `Sin botón · ${zona}` : 'Sin botón';
+  }
   const propia = el.getAttribute('data-track') || el.getAttribute('aria-label') || el.getAttribute('title');
   if (propia) return propia.slice(0, 60);
   const tag = el.tagName.toLowerCase();
@@ -157,9 +175,22 @@ function etiquetaDe(el: Element | null): string {
     return `Campo: ${etiqueta.replace(/\s+/g, ' ').trim().slice(0, 40)}`;
   }
   const texto = (el.textContent || '').replace(/\s+/g, ' ').trim().replace(/\d/g, '#');
-  const grupo = el.parentElement?.closest('[data-track]')?.getAttribute('data-track');
   if (texto) return texto.length > 40 ? `${texto.slice(0, 40)}…` : texto;
-  return grupo ? grupo.slice(0, 60) : tag;
+  const zona = zonaDe(el);
+  return zona ? `Botón sin texto · ${zona}` : 'Botón sin texto';
+}
+
+// Cuánto se había desplazado el contenido donde se tocó: así la posición es
+// la del elemento en la pantalla completa (la que se ve al abrirla), no solo
+// en lo que se veía en ese momento.
+function desplazamiento(el: Element): number {
+  for (let n: Element | null = el; n && n !== document.documentElement; n = n.parentElement) {
+    if (n.scrollTop > 0) {
+      const oy = getComputedStyle(n).overflowY;
+      if (oy === 'auto' || oy === 'scroll') return n.scrollTop;
+    }
+  }
+  return window.scrollY || 0;
 }
 
 function alTocar(ev: MouseEvent) {
@@ -183,8 +214,9 @@ function alTocar(ev: MouseEvent) {
   }
   emitir({
     k: 'toque',
-    o: etiquetaDe(interactivo ?? el),
-    ...(conPosicion ? { x: ev.clientX / window.innerWidth, y: ev.clientY / window.innerHeight } : {}),
+    o: etiquetaDe(interactivo ?? el, !!interactivo),
+    // y puede pasar de 1: el toque fue más abajo de lo que cabe al abrir la pantalla.
+    ...(conPosicion ? { x: ev.clientX / window.innerWidth, y: (ev.clientY + desplazamiento(el)) / window.innerHeight } : {}),
     ...(rabia ? { r: 1 as const } : {}),
     ...(muerto ? { m: 1 as const } : {}),
   });

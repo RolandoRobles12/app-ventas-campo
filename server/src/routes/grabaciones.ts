@@ -156,6 +156,23 @@ grabacionesRouter.get('/', requireAdmin, async (req, res) => {
   res.json({ items: grabs.map((x) => shapeLista(x.id, x.g, nombres)), truncado: docs.length >= MAX_LISTA });
 });
 
+// Solo admin: un pedazo de grabación reciente que pase por `pantalla`, para
+// usarlo de fondo en el mapa de toques (la pantalla tal como la ve el
+// vendedor). null si todavía no hay ninguno.
+grabacionesRouter.get('/muestra', requireAdmin, async (req, res) => {
+  const pantalla = typeof req.query.pantalla === 'string' ? req.query.pantalla.slice(0, 40) : '';
+  if (!pantalla) return res.status(400).json({ error: 'pantalla_requerida' });
+  const snap = await db.collection('grabaciones').where('pantallas', 'array-contains', pantalla)
+    .orderBy('createdAt', 'desc').limit(10).get();
+  for (const d of snap.docs) {
+    const g = d.data() as GrabacionDoc;
+    // Solo pedazos guardados en Firestore (los viejos de Storage no se leen).
+    const frag = g.fragmentos.find((f) => !f.path && f.pantallas.includes(pantalla));
+    if (frag) return res.json({ sesionId: d.id, seq: frag.seq });
+  }
+  res.json(null);
+});
+
 // Solo admin: el detalle de una sesión (sus fragmentos, para el reproductor).
 grabacionesRouter.get('/:sesionId', requireAdmin, async (req, res) => {
   const snap = await db.collection('grabaciones').doc(req.params.sesionId).get();

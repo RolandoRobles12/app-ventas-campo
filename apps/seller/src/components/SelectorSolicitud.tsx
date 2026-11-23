@@ -101,7 +101,7 @@ export function SelectorSolicitud({ vendedorId, visitaId, valor, onChange }: {
 function Opcion({ activa, onClick, titulo, detalle }: { activa: boolean; onClick: () => void; titulo: string; detalle: string }) {
   return (
     <button
-      className="tap" onClick={onClick} aria-pressed={activa}
+      className="tap" onClick={onClick} aria-pressed={activa} data-track="Opción de solicitud"
       style={{
         display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%', borderRadius: 14, padding: '12px 14px',
         background: activa ? '#fff' : '#fbfdfb', border: `2px solid ${activa ? 'var(--aviva-green-700)' : '#d7e6dc'}`,

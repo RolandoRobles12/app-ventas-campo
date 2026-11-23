@@ -134,6 +134,8 @@ function cortarFragmento(): Promise<void> {
     motivo, dispositivo: nombreDispositivo(),
   };
   reiniciarStats();
+  // El siguiente fragmento empieza en la pantalla donde se quedó éste.
+  stats.pantallas.add(pantallaActual());
   cortando = cortando.then(async () => {
     try {
       const blob = await comprimir(sinTelefonos(JSON.stringify(lote)));

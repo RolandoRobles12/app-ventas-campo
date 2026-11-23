@@ -17,7 +17,8 @@ export type TipoEvento = (typeof TIPOS_EVENTO)[number];
 
 // Un evento, en forma compacta (son muchos).
 //   t: instante (epoch ms)       k: tipo                 p: pantalla
-//   o: lo que se tocó            x, y: dónde (0–1 del ancho/alto de la pantalla)
+//   o: lo que se tocó            x, y: dónde (fracción del ancho/alto de la pantalla; y pasa de 1
+//                                si tocó más abajo, tras desplazar la pantalla)
 //   ms: duración (tiempo en pantalla, rato sin señal)
 //   r: toque de frustración (varios seguidos en el mismo lugar)
 //   m: toque "muerto" (en algo que no hace nada)
@@ -50,9 +51,9 @@ export const SESION_ID = /^[A-Za-z0-9-]{8,64}$/;
 
 const texto = (v: unknown, max: number): string | undefined =>
   (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
-const fraccion = (v: unknown): number | undefined => {
+const fraccion = (v: unknown, max = 1): number | undefined => {
   const n = Number(v);
-  return v != null && Number.isFinite(n) ? Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000 : undefined;
+  return v != null && Number.isFinite(n) ? Math.round(Math.min(max, Math.max(0, n)) * 1000) / 1000 : undefined;
 };
 
 function limpiarDatos(raw: unknown): Evento['d'] {
@@ -79,7 +80,7 @@ export function limpiarEvento(raw: unknown, ahora = Date.now()): Evento | null {
   const ev: Evento = { t: Math.round(t), k: e.k as TipoEvento, p };
   const o = texto(e.o, 60); if (o) ev.o = o;
   const x = fraccion(e.x); if (x !== undefined) ev.x = x;
-  const y = fraccion(e.y); if (y !== undefined) ev.y = y;
+  const y = fraccion(e.y, 50); if (y !== undefined) ev.y = y;
   const ms = Number(e.ms);
   if (e.ms != null && Number.isFinite(ms) && ms >= 0) ev.ms = Math.round(Math.min(ms, 7 * 24 * 60 * 60 * 1000));
   if (e.r) ev.r = 1;
@@ -163,6 +164,8 @@ export function resumir(docs: InteraccionDoc[]) {
   const pantallas = new Map<string, { vistas: number; ms: number; toques: number; rabia: number; vendedores: Set<string> }>();
   const objetivos = new Map<string, { pantalla: string; objetivo: string; toques: number; rabia: number; muertos: number }>();
   const celdas = new Map<string, Map<string, { n: number; r: number }>>();
+  // Toques más abajo de lo que se ve al abrir la pantalla (desplazó).
+  const abajo = new Map<string, number>();
   const errores = new Map<string, { mensaje: string; veces: number; vendedores: Set<string>; pantallas: Map<string, number>; ultima: number }>();
   const intentos = new Map<string, Map<string, Set<string>>>(EMBUDOS.map((e) => [e.clave, new Map()]));
   const bloqueos = new Map<string, number>();
@@ -216,7 +219,9 @@ export function resumir(docs: InteraccionDoc[]) {
           const o = objetivos.get(ko) ?? { pantalla: ev.p, objetivo, toques: 0, rabia: 0, muertos: 0 };
           o.toques++; if (ev.r) o.rabia++; if (ev.m) o.muertos++;
           objetivos.set(ko, o);
-          if (ev.x !== undefined && ev.y !== undefined) {
+          if (ev.x !== undefined && ev.y !== undefined && ev.y > 1) {
+            abajo.set(ev.p, (abajo.get(ev.p) ?? 0) + 1);
+          } else if (ev.x !== undefined && ev.y !== undefined) {
             const m = celdas.get(ev.p) ?? new Map();
             celdas.set(ev.p, m);
             const cx = Math.min(CELDAS_X - 1, Math.floor(ev.x * CELDAS_X));
@@ -295,9 +300,10 @@ export function resumir(docs: InteraccionDoc[]) {
       .map(([pantalla, p]) => ({ pantalla, vistas: p.vistas, minutos: Math.round(p.ms / 6000) / 10, toques: p.toques, rabia: p.rabia, vendedores: p.vendedores.size }))
       .sort((a, b) => b.minutos - a.minutos || b.vistas - a.vistas),
     objetivos: [...objetivos.values()].sort((a, b) => b.toques - a.toques).slice(0, 150),
-    mapaToques: [...celdas.entries()].map(([pantalla, m]) => ({
+    mapaToques: [...new Set([...celdas.keys(), ...abajo.keys()])].map((pantalla) => ({
       pantalla,
-      celdas: [...m.entries()].map(([k, c]) => {
+      abajo: abajo.get(pantalla) ?? 0,
+      celdas: [...(celdas.get(pantalla) ?? new Map<string, { n: number; r: number }>()).entries()].map(([k, c]) => {
         const [cx, cy] = k.split(',').map(Number);
         return { x: (cx + 0.5) / CELDAS_X, y: (cy + 0.5) / CELDAS_Y, n: c.n, r: c.r };
       }),

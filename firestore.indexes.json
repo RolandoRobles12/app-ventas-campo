@@ -233,6 +233,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "grabaciones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "pantallas",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []
