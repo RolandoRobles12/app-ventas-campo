@@ -489,10 +489,10 @@ function Tendencia({ data, hsOk }: { data: TableroData; hsOk: boolean }) {
 // ---------- Adopción de la app ----------
 
 const SEGMENTOS: { k: SegmentoAdopcion; l: string; color: string; det: (a: Adopcion) => string }[] = [
-  { k: 'regular', l: 'Con regularidad', color: '#157347', det: (a) => `visitas en ${a.diasRegular} o más de los últimos ${a.diasVentana} días` },
+  { k: 'regular', l: 'Uso regular', color: '#157347', det: (a) => `visitas en ${a.diasRegular} o más de los últimos ${a.diasVentana} días` },
   { k: 'ocasional', l: 'Uso ocasional', color: '#5cb283', det: (a) => `visitas en 1 o ${a.diasRegular - 1} de los últimos ${a.diasVentana} días` },
-  { k: 'sinUsoReciente', l: 'Dejaron de usarla', color: '#d99a1e', det: (a) => `la usaron, pero no en los últimos ${a.diasVentana} días` },
-  { k: 'nunca', l: 'Nunca la han usado', color: '#7d8a83', det: () => 'ninguna visita registrada' },
+  { k: 'sinUsoReciente', l: 'Sin uso reciente', color: '#d99a1e', det: (a) => `la usaron, pero no en los últimos ${a.diasVentana} días` },
+  { k: 'nunca', l: 'Sin uso', color: '#7d8a83', det: () => 'nunca han registrado una visita' },
 ];
 
 const haceDias = (iso: string, hoy: string) => {
@@ -501,14 +501,25 @@ const haceDias = (iso: string, hoy: string) => {
 };
 const ingreso = (v: VendedorAdopcion, hoy: string) => (v.fechaIngreso ? `ingresó ${haceDias(`${v.fechaIngreso}T12:00:00`, hoy)}` : null);
 
+// Qué se dice de cada persona según su grupo, y en qué orden van.
+function detalleAdopcion(v: VendedorAdopcion, a: Adopcion): string {
+  if (v.segmento === 'nunca') {
+    return [v.ultimaVezEnApp ? `abrió la app ${haceDias(v.ultimaVezEnApp, a.hoy)}, pero no ha registrado visitas` : 'no ha abierto la app', ingreso(v, a.hoy)].filter(Boolean).join(' · ');
+  }
+  const ultima = `última visita ${haceDias(v.ultimaVisita!, a.hoy)}`;
+  return v.segmento === 'sinUsoReciente' ? ultima : `${v.diasConVisitas} de ${a.diasVentana} días con visitas · ${ultima}`;
+}
+const ordenAdopcion = (x: VendedorAdopcion, y: VendedorAdopcion) =>
+  x.segmento === 'sinUsoReciente'
+    ? (x.ultimaVisita ?? '').localeCompare(y.ultimaVisita ?? '') // la más vieja primero
+    : y.diasConVisitas - x.diasConVisitas || x.nombre.localeCompare(y.nombre);
+
 // ¿El equipo usa la herramienta? Una foto de hoy: quién ya registró al menos
-// una visita y quién la usa con regularidad, más las listas de a quién buscar.
+// una visita y quién la usa con regularidad, y debajo cada grupo con su gente.
 function AdopcionApp({ a }: { a: Adopcion }) {
   const n = a.vendedores.length;
-  const de = (k: SegmentoAdopcion) => a.vendedores.filter((v) => v.segmento === k);
-  const nunca = de('nunca');
-  const dejaron = de('sinUsoReciente').sort((x, y) => (x.ultimaVisita ?? '').localeCompare(y.ultimaVisita ?? ''));
-  const usaron = n - nunca.length;
+  const de = (k: SegmentoAdopcion) => a.vendedores.filter((v) => v.segmento === k).sort(ordenAdopcion);
+  const usaron = n - de('nunca').length;
   const regular = de('regular').length;
   const pct = (x: number) => Math.round((x / n) * 100);
   return (
@@ -520,7 +531,7 @@ function AdopcionApp({ a }: { a: Adopcion }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 14 }}>
         {[
           { k: 'La han usado', v: pct(usaron), f: `${num(usaron)} de ${num(n)} han registrado al menos una visita` },
-          { k: 'La usan con regularidad', v: pct(regular), f: `${num(regular)} de ${num(n)} registraron visitas en ${a.diasRegular} o más de los últimos ${a.diasVentana} días` },
+          { k: 'Uso regular', v: pct(regular), f: `${num(regular)} de ${num(n)} registraron visitas en ${a.diasRegular} o más de los últimos ${a.diasVentana} días` },
         ].map((t) => (
           <div key={t.k} style={{ borderTop: '2px solid #dcebe1', paddingTop: 10, textAlign: 'center' }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#157347', letterSpacing: '.04em', textTransform: 'uppercase' }}>{t.k}</div>
@@ -536,56 +547,38 @@ function AdopcionApp({ a }: { a: Adopcion }) {
           return c ? <div key={s.k} title={`${s.l}: ${c} de ${n} (${pct(c)}%) · ${s.det(a)}`} style={{ flex: c, background: s.color, borderRadius: 4, minWidth: 6 }} /> : null;
         })}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '8px 14px', marginTop: 10 }}>
+
+      {/* Un grupo por columna, en el mismo orden que la barra, con toda su gente. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: '18px 16px', marginTop: 12 }}>
         {SEGMENTOS.map((s) => {
-          const c = de(s.k).length;
+          const gente = de(s.k);
           return (
-            <div key={s.k} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5, color: '#3a4a41' }}>
-              <span style={{ width: 10, height: 10, borderRadius: 3, background: s.color, marginTop: 3, flex: 'none' }} />
-              <div>
-                <b style={{ fontWeight: 600 }}>{s.l}</b>: {num(c)} <span style={{ color: '#8a978f' }}>({pct(c)}%)</span>
-                <div style={{ fontSize: 11.5, color: '#8a978f' }}>{s.det(a)}</div>
+            <div key={s.k} style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5, color: '#3a4a41', paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid #eef2ee' }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: s.color, marginTop: 3, flex: 'none' }} />
+                <div>
+                  <b style={{ fontWeight: 600 }}>{s.l}</b>: {num(gente.length)} <span style={{ color: '#8a978f' }}>({pct(gente.length)}%)</span>
+                  <div style={{ fontSize: 11.5, color: '#8a978f' }}>{s.det(a)}</div>
+                </div>
               </div>
+              {gente.length ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {gente.map((v) => (
+                    <div key={v.id} title={v.producto} style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                      <Avatar color={v.color} iniciales={v.iniciales} size={26} />
+                      <div style={{ minWidth: 0, fontSize: 13 }}>
+                        <div style={{ fontWeight: 600, color: '#263238', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.nombre}</div>
+                        <div style={{ fontSize: 11.5, color: '#8a978f' }}>{detalleAdopcion(v, a)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : <div style={{ fontSize: 12, color: '#9aa39c' }}>Nadie en este grupo.</div>}
             </div>
           );
         })}
       </div>
-
-      {(nunca.length > 0 || dejaron.length > 0) && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 14, marginTop: 18 }}>
-          {nunca.length > 0 && (
-            <ListaAdopcion titulo={`Nunca la han usado (${nunca.length})`} items={nunca.map((v) => ({
-              v,
-              det: [v.ultimaVezEnApp ? `abrió la app ${haceDias(v.ultimaVezEnApp, a.hoy)}, pero no ha registrado visitas` : 'no ha abierto la app', ingreso(v, a.hoy)].filter(Boolean).join(' · '),
-            }))} />
-          )}
-          {dejaron.length > 0 && (
-            <ListaAdopcion titulo={`Dejaron de usarla (${dejaron.length})`} items={dejaron.map((v) => ({
-              v, det: `última visita ${haceDias(v.ultimaVisita!, a.hoy)}`,
-            }))} />
-          )}
-        </div>
-      )}
     </Card>
-  );
-}
-
-function ListaAdopcion({ titulo, items }: { titulo: string; items: { v: VendedorAdopcion; det: string }[] }) {
-  return (
-    <div>
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: '#263238', marginBottom: 6 }}>{titulo}</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {items.map(({ v, det }) => (
-          <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-            <Avatar color={v.color} iniciales={v.iniciales} size={26} />
-            <div style={{ minWidth: 0, fontSize: 13 }}>
-              <div style={{ fontWeight: 600, color: '#263238', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.nombre}</div>
-              <div style={{ fontSize: 11.5, color: '#8a978f' }}>{v.producto} · {det}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
