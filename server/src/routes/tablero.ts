@@ -596,3 +596,101 @@ async function calcularTablero(vista: Vista, desdeQ: string, hastaQ: string, hoy
     }),
   };
 }
+
+// ---------- Adopción de la app ----------
+//
+// ¿El equipo usa la herramienta? Es una foto de hoy, no depende del periodo
+// elegido: de los vendedores activos (sin los de prueba), quién ya registró
+// al menos una visita y quién la usa con regularidad. La señal es la visita
+// registrada: abrir la app sin registrar nada no es usarla. A quien nunca ha
+// registrado una visita se le dice además si alguna vez abrió la app (GPS o
+// medición de uso), para saber si el problema es entrar o registrar.
+
+// Días distintos con visitas, de los últimos 7 (con hoy), para "con regularidad".
+const DIAS_VENTANA = 7;
+const DIAS_REGULAR = 3;
+
+type SegmentoAdopcion = 'regular' | 'ocasional' | 'sinUsoReciente' | 'nunca';
+
+const adopciones = new Map<string, { en: number; datos: Promise<unknown> }>();
+
+tableroRouter.get('/adopcion', async (req, res) => {
+  const q = req.query as { productoIds?: string; vendedorIds?: string };
+  const vendedorIdsQ = [...new Set(parseCsvParam(q.vendedorIds))].sort();
+  const productoIdsQ = [...new Set(parseCsvParam(q.productoIds))].sort();
+  const hoy = hoyMx();
+  const llave = JSON.stringify([hoy, vendedorIdsQ, productoIdsQ]);
+  const ahora = Date.now();
+  for (const [k, v] of adopciones) if (ahora - v.en > CACHE_RESPUESTA_MS) adopciones.delete(k);
+  let r = adopciones.get(llave);
+  if (!r) {
+    if (adopciones.size >= MAX_RESPUESTAS) adopciones.delete(adopciones.keys().next().value!);
+    const datos = calcularAdopcion(hoy, vendedorIdsQ, productoIdsQ);
+    r = { en: ahora, datos };
+    adopciones.set(llave, r);
+    datos.catch(() => { if (adopciones.get(llave)?.datos === datos) adopciones.delete(llave); });
+  }
+  res.json(await r.datos);
+});
+
+async function ultimoDe(coleccion: string, vendedorId: string): Promise<number | null> {
+  const s = await db.collection(coleccion).where('vendedorId', '==', vendedorId).orderBy('createdAt', 'desc').limit(1).select('createdAt').get();
+  return s.empty ? null : (s.docs[0].get('createdAt') as Timestamp).toMillis();
+}
+
+async function calcularAdopcion(hoy: string, vendedorIdsQ: string[], productoIdsQ: string[]) {
+  const filtro = await resolveVendedorIds(vendedorIdsQ, productoIdsQ);
+  const vendedores = (await getVendedoresDocs(filtro))
+    .map((d) => ({ id: d.id, ...(d.data() as VendedorDoc & { fechaIngresoIso?: string | null }) }))
+    .filter((v) => v.estado !== 'Baja');
+  const desde = sumarDias(hoy, -(DIAS_VENTANA - 1));
+  if (!vendedores.length) return { hoy, desde, diasVentana: DIAS_VENTANA, diasRegular: DIAS_REGULAR, vendedores: [] };
+
+  const ids = vendedores.map((v) => v.id);
+  const inicio = Timestamp.fromDate(inicioDiaMx(desde));
+  // Visitas de la ventana: sin filtro se lee por fecha (una consulta) y se
+  // descartan en memoria las de quien no está en la lista.
+  const consultas = filtro ? chunkArray(ids).map((c) => db.collection('visitas').where('vendedorId', 'in', c)) : [db.collection('visitas')];
+  const [snaps, productos] = await Promise.all([
+    Promise.all(consultas.map((c) => c.where('createdAt', '>=', inicio).select('vendedorId', 'createdAt').get())),
+    productosPorId(vendedores.map((v) => v.productoId)),
+  ]);
+  const dias = new Map<string, Set<string>>();
+  const ultima = new Map<string, number>();
+  for (const d of snaps.flatMap((s) => s.docs)) {
+    const id = d.get('vendedorId') as string;
+    const t = (d.get('createdAt') as Timestamp).toMillis();
+    if (!dias.has(id)) dias.set(id, new Set());
+    dias.get(id)!.add(fechaMx(new Date(t)));
+    if (t > (ultima.get(id) ?? 0)) ultima.set(id, t);
+  }
+
+  // Quien no visitó en la ventana: ¿alguna vez registró una visita? Y quien
+  // nunca: ¿alguna vez abrió la app? (una consulta de 1 documento cada una).
+  const sinVentana = vendedores.filter((v) => !dias.has(v.id));
+  const anteriores = await Promise.all(sinVentana.map((v) => ultimoDe('visitas', v.id)));
+  sinVentana.forEach((v, i) => { if (anteriores[i] != null) ultima.set(v.id, anteriores[i]!); });
+  const nunca = vendedores.filter((v) => !ultima.has(v.id));
+  const senales = await Promise.all(nunca.map(async (v) => {
+    const [gps, uso] = await Promise.all([ultimoDe('ubicaciones', v.id), ultimoDe('interacciones', v.id)]);
+    return gps == null && uso == null ? null : Math.max(gps ?? 0, uso ?? 0);
+  }));
+  const ultimaApp = new Map(nunca.map((v, i) => [v.id, senales[i]]));
+
+  const iso = (t: number | null | undefined) => (t == null ? null : new Date(t).toISOString());
+  return {
+    hoy, desde, diasVentana: DIAS_VENTANA, diasRegular: DIAS_REGULAR,
+    vendedores: vendedores.map((v) => {
+      const n = dias.get(v.id)?.size ?? 0;
+      const segmento: SegmentoAdopcion = n >= DIAS_REGULAR ? 'regular' : n > 0 ? 'ocasional' : ultima.has(v.id) ? 'sinUsoReciente' : 'nunca';
+      return {
+        id: v.id, nombre: v.nombre, iniciales: v.iniciales, color: v.color,
+        producto: productos.get(v.productoId) ?? '—',
+        fechaIngreso: v.fechaIngresoIso && esFechaIso(v.fechaIngresoIso.slice(0, 10)) ? v.fechaIngresoIso.slice(0, 10) : null,
+        segmento, diasConVisitas: n,
+        ultimaVisita: iso(ultima.get(v.id)),
+        ultimaVezEnApp: segmento === 'nunca' ? iso(ultimaApp.get(v.id)) : null,
+      };
+    }).sort((a, b) => a.nombre.localeCompare(b.nombre)),
+  };
+}
