@@ -283,9 +283,9 @@ export function Tablero() {
           </Card>
         </div>
 
-        {adopcion && adopcion.vendedores.length > 0 && <AdopcionApp a={adopcion} />}
-        {data && <PorVendedor data={data} hsOk={hsOk} onElegir={(id) => setFVendedores([id])} />}
         {data && <RequiereAtencion data={data} rutas={rutas} />}
+        {data && <PorVendedor data={data} hsOk={hsOk} onElegir={(id) => setFVendedores([id])} />}
+        {adopcion && adopcion.vendedores.length > 0 && <AdopcionApp a={adopcion} />}
 
         <div style={{ fontSize: 12, color: '#8a978f', marginTop: 14, lineHeight: 1.6 }}>
           <b style={{ color: '#6f7d75' }}>De dónde salen los datos:</b> las visitas y la meta, de la app de vendedores y de las rutas (al momento). Las solicitudes y su aprobación, de HubSpot
@@ -490,7 +490,7 @@ function Tendencia({ data, hsOk }: { data: TableroData; hsOk: boolean }) {
 
 const SEGMENTOS: { k: SegmentoAdopcion; l: string; color: string; det: (a: Adopcion) => string }[] = [
   { k: 'regular', l: 'Con regularidad', color: '#157347', det: (a) => `visitas en ${a.diasRegular} o más de los últimos ${a.diasVentana} días` },
-  { k: 'ocasional', l: 'De vez en cuando', color: '#5cb283', det: (a) => `visitas en 1 o ${a.diasRegular - 1} de los últimos ${a.diasVentana} días` },
+  { k: 'ocasional', l: 'Uso ocasional', color: '#5cb283', det: (a) => `visitas en 1 o ${a.diasRegular - 1} de los últimos ${a.diasVentana} días` },
   { k: 'sinUsoReciente', l: 'Dejaron de usarla', color: '#d99a1e', det: (a) => `la usaron, pero no en los últimos ${a.diasVentana} días` },
   { k: 'nunca', l: 'Nunca la han usado', color: '#7d8a83', det: () => 'ninguna visita registrada' },
 ];
