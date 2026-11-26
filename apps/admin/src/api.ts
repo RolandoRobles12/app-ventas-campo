@@ -120,6 +120,17 @@ export interface Tablero {
   tendencia: { desde: string; hasta: string; parcial: boolean; visitas: number; marcadas: number; solicitudes: number | null; aprobadas: number | null; rechazadas: number | null }[];
 }
 
+// Adopción de la app (foto de hoy, no depende del periodo): ver tablero.ts.
+export type SegmentoAdopcion = 'regular' | 'ocasional' | 'sinUsoReciente' | 'nunca';
+export interface VendedorAdopcion {
+  id: string; nombre: string; iniciales: string; color: string; producto: string;
+  fechaIngreso: string | null; segmento: SegmentoAdopcion; diasConVisitas: number;
+  ultimaVisita: string | null;
+  // Solo para quien nunca ha registrado una visita: la última vez que abrió la app.
+  ultimaVezEnApp: string | null;
+}
+export interface Adopcion { hoy: string; desde: string; diasVentana: number; diasRegular: number; vendedores: VendedorAdopcion[] }
+
 export interface EnVivoItem {
   id: string; nombre: string; iniciales: string; color: string; producto: string; zona: string | null;
   estado: 'en_ruta' | 'inactivo' | 'sin_actividad';
@@ -302,6 +313,7 @@ export const api = {
 
   tablero: (f: { vista: VistaTablero; fecha?: string; desde?: string; hasta?: string; productoIds?: string[]; vendedorIds?: string[] }) =>
     req<Tablero>(`/tablero${qs(f)}`),
+  adopcion: (f: { productoIds?: string[]; vendedorIds?: string[] }) => req<Adopcion>(`/tablero/adopcion${qs(f)}`),
   enVivo: (f: { productoIds?: string[]; vendedorIds?: string[] }) => req<{ hoy: string; items: EnVivoItem[] }>(`/seguimiento${qs(f)}`),
   mapaCalor: (f: Filtro) => req<MapaCalorResponse>(`/mapa/calor${qs({ ...f })}`),
   recorridos: (f: Filtro) => req<RecorridoVendedor[]>(`/ubicaciones/recorrido${qs({ ...f })}`),

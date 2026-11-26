@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  api, type BloqueTablero, type EstadoRuta, type Tablero as TableroData, type VendedorTablero, type VistaTablero,
+  api, type Adopcion, type BloqueTablero, type SegmentoAdopcion, type VendedorAdopcion, type EstadoRuta, type Tablero as TableroData, type VendedorTablero, type VistaTablero,
 } from '../api';
 import { useFilters } from '../filters';
 import { PageHeader } from '../components/FilterBar';
@@ -144,6 +144,14 @@ export function Tablero() {
     return () => { vigente = false; };
   }, [vista, fecha, desdeRango, hastaRango, fProductos, fVendedores]);
 
+  // Adopción de la app (es de hoy, no del periodo).
+  const [adopcion, setAdopcion] = useState<Adopcion | null>(null);
+  useEffect(() => {
+    let vigente = true;
+    api.adopcion({ productoIds: fProductos, vendedorIds: fVendedores }).then((r) => { if (vigente) setAdopcion(r); }).catch(() => { if (vigente) setAdopcion(null); });
+    return () => { vigente = false; };
+  }, [fProductos, fVendedores]);
+
   // Estado de las rutas (es de hoy, no del periodo): para "Requiere atención".
   useEffect(() => {
     api.rutasEstado({ productoIds: fProductos, vendedorIds: fVendedores }).then((r) => setRutas(r.items)).catch(() => {});
@@ -275,6 +283,7 @@ export function Tablero() {
           </Card>
         </div>
 
+        {adopcion && adopcion.vendedores.length > 0 && <AdopcionApp a={adopcion} />}
         {data && <PorVendedor data={data} hsOk={hsOk} onElegir={(id) => setFVendedores([id])} />}
         {data && <RequiereAtencion data={data} rutas={rutas} />}
 
@@ -477,6 +486,109 @@ function Tendencia({ data, hsOk }: { data: TableroData; hsOk: boolean }) {
   );
 }
 
+// ---------- Adopción de la app ----------
+
+const SEGMENTOS: { k: SegmentoAdopcion; l: string; color: string; det: (a: Adopcion) => string }[] = [
+  { k: 'regular', l: 'Con regularidad', color: '#157347', det: (a) => `visitas en ${a.diasRegular} o más de los últimos ${a.diasVentana} días` },
+  { k: 'ocasional', l: 'De vez en cuando', color: '#5cb283', det: (a) => `visitas en 1 o ${a.diasRegular - 1} de los últimos ${a.diasVentana} días` },
+  { k: 'sinUsoReciente', l: 'Dejaron de usarla', color: '#d99a1e', det: (a) => `la usaron, pero no en los últimos ${a.diasVentana} días` },
+  { k: 'nunca', l: 'Nunca la han usado', color: '#7d8a83', det: () => 'ninguna visita registrada' },
+];
+
+const haceDias = (iso: string, hoy: string) => {
+  const d = Math.round((Date.parse(`${hoy}T00:00:00Z`) - Date.parse(`${toISODate(new Date(iso))}T00:00:00Z`)) / 86_400_000);
+  return d <= 0 ? 'hoy' : d === 1 ? 'ayer' : `hace ${d} días`;
+};
+const ingreso = (v: VendedorAdopcion, hoy: string) => (v.fechaIngreso ? `ingresó ${haceDias(`${v.fechaIngreso}T12:00:00`, hoy)}` : null);
+
+// ¿El equipo usa la herramienta? Una foto de hoy: quién ya registró al menos
+// una visita y quién la usa con regularidad, más las listas de a quién buscar.
+function AdopcionApp({ a }: { a: Adopcion }) {
+  const n = a.vendedores.length;
+  const de = (k: SegmentoAdopcion) => a.vendedores.filter((v) => v.segmento === k);
+  const nunca = de('nunca');
+  const dejaron = de('sinUsoReciente').sort((x, y) => (x.ultimaVisita ?? '').localeCompare(y.ultimaVisita ?? ''));
+  const usaron = n - nunca.length;
+  const regular = de('regular').length;
+  const pct = (x: number) => Math.round((x / n) * 100);
+  return (
+    <Card
+      titulo="Adopción de la app"
+      subtitulo={`Al día de hoy, de los ${num(n)} vendedores activos del filtro. No cambia con el periodo elegido. Usar la app es registrar visitas: abrirla sin registrar nada no cuenta.`}
+      style={{ marginTop: 14 }}
+    >
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 14 }}>
+        {[
+          { k: 'La han usado', v: pct(usaron), f: `${num(usaron)} de ${num(n)} han registrado al menos una visita` },
+          { k: 'La usan con regularidad', v: pct(regular), f: `${num(regular)} de ${num(n)} registraron visitas en ${a.diasRegular} o más de los últimos ${a.diasVentana} días` },
+        ].map((t) => (
+          <div key={t.k} style={{ borderTop: '2px solid #dcebe1', paddingTop: 10, textAlign: 'center' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#157347', letterSpacing: '.04em', textTransform: 'uppercase' }}>{t.k}</div>
+            <div style={{ fontSize: 30, fontWeight: 600, color: '#1f2a24', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{t.v}%</div>
+            <div style={{ fontSize: 12, color: '#4f5c55', marginTop: 4, lineHeight: 1.4 }}>{t.f}</div>
+          </div>
+        ))}
+      </div>
+
+      <div role="img" aria-label={SEGMENTOS.map((s) => `${s.l}: ${de(s.k).length}`).join(', ')} style={{ display: 'flex', gap: 2, height: 14, marginTop: 20 }}>
+        {SEGMENTOS.map((s) => {
+          const c = de(s.k).length;
+          return c ? <div key={s.k} title={`${s.l}: ${c} de ${n} (${pct(c)}%) · ${s.det(a)}`} style={{ flex: c, background: s.color, borderRadius: 4, minWidth: 6 }} /> : null;
+        })}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '8px 14px', marginTop: 10 }}>
+        {SEGMENTOS.map((s) => {
+          const c = de(s.k).length;
+          return (
+            <div key={s.k} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5, color: '#3a4a41' }}>
+              <span style={{ width: 10, height: 10, borderRadius: 3, background: s.color, marginTop: 3, flex: 'none' }} />
+              <div>
+                <b style={{ fontWeight: 600 }}>{s.l}</b>: {num(c)} <span style={{ color: '#8a978f' }}>({pct(c)}%)</span>
+                <div style={{ fontSize: 11.5, color: '#8a978f' }}>{s.det(a)}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {(nunca.length > 0 || dejaron.length > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 14, marginTop: 18 }}>
+          {nunca.length > 0 && (
+            <ListaAdopcion titulo={`Nunca la han usado (${nunca.length})`} items={nunca.map((v) => ({
+              v,
+              det: [v.ultimaVezEnApp ? `abrió la app ${haceDias(v.ultimaVezEnApp, a.hoy)}, pero no ha registrado visitas` : 'no ha abierto la app', ingreso(v, a.hoy)].filter(Boolean).join(' · '),
+            }))} />
+          )}
+          {dejaron.length > 0 && (
+            <ListaAdopcion titulo={`Dejaron de usarla (${dejaron.length})`} items={dejaron.map((v) => ({
+              v, det: `última visita ${haceDias(v.ultimaVisita!, a.hoy)}`,
+            }))} />
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ListaAdopcion({ titulo, items }: { titulo: string; items: { v: VendedorAdopcion; det: string }[] }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: '#263238', marginBottom: 6 }}>{titulo}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {items.map(({ v, det }) => (
+          <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <Avatar color={v.color} iniciales={v.iniciales} size={26} />
+            <div style={{ minWidth: 0, fontSize: 13 }}>
+              <div style={{ fontWeight: 600, color: '#263238', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.nombre}</div>
+              <div style={{ fontSize: 11.5, color: '#8a978f' }}>{v.producto} · {det}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ---------- Por vendedor ----------
 
 type Col = 'nombre' | 'meta' | 'avanceMeta' | 'solicitudes' | 'conversion' | 'aprobacion' | 'montoDesembolsado' | 'confirmacion' | 'enNegocio' | 'ultimaVisita';
@@ -496,6 +608,7 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
     });
   }, [data, orden, hsOk]);
   const yaNo = data.porVendedor.filter((v) => !v.activo).length;
+  const ultimaDelEquipo = data.porVendedor.reduce<string | null>((m, v) => (v.ultimaVisita && (!m || v.ultimaVisita > m) ? v.ultimaVisita : m), null);
   const cols = 'minmax(180px, 2fr) 60px minmax(120px, 1.1fr) 80px 85px 95px 105px 85px 130px 95px';
   return (
     <Card
@@ -518,6 +631,25 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
             <ThOrden k="ultimaVisita" orden={orden} setOrden={setOrden} alinear="right">Última visita</ThOrden>
           </div>
           {filas.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: '#9aa39c', fontSize: 13 }}>No hay vendedores en este filtro.</div>}
+          {filas.length > 1 && (
+            // El total del equipo: fijo arriba (no se mueve al ordenar) y con
+            // los mismos números del embudo. No es la suma de las filas: los
+            // porcentajes salen de sumar las partes (ponderados) y un negocio
+            // que visitaron dos personas cuenta una vez.
+            <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 10, alignItems: 'center', padding: '10px 20px', background: '#f3f8f5', borderBottom: '1px solid #dcebe1', fontSize: 13, fontWeight: 600 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <span aria-hidden style={{ width: 30, height: 30, borderRadius: '50%', background: '#157347', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="8" r="3.2" /><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5" /><circle cx="17" cy="9" r="2.6" /><path d="M16.5 14.2c2.4.2 4 1.8 4.5 4.8" /></svg>
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: '#1f2a24' }} title="Todo el equipo del filtro. Los porcentajes se calculan con las sumas (no son el promedio de las filas) y un negocio que visitaron dos personas cuenta una vez.">Equipo</div>
+                  <div style={{ fontSize: 11, color: '#6f7d75', fontWeight: 400 }}>{num(filas.length)} vendedores · {num(filas.filter((v) => v.visitas > 0).length)} visitaron</div>
+                </div>
+              </div>
+              <CeldasEmbudo f={data.actual} hsOk={hsOk} />
+              <div style={{ textAlign: 'right', color: '#5a665f', fontSize: 12.5 }}>{ultimaDelEquipo ? haceCuanto(ultimaDelEquipo) : <SinDato texto="sin visitas" ayuda="Nadie visitó un negocio en el periodo." />}</div>
+            </div>
+          )}
           {filas.map((f) => (
             <div key={f.id} className="rowh" style={{ display: 'grid', gridTemplateColumns: cols, gap: 10, alignItems: 'center', padding: '9px 20px', borderBottom: '1px solid #f2f5f2', fontSize: 13 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
@@ -531,36 +663,7 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
                   </div>
                 </div>
               </div>
-              <div style={celdaNum}>{f.meta ? num(f.meta) : <SinDato texto="sin ruta" ayuda="No tenía negocios planeados en su ruta para estos días." />}</div>
-              <div>
-                {f.meta ? <BarraAvance pct={f.avanceMeta} /> : <SinDato texto="sin ruta" alinear="left" ayuda="No tenía negocios planeados en su ruta para estos días, así que no hay meta contra la cual medir." />}
-                <div style={{ fontSize: 11, color: '#9aa39c', marginTop: 2 }}>
-                  {f.metaPropios ? `ruta ${num(f.rutaVisitados)}/${num(f.metaRuta)} · nuevos ${num(f.propios)}/${num(f.metaPropios)}` : `${num(f.negociosVisitados)} visitados`}
-                </div>
-              </div>
-              <div style={celdaNum}>
-                {num(hsOk ? f.solicitudes : f.marcadas)}
-                {f.corregidas > 0 && <Sub>{f.corregidas === 1 ? '1 visita corregida' : `${f.corregidas} visitas corregidas`}</Sub>}
-              </div>
-              <div style={celdaNum}>
-                {f.conversion != null ? <>{pctTxt(f.conversion)}<Sub>de {num(f.negociosReales)} negocios</Sub></>
-                  : <SinDato texto={f.visitas ? '—' : 'sin visitas'} ayuda={f.visitas ? 'Se calcula con las solicitudes confirmadas en HubSpot.' : 'No visitó ningún negocio en el periodo.'} />}
-              </div>
-              <div style={celdaNum}>
-                {f.aprobacion != null ? <>{pctTxt(f.aprobacion)}<Sub>de {num((f.aprobadas ?? 0) + (f.rechazadas ?? 0))} con respuesta</Sub></>
-                  : (f.solicitudes ?? 0) > 0
-                    ? <SinDato texto="en revisión" ayuda="Sus solicitudes del periodo todavía no tienen respuesta (ni aprobadas ni rechazadas)." />
-                    : <SinDato texto="sin solicitudes" ayuda="No tuvo solicitudes confirmadas en el periodo; no hay nada que aprobar." />}
-              </div>
-              <div style={celdaNum}>
-                {f.desembolsadas != null && f.desembolsadas > 0 ? <>{num(f.desembolsadas)}<Sub>{dinero(f.montoDesembolsado)}</Sub></>
-                  : <SinDato texto={hsOk ? '0' : '—'} ayuda="Ninguna de sus solicitudes del periodo se ha desembolsado todavía." />}
-              </div>
-              <div style={celdaNum}>
-                {f.confirmadasVisitas != null && f.marcadas ? `${num(f.confirmadasVisitas)} de ${num(f.marcadas)}`
-                  : <SinDato texto="sin solicitudes" ayuda="No marcó ninguna visita como «Hizo solicitud» en el periodo." />}
-              </div>
-              <div style={celdaNum}><EnNegocio f={f} /></div>
+              <CeldasEmbudo f={f} hsOk={hsOk} />
               <div style={{ textAlign: 'right', color: '#5a665f', fontSize: 12.5 }}>{f.ultimaVisita ? haceCuanto(f.ultimaVisita) : <SinDato texto="sin visitas" ayuda="No visitó ningún negocio en el periodo." />}</div>
             </div>
           ))}
@@ -577,6 +680,46 @@ function PorVendedor({ data, hsOk, onElegir }: { data: TableroData; hsOk: boolea
   );
 }
 
+// Las columnas del embudo (de Meta a En el negocio) de una fila: igual para
+// cada vendedor que para la fila "Equipo", que usa el bloque del equipo ya
+// calculado en el servidor (porcentajes ponderados, no promedios de filas).
+function CeldasEmbudo({ f, hsOk }: { f: BloqueTablero; hsOk: boolean }) {
+  return (
+    <>
+      <div style={celdaNum}>{f.meta ? num(f.meta) : <SinDato texto="sin ruta" ayuda="No tenía negocios planeados en su ruta para estos días." />}</div>
+      <div>
+        {f.meta ? <BarraAvance pct={f.avanceMeta} /> : <SinDato texto="sin ruta" alinear="left" ayuda="No tenía negocios planeados en su ruta para estos días, así que no hay meta contra la cual medir." />}
+        <div style={{ fontSize: 11, color: '#9aa39c', marginTop: 2 }}>
+          {f.metaPropios ? `ruta ${num(f.rutaVisitados)}/${num(f.metaRuta)} · nuevos ${num(f.propios)}/${num(f.metaPropios)}` : `${num(f.negociosVisitados)} visitados`}
+        </div>
+      </div>
+      <div style={celdaNum}>
+        {num(hsOk ? f.solicitudes : f.marcadas)}
+        {f.corregidas > 0 && <Sub>{f.corregidas === 1 ? '1 visita corregida' : `${f.corregidas} visitas corregidas`}</Sub>}
+      </div>
+      <div style={celdaNum}>
+        {f.conversion != null ? <>{pctTxt(f.conversion)}<Sub>de {num(f.negociosReales)} negocios</Sub></>
+          : <SinDato texto={f.visitas ? '—' : 'sin visitas'} ayuda={f.visitas ? 'Se calcula con las solicitudes confirmadas en HubSpot.' : 'No visitó ningún negocio en el periodo.'} />}
+      </div>
+      <div style={celdaNum}>
+        {f.aprobacion != null ? <>{pctTxt(f.aprobacion)}<Sub>de {num((f.aprobadas ?? 0) + (f.rechazadas ?? 0))} con respuesta</Sub></>
+          : (f.solicitudes ?? 0) > 0
+            ? <SinDato texto="en revisión" ayuda="Sus solicitudes del periodo todavía no tienen respuesta (ni aprobadas ni rechazadas)." />
+            : <SinDato texto="sin solicitudes" ayuda="No tuvo solicitudes confirmadas en el periodo; no hay nada que aprobar." />}
+      </div>
+      <div style={celdaNum}>
+        {f.desembolsadas != null && f.desembolsadas > 0 ? <>{num(f.desembolsadas)}<Sub>{dinero(f.montoDesembolsado)}</Sub></>
+          : <SinDato texto={hsOk ? '0' : '—'} ayuda="Ninguna de sus solicitudes del periodo se ha desembolsado todavía." />}
+      </div>
+      <div style={celdaNum}>
+        {f.confirmadasVisitas != null && f.marcadas ? `${num(f.confirmadasVisitas)} de ${num(f.marcadas)}`
+          : <SinDato texto="sin solicitudes" ayuda="No marcó ninguna visita como «Hizo solicitud» en el periodo." />}
+      </div>
+      <div style={celdaNum}><EnNegocio f={f} /></div>
+    </>
+  );
+}
+
 // "3 nuevos · 1 a mano · 2 sin GPS" (la nota al pie de la tabla explica cada uno).
 function motivosTxt(sc: BloqueTablero['sinComprobar']): string {
   return [
@@ -590,7 +733,7 @@ const AYUDA_SIN_COMPROBAR = 'Solo se puede comprobar contra la ubicación oficia
 
 // "En el negocio" de un vendedor: el % solo con lo comprobable y, debajo,
 // cuántas visitas quedaron fuera y por qué; nunca una celda vacía.
-function EnNegocio({ f }: { f: VendedorTablero }) {
+function EnNegocio({ f }: { f: BloqueTablero }) {
   const fuera = f.sinComprobar.nuevo + f.sinComprobar.sinGps + f.sinComprobar.sinUbicacion;
   if (!f.visitas) return <SinDato texto="sin visitas" ayuda="No visitó ningún negocio en el periodo." />;
   if (f.enNegocio == null) {
